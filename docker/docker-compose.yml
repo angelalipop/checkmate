@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: checkmate-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: checkmate
+      POSTGRES_PASSWORD: checkmate_dev_password
+      POSTGRES_DB: checkmate
+
+    ports:
+      - "5433:5432"
+
+    volumes:
+      - checkmate_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  checkmate_postgres_data:
