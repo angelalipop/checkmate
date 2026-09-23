@@ -1,7 +1,6 @@
 import 'package:bcrypt/bcrypt.dart';
 
 void main() {
-  const password = 'ChangeMe123!';
-
+  const password = 'test123';
   print(BCrypt.hashpw(password, BCrypt.gensalt()));
 }

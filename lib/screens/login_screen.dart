@@ -1,36 +1,15 @@
 import 'package:flutter/material.dart';
 
-import 'services/api_service.dart';
+import '../services/api_service.dart';
 
-void main() {
-  runApp(const CheckmateApp());
-}
-
-class CheckmateApp extends StatelessWidget {
-  const CheckmateApp({super.key});
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Checkmate',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2563EB)),
-        useMaterial3: true,
-      ),
-      home: const LoginPage(),
-    );
-  }
+  State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
-
-  @override
-  State<LoginPage> createState() => _LoginPageState();
-}
-
-class _LoginPageState extends State<LoginPage> {
+class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
@@ -58,14 +37,19 @@ class _LoginPageState extends State<LoginPage> {
         password: _passwordController.text,
       );
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       final user = result['user'] as Map<String, dynamic>;
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Welcome, ${user['name']}')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Welcome, ${user['name'] ?? user['email']}')),
+      );
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       setState(() {
         _error = e.toString().replaceFirst('Exception: ', '');
@@ -88,14 +72,14 @@ class _LoginPageState extends State<LoginPage> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
             child: Card(
-              elevation: 4,
+              elevation: 2,
               child: Padding(
                 padding: const EdgeInsets.all(32),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const Icon(
-                      Icons.check_circle_outline,
+                      Icons.fact_check_rounded,
                       size: 64,
                       color: Color(0xFF2563EB),
                     ),
@@ -108,15 +92,15 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Sign in to your account',
+                      'Exam management and assessment',
                       textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyLarge,
+                      style: Theme.of(context).textTheme.bodyMedium,
                     ),
                     const SizedBox(height: 32),
                     TextField(
                       controller: _emailController,
                       keyboardType: TextInputType.emailAddress,
-                      enabled: !_loading,
+                      textInputAction: TextInputAction.next,
                       decoration: const InputDecoration(
                         labelText: 'Email',
                         prefixIcon: Icon(Icons.email_outlined),
@@ -127,8 +111,7 @@ class _LoginPageState extends State<LoginPage> {
                     TextField(
                       controller: _passwordController,
                       obscureText: true,
-                      enabled: !_loading,
-                      onSubmitted: (_) => _login(),
+                      onSubmitted: (_) => _loading ? null : _login(),
                       decoration: const InputDecoration(
                         labelText: 'Password',
                         prefixIcon: Icon(Icons.lock_outline),
@@ -139,8 +122,9 @@ class _LoginPageState extends State<LoginPage> {
                       const SizedBox(height: 16),
                       Text(
                         _error!,
-                        style: const TextStyle(color: Colors.red),
-                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
                       ),
                     ],
                     const SizedBox(height: 24),

@@ -6,6 +6,10 @@ class Password {
   }
 
   static bool verify(String password, String passwordHash) {
-    return BCrypt.checkpw(password, passwordHash);
+    try {
+      return BCrypt.checkpw(password, passwordHash);
+    } catch (_) {
+      return false;
+    }
   }
 }

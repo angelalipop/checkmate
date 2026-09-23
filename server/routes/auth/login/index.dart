@@ -1,6 +1,7 @@
 import 'package:dart_frog/dart_frog.dart';
 
 import '../../../lib/auth/auth_service.dart';
+import '../../../lib/auth/jwt_service.dart';
 
 Future<Response> onRequest(RequestContext context) async {
   if (context.request.method != HttpMethod.post) {
@@ -57,9 +58,16 @@ Future<Response> onRequest(RequestContext context) async {
       );
     }
 
+    final token = JwtService.generateToken(
+      userId: user['id'] as int,
+      email: user['email'] as String,
+      role: user['role'] as String,
+    );
+
     return Response.json(
       body: {
         'status': 'ok',
+        'token': token,
         'user': user,
       },
     );
@@ -73,4 +81,3 @@ Future<Response> onRequest(RequestContext context) async {
     );
   }
 }
-
