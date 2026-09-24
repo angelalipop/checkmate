@@ -22,8 +22,11 @@ class StudentService {
         FROM students s
         JOIN classes c ON c.id = s.class_id
         JOIN subjects sub ON sub.id = c.subject_id
-        WHERE (@class_id::bigint IS NULL OR s.class_id = @class_id)
-        ORDER BY s.id
+        WHERE (
+          @class_id::bigint IS NULL
+          OR s.class_id = @class_id
+        )
+        ORDER BY s.last_name, s.first_name
       '''),
       parameters: {
         'class_id': classId,
@@ -88,7 +91,9 @@ class StudentService {
         'student_number': studentNumber.trim(),
         'first_name': firstName.trim(),
         'last_name': lastName.trim(),
-        'email': email?.trim(),
+        'email': email?.trim().isEmpty == true
+            ? null
+            : email?.trim(),
       },
     );
 

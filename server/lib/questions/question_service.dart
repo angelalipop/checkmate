@@ -50,6 +50,24 @@ class QuestionService {
     dynamic choices,
     String? correctAnswer,
   }) async {
+    if (questionNumber < 1) {
+      throw Exception(
+        'Question number must be at least 1.',
+      );
+    }
+
+    if (questionText.trim().isEmpty) {
+      throw Exception(
+        'Question text is required.',
+      );
+    }
+
+    if (points < 0) {
+      throw Exception(
+        'Question points cannot be negative.',
+      );
+    }
+
     final result = await Database.pool.execute(
       Sql.named('''
         INSERT INTO questions (
@@ -83,8 +101,12 @@ class QuestionService {
         'question_number': questionNumber,
         'question_text': questionText.trim(),
         'points': points,
-        'choices': choices == null ? null : jsonEncode(choices),
-        'correct_answer': correctAnswer?.trim(),
+        'choices': choices == null
+            ? null
+            : jsonEncode(choices),
+        'correct_answer': correctAnswer?.trim().isEmpty == true
+            ? null
+            : correctAnswer?.trim(),
       },
     );
 

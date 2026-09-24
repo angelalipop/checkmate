@@ -21,7 +21,9 @@ Future<Response> onRequest(RequestContext context) async {
     }
 
     try {
-      final questions = await QuestionService.getBySection(sectionId);
+      final questions = await QuestionService.getBySection(
+        sectionId,
+      );
 
       return Response.json(
         body: {
@@ -42,40 +44,80 @@ Future<Response> onRequest(RequestContext context) async {
 
   if (context.request.method == HttpMethod.post) {
     try {
-      final body =
-          jsonDecode(await context.request.body()) as Map<String, dynamic>;
+      final decodedBody = jsonDecode(
+        await context.request.body(),
+      );
 
-      final sectionId = body['section_id'];
-      final questionNumber = body['question_number'];
-      final questionText = body['question_text'];
-      final points = body['points'] ?? 1;
+      if (decodedBody is! Map<String, dynamic>) {
+        return Response.json(
+          statusCode: 400,
+          body: {
+            'status': 'error',
+            'message': 'Invalid request body',
+          },
+        );
+      }
+
+      final body = decodedBody;
+
+      final sectionId = int.tryParse(
+        body['section_id']?.toString() ?? '',
+      );
+
+      final questionNumber = int.tryParse(
+        body['question_number']?.toString() ?? '',
+      );
+
+      final questionText =
+          body['question_text']?.toString().trim();
+
+      final points = num.tryParse(
+        body['points']?.toString() ?? '1',
+      );
+
       final choices = body['choices'];
-      final correctAnswer = body['correct_answer'];
 
-      if (sectionId is! int ||
-          questionNumber is! int ||
-          questionNumber < 1 ||
-          questionText is! String ||
-          questionText.trim().isEmpty ||
-          points is! num ||
-          points < 0) {
+      final correctAnswer =
+          body['correct_answer']?.toString().trim();
+
+      if (sectionId == null) {
+        return Response.json(
+          statusCode: 400,
+          body: {
+            'status': 'error',
+            'message': 'section_id is required',
+          },
+        );
+      }
+
+      if (questionNumber == null || questionNumber < 1) {
         return Response.json(
           statusCode: 400,
           body: {
             'status': 'error',
             'message':
-                'section_id, positive question_number, question_text, '
-                'and non-negative points are required',
+                'Question number must be at least 1',
           },
         );
       }
 
-      if (correctAnswer != null && correctAnswer is! String) {
+      if (questionText == null || questionText.isEmpty) {
         return Response.json(
           statusCode: 400,
           body: {
             'status': 'error',
-            'message': 'correct_answer must be a string',
+            'message': 'Question text is required',
+          },
+        );
+      }
+
+      if (points == null || points < 0) {
+        return Response.json(
+          statusCode: 400,
+          body: {
+            'status': 'error',
+            'message':
+                'Question points cannot be negative',
           },
         );
       }
@@ -96,7 +138,10 @@ Future<Response> onRequest(RequestContext context) async {
         questionText: questionText,
         points: points,
         choices: choices,
-        correctAnswer: correctAnswer as String?,
+        correctAnswer:
+            correctAnswer == null || correctAnswer.isEmpty
+                ? null
+                : correctAnswer,
       );
 
       return Response.json(

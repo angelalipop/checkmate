@@ -3,7 +3,9 @@ import 'package:postgres/postgres.dart';
 import '../database.dart';
 
 class ExamSectionService {
-  static Future<List<Map<String, dynamic>>> getByExam(int examId) async {
+  static Future<List<Map<String, dynamic>>> getByExam(
+    int examId,
+  ) async {
     final result = await Database.pool.execute(
       Sql.named('''
         SELECT
@@ -41,6 +43,42 @@ class ExamSectionService {
     required int sectionOrder,
     required num defaultPoints,
   }) async {
+    const allowedQuestionTypes = {
+      'multiple_choice',
+      'true_false',
+      'identification',
+    };
+
+    final normalizedQuestionType =
+        questionType.trim().toLowerCase();
+
+    if (!allowedQuestionTypes.contains(
+      normalizedQuestionType,
+    )) {
+      throw Exception(
+        'Invalid question type. '
+        'Use multiple_choice, true_false, or identification.',
+      );
+    }
+
+    if (name.trim().isEmpty) {
+      throw Exception(
+        'Section name is required.',
+      );
+    }
+
+    if (sectionOrder < 1) {
+      throw Exception(
+        'Section order must be at least 1.',
+      );
+    }
+
+    if (defaultPoints < 0) {
+      throw Exception(
+        'Default points cannot be negative.',
+      );
+    }
+
     final result = await Database.pool.execute(
       Sql.named('''
         INSERT INTO exam_sections (
@@ -68,7 +106,7 @@ class ExamSectionService {
       parameters: {
         'exam_id': examId,
         'name': name.trim(),
-        'question_type': questionType,
+        'question_type': normalizedQuestionType,
         'section_order': sectionOrder,
         'default_points': defaultPoints,
       },

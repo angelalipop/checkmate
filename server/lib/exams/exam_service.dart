@@ -23,8 +23,11 @@ class ExamService {
         FROM exams e
         JOIN classes c ON c.id = e.class_id
         JOIN subjects s ON s.id = c.subject_id
-        WHERE (@class_id::bigint IS NULL OR e.class_id = @class_id)
-        ORDER BY e.id
+        WHERE (
+          @class_id::bigint IS NULL
+          OR e.class_id = @class_id
+        )
+        ORDER BY e.created_at DESC
       '''),
       parameters: {
         'class_id': classId,
@@ -60,6 +63,23 @@ class ExamService {
     String? instructions,
     String? status,
   }) async {
+    final normalizedStatus =
+        status?.trim().toLowerCase();
+
+    const allowedStatuses = {
+      'draft',
+      'published',
+      'archived',
+    };
+
+    if (normalizedStatus != null &&
+        !allowedStatuses.contains(normalizedStatus)) {
+      throw Exception(
+        'Invalid exam status. '
+        'Use draft, published, or archived.',
+      );
+    }
+
     final result = await Database.pool.execute(
       Sql.named('''
         INSERT INTO exams (
@@ -89,9 +109,15 @@ class ExamService {
       parameters: {
         'class_id': classId,
         'title': title.trim(),
-        'description': description?.trim(),
-        'instructions': instructions?.trim(),
-        'status': status?.trim(),
+        'description':
+            description?.trim().isEmpty == true
+                ? null
+                : description?.trim(),
+        'instructions':
+            instructions?.trim().isEmpty == true
+                ? null
+                : instructions?.trim(),
+        'status': normalizedStatus,
       },
     );
 

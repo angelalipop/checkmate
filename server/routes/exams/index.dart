@@ -3,99 +3,147 @@ import 'package:dart_frog/dart_frog.dart';
 import '../../lib/exams/exam_service.dart';
 
 Future<Response> onRequest(RequestContext context) async {
-  if (context.request.method == HttpMethod.get) {
-    try {
-      final classId = int.tryParse(
-        context.request.uri.queryParameters['class_id'] ?? '',
-      );
+  try {
+    switch (context.request.method) {
+      case HttpMethod.get:
+        final classIdText =
+            context.request.uri.queryParameters['class_id'];
 
-      final exams = await ExamService.getAll(
-        classId: classId,
-      );
+        final classId = classIdText == null ||
+                classIdText.isEmpty
+            ? null
+            : int.tryParse(classIdText);
 
-      return Response.json(
-        body: {
-          'status': 'ok',
-          'exams': exams,
-        },
-      );
-    } catch (e) {
-      return Response.json(
-        statusCode: 500,
-        body: {
-          'status': 'error',
-          'message': e.toString(),
-        },
-      );
-    }
-  }
+        if (classIdText != null &&
+            classIdText.isNotEmpty &&
+            classId == null) {
+          return Response.json(
+            statusCode: 400,
+            body: {
+              'status': 'error',
+              'message': 'Invalid class_id',
+            },
+          );
+        }
 
-  if (context.request.method == HttpMethod.post) {
-    try {
-      final body = await context.request.json();
+        final exams = await ExamService.getAll(
+          classId: classId,
+        );
 
-      if (body is! Map) {
         return Response.json(
-          statusCode: 400,
           body: {
-            'status': 'error',
-            'message': 'Invalid request body',
+            'status': 'ok',
+            'exams': exams,
           },
         );
-      }
 
-      final classId = body['class_id'] is int
-          ? body['class_id'] as int
-          : int.tryParse(body['class_id']?.toString() ?? '');
+      case HttpMethod.post:
+        final body = await context.request.json();
 
-      final title = body['title']?.toString();
-      final description = body['description']?.toString();
-      final instructions = body['instructions']?.toString();
-      final status = body['status']?.toString();
+        if (body is! Map) {
+          return Response.json(
+            statusCode: 400,
+            body: {
+              'status': 'error',
+              'message': 'Invalid request body',
+            },
+          );
+        }
 
-      if (classId == null ||
-          title == null ||
-          title.trim().isEmpty) {
+        final classId = int.tryParse(
+          body['class_id']?.toString() ?? '',
+        );
+
+        final title =
+            body['title']?.toString().trim();
+
+        final description =
+            body['description']?.toString().trim();
+
+        final instructions =
+            body['instructions']?.toString().trim();
+
+        final status =
+            body['status']?.toString().trim();
+
+        if (classId == null) {
+          return Response.json(
+            statusCode: 400,
+            body: {
+              'status': 'error',
+              'message': 'Class is required',
+            },
+          );
+        }
+
+        if (title == null || title.isEmpty) {
+          return Response.json(
+            statusCode: 400,
+            body: {
+              'status': 'error',
+              'message': 'Exam title is required',
+            },
+          );
+        }
+
+        if (status != null &&
+            status.isNotEmpty &&
+            ![
+              'draft',
+              'published',
+              'archived',
+            ].contains(status.toLowerCase())) {
+          return Response.json(
+            statusCode: 400,
+            body: {
+              'status': 'error',
+              'message':
+                  'Invalid exam status. '
+                  'Use draft, published, or archived.',
+            },
+          );
+        }
+
+        final exam = await ExamService.create(
+          classId: classId,
+          title: title,
+          description:
+              description?.isEmpty == true
+                  ? null
+                  : description,
+          instructions:
+              instructions?.isEmpty == true
+                  ? null
+                  : instructions,
+          status: status?.isEmpty == true
+              ? null
+              : status,
+        );
+
         return Response.json(
-          statusCode: 400,
+          statusCode: 201,
           body: {
-            'status': 'error',
-            'message': 'class_id and title are required',
+            'status': 'ok',
+            'exam': exam,
           },
         );
-      }
 
-      final exam = await ExamService.create(
-        classId: classId,
-        title: title,
-        description: description,
-        instructions: instructions,
-        status: status,
-      );
-
-      return Response.json(
-        statusCode: 201,
-        body: {
-          'status': 'ok',
-          'exam': exam,
-        },
-      );
-    } catch (e) {
-      return Response.json(
-        statusCode: 500,
-        body: {
-          'status': 'error',
-          'message': e.toString(),
-        },
-      );
+      default:
+        return Response.json(
+          statusCode: 405,
+          body: {
+            'status': 'error',
+            'message': 'Method not allowed',
+          },
+        );
     }
+  } catch (e) {
+    return Response.json(
+      statusCode: 500,
+      body: {
+        'status': 'error',
+        'message': e.toString(),
+      },
+    );
   }
-
-  return Response.json(
-    statusCode: 405,
-    body: {
-      'status': 'error',
-      'message': 'Method not allowed',
-    },
-  );
 }

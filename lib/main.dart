@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'screens/admin_dashboard.dart';
+import 'screens/login_screen.dart';
 import 'services/api_service.dart';
+import 'services/auth_storage.dart';
 
 void main() {
   runApp(const CheckmateApp());
@@ -15,157 +18,104 @@ class CheckmateApp extends StatelessWidget {
       title: 'Checkmate',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2563EB)),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF2563EB),
+        ),
         useMaterial3: true,
       ),
-      home: const LoginPage(),
+      home: const AuthCheck(),
     );
   }
 }
 
-class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
+class AuthCheck extends StatefulWidget {
+  const AuthCheck({super.key});
 
   @override
-  State<LoginPage> createState() => _LoginPageState();
+  State<AuthCheck> createState() => _AuthCheckState();
 }
 
-class _LoginPageState extends State<LoginPage> {
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-
-  bool _loading = false;
-  String? _error;
+class _AuthCheckState extends State<AuthCheck> {
+  bool _loading = true;
+  Widget? _nextScreen;
 
   @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _checkSession();
   }
 
-  Future<void> _login() async {
-    FocusScope.of(context).unfocus();
+  Future<void> _checkSession() async {
+    try {
+      // Get the saved JWT.
+      final token = await AuthStorage.getToken();
+
+      // No token means the user needs to log in.
+      if (token == null || token.isEmpty) {
+        _setNextScreen(const LoginScreen());
+        return;
+      }
+
+      // Validate the JWT with the backend.
+      final result = await ApiService.getCurrentUser(token);
+
+      final user = result['user'];
+
+      if (user is! Map) {
+        throw Exception('Invalid user information.');
+      }
+
+      final role = user['role']?.toString().toLowerCase();
+
+      debugPrint('SESSION USER: $user');
+      debugPrint('SESSION ROLE: $role');
+
+      if (role == 'admin') {
+        _setNextScreen(const AdminDashboard());
+        return;
+      }
+
+      // Teacher dashboard will be added later.
+      if (role == 'teacher') {
+        await AuthStorage.deleteToken();
+        _setNextScreen(const LoginScreen());
+        return;
+      }
+
+      // Unknown role.
+      await AuthStorage.deleteToken();
+      _setNextScreen(const LoginScreen());
+    } catch (e) {
+      debugPrint('SESSION CHECK ERROR: $e');
+
+      // Token is invalid/expired or the server couldn't validate it.
+      await AuthStorage.deleteToken();
+
+      _setNextScreen(const LoginScreen());
+    }
+  }
+
+  void _setNextScreen(Widget screen) {
+    if (!mounted) {
+      return;
+    }
 
     setState(() {
-      _loading = true;
-      _error = null;
+      _nextScreen = screen;
+      _loading = false;
     });
-
-    try {
-      final result = await ApiService.login(
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
-      );
-
-      if (!mounted) return;
-
-      final user = result['user'] as Map<String, dynamic>;
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Welcome, ${user['name']}')));
-    } catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        _error = e.toString().replaceFirst('Exception: ', '');
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-        });
-      }
-    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Card(
-              elevation: 4,
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Icon(
-                      Icons.check_circle_outline,
-                      size: 64,
-                      color: Color(0xFF2563EB),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Checkmate',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.headlineMedium
-                          ?.copyWith(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Sign in to your account',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyLarge,
-                    ),
-                    const SizedBox(height: 32),
-                    TextField(
-                      controller: _emailController,
-                      keyboardType: TextInputType.emailAddress,
-                      enabled: !_loading,
-                      decoration: const InputDecoration(
-                        labelText: 'Email',
-                        prefixIcon: Icon(Icons.email_outlined),
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: _passwordController,
-                      obscureText: true,
-                      enabled: !_loading,
-                      onSubmitted: (_) => _login(),
-                      decoration: const InputDecoration(
-                        labelText: 'Password',
-                        prefixIcon: Icon(Icons.lock_outline),
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    if (_error != null) ...[
-                      const SizedBox(height: 16),
-                      Text(
-                        _error!,
-                        style: const TextStyle(color: Colors.red),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                    const SizedBox(height: 24),
-                    SizedBox(
-                      height: 50,
-                      child: FilledButton(
-                        onPressed: _loading ? null : _login,
-                        child: _loading
-                            ? const SizedBox(
-                                width: 22,
-                                height: 22,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Text('Sign In'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
+    if (_loading) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(),
         ),
-      ),
-    );
+      );
+    }
+
+    return _nextScreen ?? const LoginScreen();
   }
 }

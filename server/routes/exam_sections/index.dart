@@ -27,7 +27,9 @@ Future<Response> onRequest(RequestContext context) async {
     }
 
     try {
-      final sections = await ExamSectionService.getByExam(examId);
+      final sections = await ExamSectionService.getByExam(
+        examId,
+      );
 
       return Response.json(
         body: {
@@ -48,30 +50,92 @@ Future<Response> onRequest(RequestContext context) async {
 
   if (context.request.method == HttpMethod.post) {
     try {
-      final body =
-          jsonDecode(await context.request.body()) as Map<String, dynamic>;
+      final decodedBody = jsonDecode(
+        await context.request.body(),
+      );
 
-      final examId = body['exam_id'];
-      final name = body['name'];
-      final questionType = body['question_type'];
-      final sectionOrder = body['section_order'];
-      final defaultPoints = body['default_points'] ?? 1;
+      if (decodedBody is! Map<String, dynamic>) {
+        return Response.json(
+          statusCode: 400,
+          body: {
+            'status': 'error',
+            'message': 'Invalid request body',
+          },
+        );
+      }
 
-      if (examId is! int ||
-          name is! String ||
-          name.trim().isEmpty ||
-          questionType is! String ||
-          !allowedQuestionTypes.contains(questionType) ||
-          sectionOrder is! int ||
-          defaultPoints is! num ||
-          defaultPoints < 0) {
+      final body = decodedBody;
+
+      final examId = int.tryParse(
+        body['exam_id']?.toString() ?? '',
+      );
+
+      final name = body['name']?.toString().trim();
+
+      final questionType = body['question_type']
+          ?.toString()
+          .trim()
+          .toLowerCase();
+
+      final sectionOrder = int.tryParse(
+        body['section_order']?.toString() ?? '',
+      );
+
+      final defaultPoints = num.tryParse(
+        body['default_points']?.toString() ?? '1',
+      );
+
+      if (examId == null) {
+        return Response.json(
+          statusCode: 400,
+          body: {
+            'status': 'error',
+            'message': 'exam_id is required',
+          },
+        );
+      }
+
+      if (name == null || name.isEmpty) {
+        return Response.json(
+          statusCode: 400,
+          body: {
+            'status': 'error',
+            'message': 'Section name is required',
+          },
+        );
+      }
+
+      if (questionType == null ||
+          !allowedQuestionTypes.contains(questionType)) {
         return Response.json(
           statusCode: 400,
           body: {
             'status': 'error',
             'message':
-                'exam_id, name, valid question_type, section_order, '
-                'and non-negative default_points are required',
+                'Invalid question type. Use identification, '
+                'true_false, or multiple_choice.',
+          },
+        );
+      }
+
+      if (sectionOrder == null || sectionOrder < 1) {
+        return Response.json(
+          statusCode: 400,
+          body: {
+            'status': 'error',
+            'message':
+                'Section order must be at least 1',
+          },
+        );
+      }
+
+      if (defaultPoints == null || defaultPoints < 0) {
+        return Response.json(
+          statusCode: 400,
+          body: {
+            'status': 'error',
+            'message':
+                'Default points cannot be negative',
           },
         );
       }
