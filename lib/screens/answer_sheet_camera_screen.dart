@@ -1,15 +1,22 @@
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import 'package:checkmate/services/answer_sheet_processor.dart';
-import 'package:checkmate/services/answer_sheet_processor.dart';
+import 'package:checkmate/services/opencv_test_service.dart';
+import 'package:checkmate/services/opencv_omr_service.dart';
 
 class AnswerSheetCameraScreen extends StatefulWidget {
   final int examId;
+  final List<Map<String, dynamic>> sections;
 
-  const AnswerSheetCameraScreen({super.key, required this.examId});
+  const AnswerSheetCameraScreen({
+    super.key,
+    required this.examId,
+    required this.sections,
+  });
 
   @override
   State<AnswerSheetCameraScreen> createState() =>
@@ -31,6 +38,10 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
 
   Uint8List? _capturedImageBytes;
   Uint8List? _correctedImageBytes;
+  Uint8List? _openCVThresholdImageBytes;
+  OpenCVOMRResult? _openCVOmrResult;
+  bool _showThresholdPreview = false;
+  bool _showOmrDebugPreview = false;
 
   List<RegistrationPoint> _detectedMarkers = <RegistrationPoint>[];
 
@@ -127,6 +138,62 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
   }
 
   // ============================================================
+  // CHOOSE FROM GALLERY
+  // ============================================================
+
+  Future<void> _chooseFromGallery() async {
+    try {
+      const XTypeGroup imageTypeGroup = XTypeGroup(
+        label: 'Images',
+        uniformTypeIdentifiers: <String>[
+          'public.jpeg',
+          'public.png',
+          'public.image',
+        ],
+      );
+
+      final XFile? image = await openFile(
+        acceptedTypeGroups: <XTypeGroup>[imageTypeGroup],
+      );
+
+      if (image == null) {
+        return;
+      }
+
+      final Uint8List imageBytes = await image.readAsBytes();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _capturedImage = image;
+        _capturedImageBytes = imageBytes;
+
+        // Reset previous processing results.
+        _correctedImageBytes = null;
+        _openCVThresholdImageBytes = null;
+        _openCVOmrResult = null;
+        _showThresholdPreview = false;
+        _showOmrDebugPreview = false;
+        _detectedMarkers = <RegistrationPoint>[];
+        _isProcessing = false;
+      });
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 5),
+          content: Text('Unable to choose image:\n$e'),
+        ),
+      );
+    }
+  }
+
+  // ============================================================
   // TAKE PICTURE
   // ============================================================
 
@@ -154,6 +221,10 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
         _capturedImage = image;
         _capturedImageBytes = imageBytes;
         _correctedImageBytes = null;
+        _openCVThresholdImageBytes = null;
+        _openCVOmrResult = null;
+        _showThresholdPreview = false;
+        _showOmrDebugPreview = false;
         _detectedMarkers = <RegistrationPoint>[];
         _isTakingPicture = false;
       });
@@ -179,6 +250,10 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
       _capturedImage = null;
       _capturedImageBytes = null;
       _correctedImageBytes = null;
+      _openCVThresholdImageBytes = null;
+      _openCVOmrResult = null;
+      _showThresholdPreview = false;
+      _showOmrDebugPreview = false;
       _detectedMarkers = <RegistrationPoint>[];
       _isProcessing = false;
     });
@@ -196,6 +271,10 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
     setState(() {
       _isProcessing = true;
       _correctedImageBytes = null;
+      _openCVThresholdImageBytes = null;
+      _openCVOmrResult = null;
+      _showThresholdPreview = false;
+      _showOmrDebugPreview = false;
       _detectedMarkers = <RegistrationPoint>[];
     });
 
@@ -203,13 +282,24 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
       final AnswerSheetProcessingResult result =
           await AnswerSheetProcessor.processAnswerSheet(_capturedImageBytes!);
 
+      final Uint8List thresholdImage = OpenCVTestService.adaptiveThreshold(
+        result.correctedImageBytes,
+      );
+
+      final OpenCVOMRResult omrResult = OpenCVOMRService.process(
+        result.correctedImageBytes,
+        sections: widget.sections,
+      );
+
       if (!mounted) return;
 
       setState(() {
         _correctedImageBytes = result.correctedImageBytes;
-
+        _openCVThresholdImageBytes = thresholdImage;
+        _openCVOmrResult = omrResult;
+        _showThresholdPreview = true;
+        _showOmrDebugPreview = false;
         _detectedMarkers = result.markers;
-
         _isProcessing = false;
       });
 
@@ -226,6 +316,10 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
       setState(() {
         _isProcessing = false;
         _correctedImageBytes = null;
+        _openCVThresholdImageBytes = null;
+        _openCVOmrResult = null;
+        _showThresholdPreview = false;
+        _showOmrDebugPreview = false;
         _detectedMarkers = <RegistrationPoint>[];
       });
 
@@ -236,6 +330,201 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
         ),
       );
     }
+  }
+
+  Uint8List? _currentPreviewBytes() {
+    final bool hasCorrectedImage = _correctedImageBytes != null;
+
+    if (hasCorrectedImage &&
+        _showOmrDebugPreview &&
+        _openCVOmrResult?.debugImageBytes != null) {
+      return _openCVOmrResult!.debugImageBytes;
+    }
+
+    if (hasCorrectedImage &&
+        _showThresholdPreview &&
+        _openCVThresholdImageBytes != null) {
+      return _openCVThresholdImageBytes;
+    }
+
+    if (hasCorrectedImage) {
+      return _correctedImageBytes;
+    }
+
+    return _capturedImageBytes;
+  }
+
+  void _openFullscreenPreview() {
+    final Uint8List? imageBytes = _currentPreviewBytes();
+    if (imageBytes == null) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => _FullscreenImagePreview(
+          imageBytes: imageBytes,
+          title: _showOmrDebugPreview
+              ? 'OMR Debug Overlay'
+              : _showThresholdPreview
+              ? 'OpenCV Threshold'
+              : 'Corrected Answer Sheet',
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // OMR ANSWER CLASSIFICATION
+  // ============================================================
+
+  /// Classifies one MC/TF row without changing the OpenCV measurement logic.
+  ///
+  /// The classifier intentionally uses BOTH an absolute darkness check and
+  /// the gap between the strongest and second-strongest bubble. This keeps a
+  /// blank row from becoming an answer just because one printed bubble outline
+  /// happens to be slightly darker than its neighbours.
+  _OMRAnswerClassification _classifyQuestion(dynamic question) {
+    final bubbles = List<dynamic>.from(question.bubbles);
+
+    if (bubbles.isEmpty) {
+      return const _OMRAnswerClassification(
+        status: _OMRAnswerStatus.blank,
+        labels: <String>[],
+        strongest: 0,
+        secondStrongest: 0,
+      );
+    }
+
+    final sorted = List<dynamic>.from(bubbles)
+      ..sort(
+        (a, b) => (b.fillRatio as double).compareTo(a.fillRatio as double),
+      );
+
+    final double strongest = sorted.first.fillRatio as double;
+    final double secondStrongest = sorted.length > 1
+        ? sorted[1].fillRatio as double
+        : 0.0;
+    final double gap = strongest - secondStrongest;
+
+    // These are deliberately conservative starting values based on the
+    // current CheckMate sheet measurements. They can be tuned later after
+    // testing more blank and answered sheets under different lighting.
+    const double clearMarkMinimum = 0.52;
+    const double possibleMarkMinimum = 0.46;
+    const double clearWinnerGap = 0.12;
+    const double ambiguousWinnerGap = 0.07;
+    const double multipleMarkMinimum = 0.52;
+    const double multiplePairGap = 0.10;
+
+    final strongBubbles = bubbles
+        .where((bubble) => (bubble.fillRatio as double) >= multipleMarkMinimum)
+        .toList();
+
+    if (strongBubbles.length >= 2) {
+      strongBubbles.sort(
+        (a, b) => (b.fillRatio as double).compareTo(a.fillRatio as double),
+      );
+
+      final double first = strongBubbles[0].fillRatio as double;
+      final double second = strongBubbles[1].fillRatio as double;
+
+      if ((first - second).abs() <= multiplePairGap) {
+        return _OMRAnswerClassification(
+          status: _OMRAnswerStatus.multiple,
+          labels: strongBubbles
+              .map<String>((bubble) => bubble.label.toString())
+              .toList(),
+          strongest: strongest,
+          secondStrongest: secondStrongest,
+        );
+      }
+    }
+
+    if (strongest >= clearMarkMinimum && gap >= clearWinnerGap) {
+      return _OMRAnswerClassification(
+        status: _OMRAnswerStatus.answered,
+        labels: <String>[sorted.first.label.toString()],
+        strongest: strongest,
+        secondStrongest: secondStrongest,
+      );
+    }
+
+    // A reasonably dark bubble with a smaller-than-normal lead is not trusted
+    // automatically. It is surfaced for manual verification instead.
+    if (strongest >= possibleMarkMinimum && gap >= ambiguousWinnerGap) {
+      return _OMRAnswerClassification(
+        status: _OMRAnswerStatus.ambiguous,
+        labels: <String>[sorted.first.label.toString()],
+        strongest: strongest,
+        secondStrongest: secondStrongest,
+      );
+    }
+
+    // If the strongest bubble is dark but has almost no separation from the
+    // runner-up, treat the row as ambiguous rather than guessing.
+    if (strongest >= clearMarkMinimum) {
+      return _OMRAnswerClassification(
+        status: _OMRAnswerStatus.ambiguous,
+        labels: <String>[sorted.first.label.toString()],
+        strongest: strongest,
+        secondStrongest: secondStrongest,
+      );
+    }
+
+    return _OMRAnswerClassification(
+      status: _OMRAnswerStatus.blank,
+      labels: const <String>[],
+      strongest: strongest,
+      secondStrongest: secondStrongest,
+    );
+  }
+
+  Widget _buildClassificationBadge(_OMRAnswerClassification result) {
+    final IconData icon;
+    final String text;
+    final Color color;
+
+    switch (result.status) {
+      case _OMRAnswerStatus.answered:
+        icon = Icons.check_circle_outline;
+        text = result.labels.first;
+        color = Colors.greenAccent;
+        break;
+      case _OMRAnswerStatus.blank:
+        icon = Icons.remove_circle_outline;
+        text = 'Blank';
+        color = Colors.white60;
+        break;
+      case _OMRAnswerStatus.multiple:
+        icon = Icons.warning_amber_rounded;
+        text = 'Multiple: ${result.labels.join(', ')}';
+        color = Colors.orangeAccent;
+        break;
+      case _OMRAnswerStatus.ambiguous:
+        icon = Icons.help_outline;
+        text = result.labels.isEmpty
+            ? 'Ambiguous'
+            : 'Ambiguous: ${result.labels.first}';
+        color = Colors.amberAccent;
+        break;
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 5),
+        Flexible(
+          child: Text(
+            text,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   // ============================================================
@@ -395,6 +684,13 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
                           ),
                   ),
                 ),
+                const SizedBox(height: 12),
+                TextButton.icon(
+                  onPressed: _isTakingPicture ? null : _chooseFromGallery,
+                  icon: const Icon(Icons.photo_library_outlined),
+                  label: const Text('Choose From Gallery'),
+                  style: TextButton.styleFrom(foregroundColor: Colors.white),
+                ),
               ],
             ),
           ),
@@ -475,11 +771,46 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
           Expanded(
             child: Center(
               child: _capturedImageBytes != null
-                  ? Image.memory(
-                      hasCorrectedImage
-                          ? _correctedImageBytes!
-                          : _capturedImageBytes!,
-                      fit: BoxFit.contain,
+                  ? GestureDetector(
+                      onTap: _openFullscreenPreview,
+                      child: Stack(
+                        alignment: Alignment.bottomCenter,
+                        children: [
+                          Image.memory(
+                            _currentPreviewBytes()!,
+                            fit: BoxFit.contain,
+                          ),
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.70),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.zoom_in,
+                                  color: Colors.white,
+                                  size: 18,
+                                ),
+                                SizedBox(width: 6),
+                                Text(
+                                  'Tap to zoom',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     )
                   : const SizedBox(),
             ),
@@ -537,7 +868,169 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
                     'Detected ${_detectedMarkers.length} registration markers.',
                     style: const TextStyle(color: Colors.white70),
                   ),
+                  if (_openCVThresholdImageBytes != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      _showOmrDebugPreview
+                          ? 'Showing OMR debug overlay'
+                          : _showThresholdPreview
+                          ? 'Showing OpenCV threshold preview'
+                          : 'Showing corrected answer sheet',
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              if (_showThresholdPreview ||
+                                  _showOmrDebugPreview) {
+                                _showThresholdPreview = false;
+                                _showOmrDebugPreview = false;
+                              } else {
+                                _showThresholdPreview = true;
+                                _showOmrDebugPreview = false;
+                              }
+                            });
+                          },
+                          icon: Icon(
+                            _showThresholdPreview && !_showOmrDebugPreview
+                                ? Icons.image_outlined
+                                : Icons.contrast,
+                          ),
+                          label: Text(
+                            _showThresholdPreview && !_showOmrDebugPreview
+                                ? 'View Corrected Image'
+                                : 'View OpenCV Threshold',
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(color: Colors.white54),
+                          ),
+                        ),
+                        if (_openCVOmrResult?.debugImageBytes != null)
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                _showOmrDebugPreview = true;
+                                _showThresholdPreview = false;
+                              });
+                            },
+                            icon: const Icon(Icons.center_focus_strong),
+                            label: const Text('View OMR Debug Overlay'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Colors.white54),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
                 ],
+              ),
+            ),
+
+          if (hasCorrectedImage && _openCVOmrResult != null)
+            Container(
+              constraints: const BoxConstraints(maxHeight: 220),
+              margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'OMR Answer Detection',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ..._openCVOmrResult!.sections.map((section) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              section.sectionName,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            if (section.sectionType == 'identification')
+                              const Text(
+                                'Identification: OCR pending',
+                                style: TextStyle(color: Colors.white70),
+                              )
+                            else
+                              ...section.questions.map((question) {
+                                final values = question.bubbles
+                                    .map(
+                                      (bubble) =>
+                                          '${bubble.label}:${bubble.fillRatio.toStringAsFixed(3)}',
+                                    )
+                                    .join('  ');
+                                final classification =
+                                    _classifyQuestion(question);
+
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          SizedBox(
+                                            width: 38,
+                                            child: Text(
+                                              'Q${question.questionNumber}',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ),
+                                          Expanded(
+                                            child: _buildClassificationBadge(
+                                              classification,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        values,
+                                        style: const TextStyle(
+                                          color: Colors.white54,
+                                          fontFamily: 'monospace',
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+                ),
               ),
             ),
 
@@ -597,6 +1090,52 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+enum _OMRAnswerStatus { answered, blank, multiple, ambiguous }
+
+class _OMRAnswerClassification {
+  final _OMRAnswerStatus status;
+  final List<String> labels;
+  final double strongest;
+  final double secondStrongest;
+
+  const _OMRAnswerClassification({
+    required this.status,
+    required this.labels,
+    required this.strongest,
+    required this.secondStrongest,
+  });
+}
+
+class _FullscreenImagePreview extends StatelessWidget {
+  final Uint8List imageBytes;
+  final String title;
+
+  const _FullscreenImagePreview({
+    required this.imageBytes,
+    required this.title,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: Text(title),
+      ),
+      body: SafeArea(
+        child: InteractiveViewer(
+          minScale: 0.5,
+          maxScale: 8.0,
+          boundaryMargin: const EdgeInsets.all(120),
+          child: Center(child: Image.memory(imageBytes, fit: BoxFit.contain)),
+        ),
       ),
     );
   }
