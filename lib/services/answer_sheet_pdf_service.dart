@@ -114,9 +114,7 @@ class AnswerSheetPdfService {
     final activeSections = <Map<String, dynamic>>[];
 
     for (final section in sections) {
-      final sectionId = int.tryParse(
-        section['id']?.toString() ?? '',
-      );
+      final sectionId = int.tryParse(section['id']?.toString() ?? '');
 
       if (sectionId == null) {
         continue;
@@ -152,17 +150,12 @@ class AnswerSheetPdfService {
     /*
       Two A5 sheets per A4 landscape page.
     */
-    for (
-      int index = 0;
-      index < sheetLayouts.length;
-      index += 2
-    ) {
+    for (int index = 0; index < sheetLayouts.length; index += 2) {
       final leftLayout = sheetLayouts[index];
 
-      final rightLayout =
-          index + 1 < sheetLayouts.length
-              ? sheetLayouts[index + 1]
-              : null;
+      final rightLayout = index + 1 < sheetLayouts.length
+          ? sheetLayouts[index + 1]
+          : null;
 
       pdf.addPage(
         pw.Page(
@@ -170,8 +163,7 @@ class AnswerSheetPdfService {
           margin: const pw.EdgeInsets.all(18),
           build: (context) {
             return pw.Row(
-              crossAxisAlignment:
-                  pw.CrossAxisAlignment.start,
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 pw.Expanded(
                   child: _buildAnswerSheet(
@@ -183,9 +175,7 @@ class AnswerSheetPdfService {
                   ),
                 ),
 
-                pw.SizedBox(
-                  width: 12,
-                ),
+                pw.SizedBox(width: 12),
 
                 pw.Expanded(
                   child: rightLayout == null
@@ -231,17 +221,13 @@ class AnswerSheetPdfService {
     double usedHeight = _headerAndStudentInfoHeight();
 
     for (final section in sections) {
-      final sectionId = int.tryParse(
-        section['id']?.toString() ?? '',
-      );
+      final sectionId = int.tryParse(section['id']?.toString() ?? '');
 
       if (sectionId == null) {
         continue;
       }
 
-      final type = _normalizeType(
-        section['question_type'],
-      );
+      final type = _normalizeType(section['question_type']);
 
       final sectionQuestions = questions[sectionId] ?? [];
 
@@ -261,8 +247,7 @@ class AnswerSheetPdfService {
         We keep whole sections together whenever possible.
       */
       if (currentSheet.isNotEmpty &&
-          usedHeight + sectionHeight >
-              _usableSheetHeight()) {
+          usedHeight + sectionHeight > _usableSheetHeight()) {
         layouts.add(currentSheet);
 
         currentSheet = [];
@@ -306,9 +291,7 @@ class AnswerSheetPdfService {
       so they do not consume normal Column layout space.
     */
 
-    return _sheetHeight -
-        (_sheetPadding * 2) -
-        18;
+    return _sheetHeight - (_sheetPadding * 2) - 18;
   }
 
   // --------------------------------------------------------------------------
@@ -319,24 +302,18 @@ class AnswerSheetPdfService {
     required String type,
     required int questionCount,
   }) {
-    if (type == 'multiple_choice' ||
-        type == 'true_false') {
-      final columns = _calculateOmrColumns(
-        questionCount,
-      );
+    if (type == 'multiple_choice' || type == 'true_false') {
+      final columns = _calculateOmrColumns(questionCount);
 
       final rows = (questionCount / columns).ceil();
 
-      return _sectionTitleHeight +
-          (rows * _omrRowHeight) +
-          _sectionSpacing;
+      return _sectionTitleHeight + (rows * _omrRowHeight) + _sectionSpacing;
     }
 
     if (type == 'identification') {
       return _sectionTitleHeight +
           (questionCount *
-              (_identificationBoxHeight +
-                  _identificationRowSpacing)) +
+              (_identificationBoxHeight + _identificationRowSpacing)) +
           _sectionSpacing;
     }
 
@@ -350,9 +327,7 @@ class AnswerSheetPdfService {
   // OMR COLUMN CALCULATION
   // --------------------------------------------------------------------------
 
-  static int _calculateOmrColumns(
-    int questionCount,
-  ) {
+  static int _calculateOmrColumns(int questionCount) {
     /*
       1-9 questions:
       1 column
@@ -372,12 +347,8 @@ class AnswerSheetPdfService {
   // TYPE NORMALIZATION
   // --------------------------------------------------------------------------
 
-  static String _normalizeType(
-    dynamic value,
-  ) {
-    return (value?.toString() ?? '')
-        .trim()
-        .toLowerCase();
+  static String _normalizeType(dynamic value) {
+    return (value?.toString() ?? '').trim().toLowerCase();
   }
 
   // --------------------------------------------------------------------------
@@ -400,64 +371,43 @@ class AnswerSheetPdfService {
       They are positioned independently using Stack.
     */
     final content = pw.Column(
-      crossAxisAlignment:
-          pw.CrossAxisAlignment.start,
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        _buildHeader(
-          exam: exam,
-          examId: examId,
-          sheetNumber: sheetNumber,
-        ),
+        _buildHeader(exam: exam, examId: examId, sheetNumber: sheetNumber),
 
-        pw.SizedBox(
-          height: 6,
-        ),
+        pw.SizedBox(height: 6),
 
         _buildStudentInformation(),
 
-        pw.SizedBox(
-          height: 7,
-        ),
+        pw.SizedBox(height: 7),
 
         /*
           Render only the sections assigned
           to this particular sheet.
         */
         ...sections
-            .where(
-              (section) {
-                final sectionId = int.tryParse(
-                  section['id']?.toString() ?? '',
-                );
+            .where((section) {
+              final sectionId = int.tryParse(section['id']?.toString() ?? '');
 
-                return sectionId != null &&
-                    layout.contains(sectionId);
-              },
-            )
-            .map(
-              (section) {
-                final sectionId = int.tryParse(
-                  section['id']?.toString() ?? '',
-                );
+              return sectionId != null && layout.contains(sectionId);
+            })
+            .map((section) {
+              final sectionId = int.tryParse(section['id']?.toString() ?? '');
 
-                if (sectionId == null) {
-                  return pw.SizedBox();
-                }
+              if (sectionId == null) {
+                return pw.SizedBox();
+              }
 
-                final type = _normalizeType(
-                  section['question_type'],
-                );
+              final type = _normalizeType(section['question_type']);
 
-                final sectionQuestions =
-                    questions[sectionId] ?? [];
+              final sectionQuestions = questions[sectionId] ?? [];
 
-                return _buildSection(
-                  section: section,
-                  type: type,
-                  questions: sectionQuestions,
-                );
-              },
-            ),
+              return _buildSection(
+                section: section,
+                type: type,
+                questions: sectionQuestions,
+              );
+            }),
 
         /*
           Empty space is used here instead of forcing
@@ -474,11 +424,7 @@ class AnswerSheetPdfService {
     return pw.Container(
       width: _sheetWidth,
       height: _sheetHeight,
-      decoration: pw.BoxDecoration(
-        border: pw.Border.all(
-          width: 1,
-        ),
-      ),
+      decoration: pw.BoxDecoration(border: pw.Border.all(width: 1)),
       child: pw.Stack(
         children: [
           /*
@@ -541,19 +487,15 @@ class AnswerSheetPdfService {
     required String examId,
     required int sheetNumber,
   }) {
-    final sheetId =
-        'CHECKMATE-EXAM-$examId-SHEET-$sheetNumber';
+    final sheetId = 'CHECKMATE-EXAM-$examId-SHEET-$sheetNumber';
 
     return pw.Row(
-      mainAxisAlignment:
-          pw.MainAxisAlignment.spaceBetween,
-      crossAxisAlignment:
-          pw.CrossAxisAlignment.start,
+      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
         pw.Expanded(
           child: pw.Column(
-            crossAxisAlignment:
-                pw.CrossAxisAlignment.start,
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
               pw.Text(
                 'CHECKMATE',
@@ -563,9 +505,7 @@ class AnswerSheetPdfService {
                 ),
               ),
 
-              pw.SizedBox(
-                height: 2,
-              ),
+              pw.SizedBox(height: 2),
 
               pw.Text(
                 exam['title']?.toString() ?? 'Exam',
@@ -576,20 +516,14 @@ class AnswerSheetPdfService {
                 maxLines: 2,
               ),
 
-              pw.SizedBox(
-                height: 2,
-              ),
+              pw.SizedBox(height: 2),
 
               pw.Text(
                 'Exam ID: $examId',
-                style: const pw.TextStyle(
-                  fontSize: 6,
-                ),
+                style: const pw.TextStyle(fontSize: 6),
               ),
 
-              pw.SizedBox(
-                height: 2,
-              ),
+              pw.SizedBox(height: 2),
 
               pw.Text(
                 'Sheet $sheetNumber',
@@ -599,23 +533,14 @@ class AnswerSheetPdfService {
                 ),
               ),
 
-              pw.SizedBox(
-                height: 2,
-              ),
+              pw.SizedBox(height: 2),
 
-              pw.Text(
-                sheetId,
-                style: const pw.TextStyle(
-                  fontSize: 4.5,
-                ),
-              ),
+              pw.Text(sheetId, style: const pw.TextStyle(fontSize: 4.5)),
             ],
           ),
         ),
 
-        _buildQrCode(
-          sheetId,
-        ),
+        _buildQrCode(sheetId),
       ],
     );
   }
@@ -629,66 +554,37 @@ class AnswerSheetPdfService {
       children: [
         pw.Row(
           children: [
-            pw.Expanded(
-              child: _buildLineField(
-                'Student Name',
-              ),
-            ),
+            pw.Expanded(child: _buildLineField('Student Name')),
 
-            pw.SizedBox(
-              width: 6,
-            ),
+            pw.SizedBox(width: 6),
 
-            pw.Expanded(
-              child: _buildLineField(
-                'Student Number',
-              ),
-            ),
+            pw.Expanded(child: _buildLineField('Student Number')),
           ],
         ),
 
-        pw.SizedBox(
-          height: 5,
-        ),
+        pw.SizedBox(height: 5),
 
-        _buildLineField(
-          'Section',
-        ),
+        _buildLineField('Section'),
       ],
     );
   }
 
-  static pw.Widget _buildLineField(
-    String label,
-  ) {
+  static pw.Widget _buildLineField(String label) {
     return pw.Container(
       height: 16,
-      padding: const pw.EdgeInsets.symmetric(
-        horizontal: 4,
-      ),
-      decoration: pw.BoxDecoration(
-        border: pw.Border.all(
-          width: 0.8,
-        ),
-      ),
+      padding: const pw.EdgeInsets.symmetric(horizontal: 4),
+      decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.8)),
       child: pw.Row(
         children: [
           pw.Text(
             '$label: ',
-            style: pw.TextStyle(
-              fontSize: 6,
-              fontWeight: pw.FontWeight.bold,
-            ),
+            style: pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold),
           ),
 
           pw.Expanded(
             child: pw.Container(
               decoration: const pw.BoxDecoration(
-                border: pw.Border(
-                  bottom: pw.BorderSide(
-                    width: 0.5,
-                  ),
-                ),
+                border: pw.Border(bottom: pw.BorderSide(width: 0.5)),
               ),
             ),
           ),
@@ -707,53 +603,29 @@ class AnswerSheetPdfService {
     required List<Map<String, dynamic>> questions,
   }) {
     return pw.Column(
-      crossAxisAlignment:
-          pw.CrossAxisAlignment.start,
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
         pw.Container(
           width: double.infinity,
           height: _sectionTitleHeight,
           alignment: pw.Alignment.centerLeft,
-          padding: const pw.EdgeInsets.symmetric(
-            horizontal: 5,
-          ),
-          decoration: pw.BoxDecoration(
-            border: pw.Border.all(
-              width: 0.8,
-            ),
-          ),
+          padding: const pw.EdgeInsets.symmetric(horizontal: 5),
+          decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.8)),
           child: pw.Text(
-            section['name']?.toString().toUpperCase() ??
-                'SECTION',
-            style: pw.TextStyle(
-              fontSize: 6.5,
-              fontWeight: pw.FontWeight.bold,
-            ),
+            section['name']?.toString().toUpperCase() ?? 'SECTION',
+            style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold),
           ),
         ),
 
-        pw.SizedBox(
-          height: 3,
-        ),
+        pw.SizedBox(height: 3),
 
-        if (type == 'multiple_choice')
-          _buildMultipleChoice(
-            questions,
-          ),
+        if (type == 'multiple_choice') _buildMultipleChoice(questions),
 
-        if (type == 'true_false')
-          _buildTrueFalse(
-            questions,
-          ),
+        if (type == 'true_false') _buildTrueFalse(questions),
 
-        if (type == 'identification')
-          _buildIdentification(
-            questions,
-          ),
+        if (type == 'identification') _buildIdentification(questions),
 
-        pw.SizedBox(
-          height: _sectionSpacing,
-        ),
+        pw.SizedBox(height: _sectionSpacing),
       ],
     );
   }
@@ -762,17 +634,10 @@ class AnswerSheetPdfService {
   // MULTIPLE CHOICE
   // --------------------------------------------------------------------------
 
-  static pw.Widget _buildMultipleChoice(
-    List<Map<String, dynamic>> questions,
-  ) {
+  static pw.Widget _buildMultipleChoice(List<Map<String, dynamic>> questions) {
     return _buildOmrGrid(
       questions: questions,
-      labels: const [
-        'A',
-        'B',
-        'C',
-        'D',
-      ],
+      labels: const ['A', 'B', 'C', 'D'],
     );
   }
 
@@ -780,16 +645,8 @@ class AnswerSheetPdfService {
   // TRUE / FALSE
   // --------------------------------------------------------------------------
 
-  static pw.Widget _buildTrueFalse(
-    List<Map<String, dynamic>> questions,
-  ) {
-    return _buildOmrGrid(
-      questions: questions,
-      labels: const [
-        'T',
-        'F',
-      ],
-    );
+  static pw.Widget _buildTrueFalse(List<Map<String, dynamic>> questions) {
+    return _buildOmrGrid(questions: questions, labels: const ['T', 'F']);
   }
 
   // --------------------------------------------------------------------------
@@ -800,12 +657,9 @@ class AnswerSheetPdfService {
     required List<Map<String, dynamic>> questions,
     required List<String> labels,
   }) {
-    final columns = _calculateOmrColumns(
-      questions.length,
-    );
+    final columns = _calculateOmrColumns(questions.length);
 
-    final rows =
-        <List<Map<String, dynamic>>>[];
+    final rows = <List<Map<String, dynamic>>>[];
 
     /*
       Distribute questions vertically.
@@ -827,33 +681,18 @@ class AnswerSheetPdfService {
       10
     */
 
-    final questionsPerColumn =
-        (questions.length / columns).ceil();
+    final questionsPerColumn = (questions.length / columns).ceil();
 
-    for (
-      int columnIndex = 0;
-      columnIndex < columns;
-      columnIndex++
-    ) {
-      final start =
-          columnIndex * questionsPerColumn;
+    for (int columnIndex = 0; columnIndex < columns; columnIndex++) {
+      final start = columnIndex * questionsPerColumn;
 
       if (start >= questions.length) {
         break;
       }
 
-      final end =
-          (start + questionsPerColumn).clamp(
-        0,
-        questions.length,
-      );
+      final end = (start + questionsPerColumn).clamp(0, questions.length);
 
-      rows.add(
-        questions.sublist(
-          start,
-          end,
-        ),
-      );
+      rows.add(questions.sublist(start, end));
     }
 
     /*
@@ -864,39 +703,30 @@ class AnswerSheetPdfService {
     */
 
     final columnWidth =
-        _questionNumberWidth +
-        (labels.length * _answerOptionWidth);
+        _questionNumberWidth + (labels.length * _answerOptionWidth);
 
-    final totalBlockWidth =
-        columnWidth * rows.length;
+    final totalBlockWidth = columnWidth * rows.length;
 
     return pw.Center(
       child: pw.SizedBox(
         width: totalBlockWidth,
         child: pw.Row(
-          mainAxisAlignment:
-              pw.MainAxisAlignment.center,
-          crossAxisAlignment:
-              pw.CrossAxisAlignment.start,
-          children: rows.map(
-            (columnQuestions) {
-              return pw.SizedBox(
-                width: columnWidth,
-                child: pw.Column(
-                  crossAxisAlignment:
-                      pw.CrossAxisAlignment.start,
-                  children: columnQuestions
-                      .map(
-                        (question) => _buildOmrRow(
-                          question: question,
-                          labels: labels,
-                        ),
-                      )
-                      .toList(),
-                ),
-              );
-            },
-          ).toList(),
+          mainAxisAlignment: pw.MainAxisAlignment.center,
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: rows.map((columnQuestions) {
+            return pw.SizedBox(
+              width: columnWidth,
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: columnQuestions
+                    .map(
+                      (question) =>
+                          _buildOmrRow(question: question, labels: labels),
+                    )
+                    .toList(),
+              ),
+            );
+          }).toList(),
         ),
       ),
     );
@@ -910,8 +740,7 @@ class AnswerSheetPdfService {
     required Map<String, dynamic> question,
     required List<String> labels,
   }) {
-    final number =
-        question['question_number']?.toString() ?? '';
+    final number = question['question_number']?.toString() ?? '';
 
     return pw.SizedBox(
       height: _omrRowHeight,
@@ -921,17 +750,11 @@ class AnswerSheetPdfService {
             width: _questionNumberWidth,
             child: pw.Text(
               '$number.',
-              style: const pw.TextStyle(
-                fontSize: 6.5,
-              ),
+              style: const pw.TextStyle(fontSize: 6.5),
             ),
           ),
 
-          ...labels.map(
-            (label) => _buildOmrBubble(
-              label,
-            ),
-          ),
+          ...labels.map((label) => _buildOmrBubble(label)),
         ],
       ),
     );
@@ -941,37 +764,42 @@ class AnswerSheetPdfService {
   // OMR BUBBLE
   // --------------------------------------------------------------------------
 
-  static pw.Widget _buildOmrBubble(
-    String label,
-  ) {
+  static pw.Widget _buildOmrBubble(String label) {
+    /*
+      IMPORTANT FOR OMR SCANNING
+
+      Every answer option owns a fixed 23-unit-wide cell.
+
+      The 11 x 11 bubble is EXPLICITLY centered horizontally inside that cell.
+      This makes the PDF generator and OMRProcessor use the same deterministic
+      bubble-center formula:
+
+        option cell start + (_answerOptionWidth / 2)
+
+      Do not remove this alignment unless the scanner geometry is changed too.
+    */
     return pw.SizedBox(
       width: _answerOptionWidth,
-      child: pw.Column(
-        mainAxisAlignment:
-            pw.MainAxisAlignment.start,
-        children: [
-          pw.Container(
-            width: _bubbleSize,
-            height: _bubbleSize,
-            decoration: pw.BoxDecoration(
-              shape: pw.BoxShape.circle,
-              border: pw.Border.all(
-                width: 1,
+      child: pw.Align(
+        alignment: pw.Alignment.topCenter,
+        child: pw.Column(
+          mainAxisSize: pw.MainAxisSize.min,
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
+          children: [
+            pw.Container(
+              width: _bubbleSize,
+              height: _bubbleSize,
+              decoration: pw.BoxDecoration(
+                shape: pw.BoxShape.circle,
+                border: pw.Border.all(width: 1),
               ),
             ),
-          ),
 
-          pw.SizedBox(
-            height: 0.5,
-          ),
+            pw.SizedBox(height: 0.5),
 
-          pw.Text(
-            label,
-            style: const pw.TextStyle(
-              fontSize: 5,
-            ),
-          ),
-        ],
+            pw.Text(label, style: const pw.TextStyle(fontSize: 5)),
+          ],
+        ),
       ),
     );
   }
@@ -980,50 +808,37 @@ class AnswerSheetPdfService {
   // IDENTIFICATION
   // --------------------------------------------------------------------------
 
-  static pw.Widget _buildIdentification(
-    List<Map<String, dynamic>> questions,
-  ) {
+  static pw.Widget _buildIdentification(List<Map<String, dynamic>> questions) {
     return pw.Column(
-      crossAxisAlignment:
-          pw.CrossAxisAlignment.start,
-      children: questions.map(
-        (question) {
-          final number =
-              question['question_number']?.toString() ?? '';
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: questions.map((question) {
+        final number = question['question_number']?.toString() ?? '';
 
-          return pw.Padding(
-            padding: const pw.EdgeInsets.only(
-              bottom: _identificationRowSpacing,
-            ),
-            child: pw.Row(
-              crossAxisAlignment:
-                  pw.CrossAxisAlignment.center,
-              children: [
-                pw.SizedBox(
-                  width: _questionNumberWidth,
-                  child: pw.Text(
-                    '$number.',
-                    style: const pw.TextStyle(
-                      fontSize: 6.5,
-                    ),
+        return pw.Padding(
+          padding: const pw.EdgeInsets.only(bottom: _identificationRowSpacing),
+          child: pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              pw.SizedBox(
+                width: _questionNumberWidth,
+                child: pw.Text(
+                  '$number.',
+                  style: const pw.TextStyle(fontSize: 6.5),
+                ),
+              ),
+
+              pw.Expanded(
+                child: pw.Container(
+                  height: _identificationBoxHeight,
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(width: 0.8),
                   ),
                 ),
-
-                pw.Expanded(
-                  child: pw.Container(
-                    height: _identificationBoxHeight,
-                    decoration: pw.BoxDecoration(
-                      border: pw.Border.all(
-                        width: 0.8,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ).toList(),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -1031,17 +846,10 @@ class AnswerSheetPdfService {
   // QR CODE
   // --------------------------------------------------------------------------
 
-  static pw.Widget _buildQrCode(
-    String data,
-  ) {
-    final qrCode = QrCode(
-      4,
-      QrErrorCorrectLevel.M,
-    );
+  static pw.Widget _buildQrCode(String data) {
+    final qrCode = QrCode(4, QrErrorCorrectLevel.M);
 
-    qrCode.addData(
-      data,
-    );
+    qrCode.addData(data);
 
     final qrImage = QrImage(qrCode);
 
@@ -1050,49 +858,21 @@ class AnswerSheetPdfService {
     return pw.Container(
       width: 45,
       height: 45,
-      padding: const pw.EdgeInsets.all(
-        3,
-      ),
-      decoration: pw.BoxDecoration(
-        border: pw.Border.all(
-          width: 0.8,
-        ),
-      ),
+      padding: const pw.EdgeInsets.all(3),
+      decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.8)),
       child: pw.CustomPaint(
-        size: const PdfPoint(
-          39,
-          39,
-        ),
-        painter: (
-          PdfGraphics canvas,
-          PdfPoint size,
-        ) {
-          final cellSize =
-              size.x / moduleCount;
+        size: const PdfPoint(39, 39),
+        painter: (PdfGraphics canvas, PdfPoint size) {
+          final cellSize = size.x / moduleCount;
 
-          for (
-            int row = 0;
-            row < moduleCount;
-            row++
-          ) {
-            for (
-              int col = 0;
-              col < moduleCount;
-              col++
-            ) {
-              if (qrImage.isDark(
-                row,
-                col,
-              )) {
+          for (int row = 0; row < moduleCount; row++) {
+            for (int col = 0; col < moduleCount; col++) {
+              if (qrImage.isDark(row, col)) {
                 canvas
-                  ..setColor(
-                    PdfColors.black,
-                  )
+                  ..setColor(PdfColors.black)
                   ..drawRect(
                     col * cellSize,
-                    size.y -
-                        ((row + 1) *
-                            cellSize),
+                    size.y - ((row + 1) * cellSize),
                     cellSize,
                     cellSize,
                   )
@@ -1125,10 +905,7 @@ class AnswerSheetPdfService {
       height: _registrationMarkerSize,
       decoration: pw.BoxDecoration(
         color: PdfColors.black,
-        border: pw.Border.all(
-          width: 1,
-          color: PdfColors.black,
-        ),
+        border: pw.Border.all(width: 1, color: PdfColors.black),
       ),
     );
   }

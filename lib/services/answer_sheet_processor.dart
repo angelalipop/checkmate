@@ -3,806 +3,1102 @@ import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
 
-/// A point representing a detected registration marker.
 class RegistrationPoint {
   final double x;
   final double y;
 
-  const RegistrationPoint({
-    required this.x,
-    required this.y,
-  });
-
-  @override
-  String toString() {
-    return '($x, $y)';
-  }
+  const RegistrationPoint({required this.x, required this.y});
 }
 
-/// Result of answer-sheet detection and correction.
 class AnswerSheetProcessingResult {
+  final Uint8List originalImageBytes;
   final Uint8List correctedImageBytes;
   final List<RegistrationPoint> markers;
-  final int originalWidth;
-  final int originalHeight;
 
-  const AnswerSheetProcessingResult({
+  AnswerSheetProcessingResult({
+    required this.originalImageBytes,
     required this.correctedImageBytes,
     required this.markers,
-    required this.originalWidth,
-    required this.originalHeight,
   });
 }
 
-/// Handles image processing for CheckMate answer sheets.
 class AnswerSheetProcessor {
-  AnswerSheetProcessor._();
+  // ---------------------------------------------------------------------------
+  // GENERATED SHEET GEOMETRY
+  // ---------------------------------------------------------------------------
 
-  // ============================================================
-  // OUTPUT CONFIGURATION
-  // ============================================================
+  static const double _pageWidth = 397.0;
+  static const double _pageHeight = 559.0;
 
-  static const double _a5AspectRatio = 148.0 / 210.0;
+  /*
+   * PDF registration markers:
+   *
+   * marker inset = 2
+   * marker size  = 10
+   *
+   * marker center = 2 + 5 = 7
+   *
+   * TL = (7, 7)
+   * TR = (390, 7)
+   * BR = (390, 552)
+   * BL = (7, 552)
+   */
+  static const double _markerCenterInset = 7.0;
 
-  static const int _outputHeight = 2129;
-  static const int _outputWidth = 1500;
+  // Normalized image size used by the OMR processor.
+  static const int _correctedWidth = 1500;
+  static const int _correctedHeight = 2129;
 
-  // ============================================================
-  // MARKER DETECTION CONFIGURATION
-  // ============================================================
+  /*
+   * A slightly relaxed threshold helps detect markers under uneven lighting
+   * without making normal printed outlines too competitive.
+   */
+  static const double _darkThreshold = 125.0;
 
-  static const int _darkThreshold = 70;
+  // ---------------------------------------------------------------------------
+  // PUBLIC PROCESSOR
+  // ---------------------------------------------------------------------------
 
-  static const double _minimumMarkerAreaRatio = 0.00001;
-  static const double _maximumMarkerAreaRatio = 0.015;
-
-  static const double _minimumAspectRatio = 0.55;
-  static const double _maximumAspectRatio = 1.8;
-
-  /// Only candidates inside these corner regions
-  /// are considered for registration markers.
-  static const double _cornerRegionRatio = 0.25;
-
-  // ============================================================
-  // PUBLIC API
-  // ============================================================
-
-  static Future<AnswerSheetProcessingResult>
-      processAnswerSheet(Uint8List imageBytes) async {
-    final img.Image? decoded =
-        img.decodeImage(imageBytes);
+  static Future<AnswerSheetProcessingResult> processAnswerSheet(
+    Uint8List imageBytes,
+  ) async {
+    final img.Image? decoded = img.decodeImage(imageBytes);
 
     if (decoded == null) {
-      throw const FormatException(
-        'Unable to decode the answer sheet image.',
-      );
+      throw Exception('Unable to decode the selected image.');
     }
 
-    // Normalize EXIF orientation.
-    final img.Image image =
-        img.bakeOrientation(decoded);
+    // Respect EXIF / phone orientation.
+    final img.Image image = img.bakeOrientation(decoded);
 
-    // Detect markers.
-    final List<RegistrationPoint> markers =
-        _detectRegistrationMarkers(image);
+    final List<RegistrationPoint> markers = _detectRegistrationMarkers(image);
 
     if (markers.length != 4) {
-      throw StateError(
-        'Could not detect all four registration markers. '
-        'Detected ${markers.length} of 4.',
+      throw Exception(
+        'Four registration markers could not be detected. '
+        'Please make sure the entire answer sheet is visible.',
       );
     }
 
-    // Order markers.
-    final List<RegistrationPoint> ordered =
-        _orderMarkers(markers);
+    final img.Image corrected = _correctPerspective(image, markers);
 
-    // Correct perspective.
-    final img.Image corrected =
-        _correctPerspective(
-      image,
-      ordered,
-    );
-
-    final Uint8List correctedBytes =
-        Uint8List.fromList(
+    final Uint8List correctedBytes = Uint8List.fromList(
       img.encodePng(corrected),
     );
 
     return AnswerSheetProcessingResult(
+      originalImageBytes: imageBytes,
       correctedImageBytes: correctedBytes,
-      markers: ordered,
-      originalWidth: image.width,
-      originalHeight: image.height,
+      markers: markers,
     );
   }
 
-  // ============================================================
+  // ---------------------------------------------------------------------------
   // MARKER DETECTION
-  // ============================================================
+  // ---------------------------------------------------------------------------
 
-  static List<RegistrationPoint>
-      _detectRegistrationMarkers(
-    img.Image image,
-  ) {
+  static List<RegistrationPoint> _detectRegistrationMarkers(img.Image image) {
     final int width = image.width;
     final int height = image.height;
 
-    const int sampleStep = 2;
-
-    final int sampledWidth =
-        (width / sampleStep).ceil();
-
-    final int sampledHeight =
-        (height / sampleStep).ceil();
-
-    // IMPORTANT:
-    //
-    // Components are detected on the sampled image,
-    // so the area thresholds must also be based
-    // on the sampled image.
-    final int sampledTotalPixels =
-        sampledWidth * sampledHeight;
-
-    final int minimumArea = math.max(
-      4,
-      (sampledTotalPixels *
-              _minimumMarkerAreaRatio)
-          .round(),
-    );
-
-    final int maximumArea =
-        (sampledTotalPixels *
-                _maximumMarkerAreaRatio)
-            .round();
-
-    final List<bool> darkPixels =
-        List<bool>.filled(
-      sampledTotalPixels,
-      false,
-    );
-
-    // ----------------------------------------------------------
-    // Create binary image.
-    // ----------------------------------------------------------
-
-    for (int y = 0;
-        y < sampledHeight;
-        y++) {
-      final int sourceY =
-          math.min(
-        y * sampleStep,
-        height - 1,
-      );
-
-      for (int x = 0;
-          x < sampledWidth;
-          x++) {
-        final int sourceX =
-            math.min(
-          x * sampleStep,
-          width - 1,
-        );
-
-        final img.Pixel pixel =
-            image.getPixel(
-          sourceX,
-          sourceY,
-        );
-
-        final double luminance =
-            0.299 * pixel.r.toDouble() +
-                0.587 * pixel.g.toDouble() +
-                0.114 * pixel.b.toDouble();
-
-        darkPixels[
-          y * sampledWidth + x
-        ] = luminance <= _darkThreshold;
-      }
-    }
-
-    // ----------------------------------------------------------
-    // Find connected components.
-    // ----------------------------------------------------------
-
-    final List<_Component> components =
-        <_Component>[];
-
-    final List<bool> visited =
-        List<bool>.filled(
-      darkPixels.length,
-      false,
-    );
-
-    for (int y = 0;
-        y < sampledHeight;
-        y++) {
-      for (int x = 0;
-          x < sampledWidth;
-          x++) {
-        final int index =
-            y * sampledWidth + x;
-
-        if (!darkPixels[index] ||
-            visited[index]) {
-          continue;
-        }
-
-        final _Component component =
-            _floodFill(
-          darkPixels,
-          visited,
-          sampledWidth,
-          sampledHeight,
-          x,
-          y,
-        );
-
-        if (component.area < minimumArea ||
-            component.area > maximumArea) {
-          continue;
-        }
-
-        final double componentWidth =
-            (component.maxX -
-                    component.minX +
-                    1)
-                .toDouble();
-
-        final double componentHeight =
-            (component.maxY -
-                    component.minY +
-                    1)
-                .toDouble();
-
-        if (componentHeight <= 0.0) {
-          continue;
-        }
-
-        final double aspectRatio =
-            componentWidth /
-                componentHeight;
-
-        if (aspectRatio <
-                _minimumAspectRatio ||
-            aspectRatio >
-                _maximumAspectRatio) {
-          continue;
-        }
-
-        components.add(component);
-      }
-    }
-
-    if (components.isEmpty) {
-      return <RegistrationPoint>[];
-    }
-
-    // ----------------------------------------------------------
-    // Convert to candidates.
-    // ----------------------------------------------------------
-
-    final List<_MarkerCandidate> candidates =
-        components.map(
-      (_Component component) {
-        final double centerX =
-            ((component.minX +
-                        component.maxX) /
-                    2.0) *
-                sampleStep.toDouble();
-
-        final double centerY =
-            ((component.minY +
-                        component.maxY) /
-                    2.0) *
-                sampleStep.toDouble();
-
-        return _MarkerCandidate(
-          point: RegistrationPoint(
-            x: centerX,
-            y: centerY,
-          ),
-          area: component.area,
-          width:
-              (component.maxX -
-                      component.minX +
-                      1) *
-                  sampleStep.toDouble(),
-          height:
-              (component.maxY -
-                      component.minY +
-                      1) *
-                  sampleStep.toDouble(),
-        );
-      },
-    ).toList();
-
-    // ----------------------------------------------------------
-    // Select one marker from each corner region.
-    // ----------------------------------------------------------
-
-    final List<_MarkerCandidate> selected =
-        _selectCornerCandidates(
-      candidates,
-      width.toDouble(),
-      height.toDouble(),
-    );
-
-    return selected
-        .map(
-          (_MarkerCandidate candidate) =>
-              candidate.point,
-        )
-        .toList();
-  }
-
-  // ============================================================
-  // FLOOD FILL
-  // ============================================================
-
-  static _Component _floodFill(
-    List<bool> pixels,
-    List<bool> visited,
-    int width,
-    int height,
-    int startX,
-    int startY,
-  ) {
-    final List<_GridPoint> queue =
-        <_GridPoint>[
-      _GridPoint(
-        startX,
-        startY,
+    /*
+     * Search reasonably large corner regions.
+     *
+     * This allows perspective / rotation while still keeping most answer
+     * bubbles away from the candidate search areas.
+     */
+    final List<_CornerRegion> regions = <_CornerRegion>[
+      _CornerRegion(
+        name: 'Top Left',
+        minX: 0,
+        maxX: width * 0.40,
+        minY: 0,
+        maxY: height * 0.40,
+        cornerX: 0,
+        cornerY: 0,
+      ),
+      _CornerRegion(
+        name: 'Top Right',
+        minX: width * 0.60,
+        maxX: width.toDouble(),
+        minY: 0,
+        maxY: height * 0.40,
+        cornerX: width.toDouble(),
+        cornerY: 0,
+      ),
+      _CornerRegion(
+        name: 'Bottom Right',
+        minX: width * 0.60,
+        maxX: width.toDouble(),
+        minY: height * 0.60,
+        maxY: height.toDouble(),
+        cornerX: width.toDouble(),
+        cornerY: height.toDouble(),
+      ),
+      _CornerRegion(
+        name: 'Bottom Left',
+        minX: 0,
+        maxX: width * 0.40,
+        minY: height * 0.60,
+        maxY: height.toDouble(),
+        cornerX: 0,
+        cornerY: height.toDouble(),
       ),
     ];
 
-    visited[
-      startY * width + startX
-    ] = true;
+    final List<List<_MarkerCandidate>> candidatesByCorner =
+        <List<_MarkerCandidate>>[];
 
-    int minX = startX;
-    int maxX = startX;
-    int minY = startY;
-    int maxY = startY;
+    for (final _CornerRegion region in regions) {
+      final List<_MarkerCandidate> candidates = _findCandidates(image, region);
 
-    int area = 0;
-    int queueIndex = 0;
+      if (candidates.isEmpty) {
+        throw Exception(
+          '${region.name} registration marker could not be detected.',
+        );
+      }
 
-    while (queueIndex < queue.length) {
-      final _GridPoint current =
-          queue[queueIndex++];
+      candidatesByCorner.add(candidates);
+    }
 
-      final int x = current.x;
-      final int y = current.y;
+    /*
+     * Do not choose each corner independently.
+     *
+     * Select the four markers as a SET so their sizes and page geometry can
+     * also be compared.
+     */
+    final _MarkerSet? bestSet = _selectBestMarkerSet(image, candidatesByCorner);
 
-      area++;
-
-      minX = math.min(
-        minX,
-        x,
+    if (bestSet == null) {
+      throw Exception(
+        'The four registration markers could not be matched reliably. '
+        'Please make sure the entire answer sheet is visible.',
       );
+    }
 
-      maxX = math.max(
-        maxX,
-        x,
-      );
+    return <RegistrationPoint>[
+      RegistrationPoint(x: bestSet.topLeft.centerX, y: bestSet.topLeft.centerY),
+      RegistrationPoint(
+        x: bestSet.topRight.centerX,
+        y: bestSet.topRight.centerY,
+      ),
+      RegistrationPoint(
+        x: bestSet.bottomRight.centerX,
+        y: bestSet.bottomRight.centerY,
+      ),
+      RegistrationPoint(
+        x: bestSet.bottomLeft.centerX,
+        y: bestSet.bottomLeft.centerY,
+      ),
+    ];
+  }
 
-      minY = math.min(
-        minY,
-        y,
-      );
+  static List<_MarkerCandidate> _findCandidates(
+    img.Image image,
+    _CornerRegion region,
+  ) {
+    final int minX = math.max(0, region.minX.floor());
 
-      maxY = math.max(
-        maxY,
-        y,
-      );
+    final int maxX = math.min(image.width - 1, region.maxX.ceil());
 
-      const List<List<int>> directions =
-          <List<int>>[
-        <int>[1, 0],
-        <int>[-1, 0],
-        <int>[0, 1],
-        <int>[0, -1],
-      ];
+    final int minY = math.max(0, region.minY.floor());
 
-      for (final List<int> direction
-          in directions) {
-        final int nextX =
-            x + direction[0];
+    final int maxY = math.min(image.height - 1, region.maxY.ceil());
 
-        final int nextY =
-            y + direction[1];
+    final Set<int> visited = <int>{};
 
-        if (nextX < 0 ||
-            nextX >= width ||
-            nextY < 0 ||
-            nextY >= height) {
+    final List<_MarkerCandidate> candidates = <_MarkerCandidate>[];
+
+    for (int y = minY; y <= maxY; y++) {
+      for (int x = minX; x <= maxX; x++) {
+        final int key = y * image.width + x;
+
+        if (visited.contains(key)) {
           continue;
         }
 
-        final int nextIndex =
-            nextY * width + nextX;
-
-        if (!pixels[nextIndex] ||
-            visited[nextIndex]) {
+        if (!_isDark(image, x, y)) {
           continue;
         }
 
-        visited[nextIndex] = true;
+        final _Component component = _floodFill(
+          image,
+          x,
+          y,
+          minX,
+          maxX,
+          minY,
+          maxY,
+          visited,
+        );
 
-        queue.add(
-          _GridPoint(
-            nextX,
-            nextY,
+        /*
+         * Ignore tiny image noise.
+         */
+        if (component.area < 20) {
+          continue;
+        }
+
+        /*
+         * Ignore extremely large connected regions.
+         */
+        if (component.area > 100000) {
+          continue;
+        }
+
+        final double componentWidth = component.maxX - component.minX + 1.0;
+
+        final double componentHeight = component.maxY - component.minY + 1.0;
+
+        if (componentWidth < 3 || componentHeight < 3) {
+          continue;
+        }
+
+        final double aspectRatio = componentWidth / componentHeight;
+
+        /*
+         * Registration markers are square, but photographed squares may be
+         * distorted by perspective.
+         */
+        if (aspectRatio < 0.50 || aspectRatio > 2.00) {
+          continue;
+        }
+
+        final double boundingArea = componentWidth * componentHeight;
+
+        final double fillRatio = component.area / boundingArea;
+
+        /*
+         * Marker is filled black.
+         *
+         * 0.40 is deliberately tolerant of blur and lighting.
+         */
+        if (fillRatio < 0.40) {
+          continue;
+        }
+
+        final double centerX = (component.minX + component.maxX) / 2.0;
+
+        final double centerY = (component.minY + component.maxY) / 2.0;
+
+        final double distanceToCorner = _distance(
+          centerX,
+          centerY,
+          region.cornerX,
+          region.cornerY,
+        );
+
+        candidates.add(
+          _MarkerCandidate(
+            centerX: centerX,
+            centerY: centerY,
+            area: component.area,
+            width: componentWidth,
+            height: componentHeight,
+            fillRatio: fillRatio,
+            distanceToCorner: distanceToCorner,
           ),
         );
       }
     }
 
-    return _Component(
-      area: area,
-      minX: minX,
-      maxX: maxX,
-      minY: minY,
-      maxY: maxY,
-    );
+    /*
+     * Keep several possible markers.
+     *
+     * Final selection happens later using all four corners together.
+     */
+    candidates.sort((_MarkerCandidate a, _MarkerCandidate b) {
+      return a.individualScore.compareTo(b.individualScore);
+    });
+
+    const int maxCandidates = 12;
+
+    if (candidates.length > maxCandidates) {
+      return candidates.take(maxCandidates).toList();
+    }
+
+    return candidates;
   }
 
-  // ============================================================
-  // CORNER SELECTION
-  // ============================================================
+  // ---------------------------------------------------------------------------
+  // FOUR-MARKER SELECTION
+  // ---------------------------------------------------------------------------
 
-  static List<_MarkerCandidate>
-      _selectCornerCandidates(
-    List<_MarkerCandidate> candidates,
-    double width,
-    double height,
+  static _MarkerSet? _selectBestMarkerSet(
+    img.Image image,
+    List<List<_MarkerCandidate>> candidates,
   ) {
-    if (candidates.length < 4) {
-      return <_MarkerCandidate>[];
+    if (candidates.length != 4) {
+      return null;
     }
 
-    final double cornerWidth =
-        width * _cornerRegionRatio;
+    _MarkerSet? best;
 
-    final double cornerHeight =
-        height * _cornerRegionRatio;
+    for (final _MarkerCandidate tl in candidates[0]) {
+      for (final _MarkerCandidate tr in candidates[1]) {
+        for (final _MarkerCandidate br in candidates[2]) {
+          for (final _MarkerCandidate bl in candidates[3]) {
+            final _MarkerSet set = _MarkerSet(
+              topLeft: tl,
+              topRight: tr,
+              bottomRight: br,
+              bottomLeft: bl,
+            );
 
-    final _MarkerCandidate? topLeft =
-        _findBestCandidateInRegion(
-      candidates,
-      minX: 0.0,
-      maxX: cornerWidth,
-      minY: 0.0,
-      maxY: cornerHeight,
-    );
+            if (!_isPlausibleMarkerSet(image, set)) {
+              continue;
+            }
 
-    final _MarkerCandidate? topRight =
-        _findBestCandidateInRegion(
-      candidates,
-      minX: width - cornerWidth,
-      maxX: width,
-      minY: 0.0,
-      maxY: cornerHeight,
-      excluded: <_MarkerCandidate>[
-        if (topLeft != null) topLeft,
-      ],
-    );
-
-    final _MarkerCandidate? bottomLeft =
-        _findBestCandidateInRegion(
-      candidates,
-      minX: 0.0,
-      maxX: cornerWidth,
-      minY: height - cornerHeight,
-      maxY: height,
-      excluded: <_MarkerCandidate>[
-        if (topLeft != null) topLeft,
-        if (topRight != null) topRight,
-      ],
-    );
-
-    final _MarkerCandidate? bottomRight =
-        _findBestCandidateInRegion(
-      candidates,
-      minX: width - cornerWidth,
-      maxX: width,
-      minY: height - cornerHeight,
-      maxY: height,
-      excluded: <_MarkerCandidate>[
-        if (topLeft != null) topLeft,
-        if (topRight != null) topRight,
-        if (bottomLeft != null) bottomLeft,
-      ],
-    );
-
-    if (topLeft == null ||
-        topRight == null ||
-        bottomLeft == null ||
-        bottomRight == null) {
-      return <_MarkerCandidate>[];
-    }
-
-    return <_MarkerCandidate>[
-      topLeft,
-      topRight,
-      bottomRight,
-      bottomLeft,
-    ];
-  }
-
-  static _MarkerCandidate?
-      _findBestCandidateInRegion(
-    List<_MarkerCandidate> candidates, {
-    required double minX,
-    required double maxX,
-    required double minY,
-    required double maxY,
-    List<_MarkerCandidate> excluded =
-        const <_MarkerCandidate>[],
-  }) {
-    _MarkerCandidate? best;
-    double bestScore = double.infinity;
-
-    final double targetX =
-        (minX + maxX) / 2.0;
-
-    final double targetY =
-        (minY + maxY) / 2.0;
-
-    final double regionWidth =
-        maxX - minX;
-
-    final double regionHeight =
-        maxY - minY;
-
-    final double diagonal =
-        math.sqrt(
-      regionWidth * regionWidth +
-          regionHeight * regionHeight,
-    );
-
-    for (final _MarkerCandidate candidate
-        in candidates) {
-      if (excluded.contains(candidate)) {
-        continue;
-      }
-
-      final double x =
-          candidate.point.x;
-
-      final double y =
-          candidate.point.y;
-
-      // Candidate must actually be inside
-      // this corner region.
-      if (x < minX ||
-          x > maxX ||
-          y < minY ||
-          y > maxY) {
-        continue;
-      }
-
-      final double dx =
-          x - targetX;
-
-      final double dy =
-          y - targetY;
-
-      final double distance =
-          math.sqrt(
-        dx * dx + dy * dy,
-      );
-
-      final double normalizedDistance =
-          diagonal > 0.0
-              ? distance / diagonal
-              : distance;
-
-      // Prefer approximately square markers.
-      final double shapePenalty =
-          (candidate.width -
-                      candidate.height)
-                  .abs() /
-              math.max(
-                candidate.width,
-                candidate.height,
-              );
-
-      final double score =
-          normalizedDistance +
-              shapePenalty * 0.35;
-
-      if (score < bestScore) {
-        bestScore = score;
-        best = candidate;
+            if (best == null || set.score < best.score) {
+              best = set;
+            }
+          }
+        }
       }
     }
 
     return best;
   }
 
-  // ============================================================
-  // MARKER ORDERING
-  // ============================================================
+  static bool _isPlausibleMarkerSet(img.Image image, _MarkerSet set) {
+    // -----------------------------------------------------------------------
+    // CORRECT CORNER ORDER
+    // -----------------------------------------------------------------------
 
-  static List<RegistrationPoint>
-      _orderMarkers(
-    List<RegistrationPoint> points,
-  ) {
-    if (points.length != 4) {
-      throw StateError(
-        'Exactly four registration markers are required.',
-      );
+    if (set.topLeft.centerX >= set.topRight.centerX) {
+      return false;
     }
 
-    // Because candidates are now explicitly selected
-    // from corner regions, we can safely determine
-    // their final positions using X/Y.
+    if (set.bottomLeft.centerX >= set.bottomRight.centerX) {
+      return false;
+    }
 
-    final List<RegistrationPoint> sorted =
-        List<RegistrationPoint>.from(points)
-          ..sort(
-            (
-              RegistrationPoint a,
-              RegistrationPoint b,
-            ) {
-              return a.y.compareTo(
-                b.y,
-              );
-            },
-          );
+    if (set.topLeft.centerY >= set.bottomLeft.centerY) {
+      return false;
+    }
 
-    final List<RegistrationPoint> top =
-        sorted.sublist(0, 2);
+    if (set.topRight.centerY >= set.bottomRight.centerY) {
+      return false;
+    }
 
-    final List<RegistrationPoint> bottom =
-        sorted.sublist(2, 4);
+    // -----------------------------------------------------------------------
+    // EDGE LENGTHS
+    // -----------------------------------------------------------------------
 
-    top.sort(
-      (
-        RegistrationPoint a,
-        RegistrationPoint b,
-      ) {
-        return a.x.compareTo(
-          b.x,
-        );
-      },
+    final double topWidth = _distance(
+      set.topLeft.centerX,
+      set.topLeft.centerY,
+      set.topRight.centerX,
+      set.topRight.centerY,
     );
 
-    bottom.sort(
-      (
-        RegistrationPoint a,
-        RegistrationPoint b,
-      ) {
-        return a.x.compareTo(
-          b.x,
-        );
-      },
+    final double bottomWidth = _distance(
+      set.bottomLeft.centerX,
+      set.bottomLeft.centerY,
+      set.bottomRight.centerX,
+      set.bottomRight.centerY,
     );
 
-    return <RegistrationPoint>[
-      top[0],
-      top[1],
-      bottom[1],
-      bottom[0],
+    final double leftHeight = _distance(
+      set.topLeft.centerX,
+      set.topLeft.centerY,
+      set.bottomLeft.centerX,
+      set.bottomLeft.centerY,
+    );
+
+    final double rightHeight = _distance(
+      set.topRight.centerX,
+      set.topRight.centerY,
+      set.bottomRight.centerX,
+      set.bottomRight.centerY,
+    );
+
+    /*
+     * The four markers should span a substantial portion of the photo.
+     *
+     * This prevents a small group of answer bubbles from being selected.
+     */
+    if (topWidth < image.width * 0.30) {
+      return false;
+    }
+
+    if (bottomWidth < image.width * 0.30) {
+      return false;
+    }
+
+    if (leftHeight < image.height * 0.30) {
+      return false;
+    }
+
+    if (rightHeight < image.height * 0.30) {
+      return false;
+    }
+
+    // -----------------------------------------------------------------------
+    // PERSPECTIVE TOLERANCE
+    // -----------------------------------------------------------------------
+
+    final double horizontalRatio =
+        math.max(topWidth, bottomWidth) / math.min(topWidth, bottomWidth);
+
+    final double verticalRatio =
+        math.max(leftHeight, rightHeight) / math.min(leftHeight, rightHeight);
+
+    if (horizontalRatio > 2.25) {
+      return false;
+    }
+
+    if (verticalRatio > 2.25) {
+      return false;
+    }
+
+    // -----------------------------------------------------------------------
+    // MARKER SIZE CONSISTENCY
+    // -----------------------------------------------------------------------
+
+    final List<double> sizes = <double>[
+      set.topLeft.averageSize,
+      set.topRight.averageSize,
+      set.bottomRight.averageSize,
+      set.bottomLeft.averageSize,
     ];
+
+    final double smallest = sizes.reduce(math.min);
+
+    final double largest = sizes.reduce(math.max);
+
+    if (smallest <= 0) {
+      return false;
+    }
+
+    /*
+     * Fairly tolerant because perspective can make markers closer to the
+     * camera appear larger.
+     */
+    if (largest / smallest > 2.5) {
+      return false;
+    }
+
+    // -----------------------------------------------------------------------
+    // QUADRILATERAL AREA
+    // -----------------------------------------------------------------------
+
+    final double pageArea = _quadrilateralArea(
+      set.topLeft,
+      set.topRight,
+      set.bottomRight,
+      set.bottomLeft,
+    );
+
+    final double imageArea = image.width.toDouble() * image.height.toDouble();
+
+    /*
+     * The selected markers should surround a meaningful portion of the image.
+     */
+    if (pageArea < imageArea * 0.15) {
+      return false;
+    }
+
+    return true;
   }
 
-  // ============================================================
-  // PERSPECTIVE CORRECTION
-  // ============================================================
-
-    static img.Image _correctPerspective(
-    img.Image source,
-    List<RegistrationPoint> markers,
+  static double _quadrilateralArea(
+    _MarkerCandidate tl,
+    _MarkerCandidate tr,
+    _MarkerCandidate br,
+    _MarkerCandidate bl,
   ) {
-    final tl = markers[0];
-    final tr = markers[1];
-    final br = markers[2];
-    final bl = markers[3];
+    final List<_Point2D> points = <_Point2D>[
+      _Point2D(tl.centerX, tl.centerY),
+      _Point2D(tr.centerX, tr.centerY),
+      _Point2D(br.centerX, br.centerY),
+      _Point2D(bl.centerX, bl.centerY),
+    ];
 
-    const outputWidth = 1500;
-    const outputHeight = 2129;
+    double sum = 0.0;
 
-    // The registration markers are NOT the actual page corners.
-    // They are inset from the physical edges of the answer sheet.
-    //
-    // Expand the marker quadrilateral outward before rectification.
-    // This keeps content such as the QR code inside the corrected page.
+    for (int i = 0; i < points.length; i++) {
+      final _Point2D current = points[i];
 
-    final centerX = (tl.x + tr.x + br.x + bl.x) / 4;
-    final centerY = (tl.y + tr.y + br.y + bl.y) / 4;
+      final _Point2D next = points[(i + 1) % points.length];
 
-    // Increase these if content is still being clipped.
-    const horizontalExpansion = 0.10;
-    const verticalExpansion = 0.10;
-
-    img.Point expandPoint(
-      double x,
-      double y,
-      double horizontal,
-      double vertical,
-    ) {
-      final dx = x - centerX;
-      final dy = y - centerY;
-
-      return img.Point(
-        centerX + dx * (1 + horizontal),
-        centerY + dy * (1 + vertical),
-      );
+      sum += current.x * next.y - next.x * current.y;
     }
 
-    final expandedTL = expandPoint(
-      tl.x,
-      tl.y,
-      horizontalExpansion,
-      verticalExpansion,
+    return sum.abs() / 2.0;
+  }
+
+  // ---------------------------------------------------------------------------
+  // DARK PIXEL CHECK
+  // ---------------------------------------------------------------------------
+
+  static bool _isDark(img.Image image, int x, int y) {
+    final img.Pixel pixel = image.getPixel(x, y);
+
+    final double luminance =
+        (0.299 * pixel.r) + (0.587 * pixel.g) + (0.114 * pixel.b);
+
+    return luminance < _darkThreshold;
+  }
+
+  // ---------------------------------------------------------------------------
+  // FLOOD FILL
+  // ---------------------------------------------------------------------------
+
+  static _Component _floodFill(
+    img.Image image,
+    int startX,
+    int startY,
+    int minX,
+    int maxX,
+    int minY,
+    int maxY,
+    Set<int> visited,
+  ) {
+    final List<_PixelPoint> queue = <_PixelPoint>[_PixelPoint(startX, startY)];
+
+    visited.add(startY * image.width + startX);
+
+    int area = 0;
+
+    int componentMinX = startX;
+    int componentMaxX = startX;
+
+    int componentMinY = startY;
+    int componentMaxY = startY;
+
+    int queueIndex = 0;
+
+    const int maxComponentPixels = 200000;
+
+    while (queueIndex < queue.length) {
+      final _PixelPoint point = queue[queueIndex++];
+
+      area++;
+
+      componentMinX = math.min(componentMinX, point.x);
+
+      componentMaxX = math.max(componentMaxX, point.x);
+
+      componentMinY = math.min(componentMinY, point.y);
+
+      componentMaxY = math.max(componentMaxY, point.y);
+
+      if (area >= maxComponentPixels) {
+        break;
+      }
+
+      final List<_PixelPoint> neighbors = <_PixelPoint>[
+        _PixelPoint(point.x + 1, point.y),
+        _PixelPoint(point.x - 1, point.y),
+        _PixelPoint(point.x, point.y + 1),
+        _PixelPoint(point.x, point.y - 1),
+      ];
+
+      for (final _PixelPoint neighbor in neighbors) {
+        if (neighbor.x < minX ||
+            neighbor.x > maxX ||
+            neighbor.y < minY ||
+            neighbor.y > maxY) {
+          continue;
+        }
+
+        final int key = neighbor.y * image.width + neighbor.x;
+
+        if (visited.contains(key)) {
+          continue;
+        }
+
+        if (!_isDark(image, neighbor.x, neighbor.y)) {
+          continue;
+        }
+
+        visited.add(key);
+        queue.add(neighbor);
+      }
+    }
+
+    return _Component(
+      area: area,
+      minX: componentMinX,
+      maxX: componentMaxX,
+      minY: componentMinY,
+      maxY: componentMaxY,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // PERSPECTIVE CORRECTION
+  // ---------------------------------------------------------------------------
+
+  static img.Image _correctPerspective(
+    img.Image image,
+    List<RegistrationPoint> markers,
+  ) {
+    if (markers.length != 4) {
+      throw Exception('Perspective correction requires exactly four markers.');
+    }
+
+    /*
+    * -------------------------------------------------------------------------
+    * IMPORTANT
+    * -------------------------------------------------------------------------
+    *
+    * We DO NOT estimate the physical paper corners anymore.
+    *
+    * The four registration-marker CENTERS are now the coordinate anchors.
+    *
+    * Generated answer-sheet coordinates:
+    *
+    * TL = (7, 7)
+    * TR = (390, 7)
+    * BR = (390, 552)
+    * BL = (7, 552)
+    *
+    * Therefore the known marker-to-marker region is:
+    *
+    * width  = 390 - 7 = 383 units
+    * height = 552 - 7 = 545 units
+    *
+    * We rectify that region directly and then place it inside a clean
+    * 397 x 559 logical canvas.
+    *
+    * This avoids extrapolating from the markers to uncertain photographed
+    * paper edges.
+    * -------------------------------------------------------------------------
+    */
+
+    final RegistrationPoint topLeft = markers[0];
+    final RegistrationPoint topRight = markers[1];
+    final RegistrationPoint bottomRight = markers[2];
+    final RegistrationPoint bottomLeft = markers[3];
+
+    // -------------------------------------------------------------------------
+    // FULL NORMALIZED OUTPUT
+    // -------------------------------------------------------------------------
+
+    const int outputWidth = _correctedWidth;
+    const int outputHeight = _correctedHeight;
+
+    /*
+    * Scale factors from the generated PDF coordinate system to pixels.
+    *
+    * 397 logical units -> 1500 pixels
+    * 559 logical units -> 2129 pixels
+    */
+    const double scaleX = outputWidth / _pageWidth;
+
+    const double scaleY = outputHeight / _pageHeight;
+
+    /*
+    * Marker centers in the final normalized image.
+    */
+    final int destinationLeft = (_markerCenterInset * scaleX).round();
+
+    final int destinationTop = (_markerCenterInset * scaleY).round();
+
+    final int destinationRight = ((_pageWidth - _markerCenterInset) * scaleX)
+        .round();
+
+    final int destinationBottom = ((_pageHeight - _markerCenterInset) * scaleY)
+        .round();
+
+    /*
+    * Size of the marker-center-to-marker-center rectangle.
+    */
+    final int rectifiedWidth = destinationRight - destinationLeft;
+
+    final int rectifiedHeight = destinationBottom - destinationTop;
+
+    if (rectifiedWidth <= 0 || rectifiedHeight <= 0) {
+      throw Exception('Invalid normalized marker geometry.');
+    }
+
+    // -------------------------------------------------------------------------
+    // DIRECT MARKER-TO-MARKER RECTIFICATION
+    // -------------------------------------------------------------------------
+
+    /*
+    * copyRectify maps:
+    *
+    * detected TL marker center -> top-left of intermediate image
+    * detected TR marker center -> top-right
+    * detected BL marker center -> bottom-left
+    * detected BR marker center -> bottom-right
+    *
+    * No paper-edge extrapolation happens here.
+    */
+
+    final img.Image rectifiedMarkerRegion = img.copyRectify(
+      image,
+      topLeft: img.Point(topLeft.x.round(), topLeft.y.round()),
+      topRight: img.Point(topRight.x.round(), topRight.y.round()),
+      bottomLeft: img.Point(bottomLeft.x.round(), bottomLeft.y.round()),
+      bottomRight: img.Point(bottomRight.x.round(), bottomRight.y.round()),
+      interpolation: img.Interpolation.linear,
+      toImage: img.Image(width: rectifiedWidth, height: rectifiedHeight),
     );
 
-    final expandedTR = expandPoint(
-      tr.x,
-      tr.y,
-      horizontalExpansion,
-      verticalExpansion,
-    );
+    // -------------------------------------------------------------------------
+    // CREATE FULL NORMALIZED SHEET
+    // -------------------------------------------------------------------------
 
-    final expandedBR = expandPoint(
-      br.x,
-      br.y,
-      horizontalExpansion,
-      verticalExpansion,
-    );
+    /*
+    * The area outside the registration-marker centers is intentionally
+    * synthetic white space.
+    *
+    * We know from the PDF generator that each marker center is exactly
+    * 7 logical units from its corresponding page edge.
+    *
+    * We therefore do not need to guess where the photographed paper edge is.
+    */
 
-    final expandedBL = expandPoint(
-      bl.x,
-      bl.y,
-      horizontalExpansion,
-      verticalExpansion,
-    );
-
-    final corrected = img.copyRectify(
-      source,
-      topLeft: expandedTL,
-      topRight: expandedTR,
-      bottomRight: expandedBR,
-      bottomLeft: expandedBL,
-    );
-
-    return img.copyResize(
-      corrected,
+    final img.Image normalized = img.Image(
       width: outputWidth,
       height: outputHeight,
     );
+
+    // Make the whole normalized sheet white.
+    img.fill(normalized, color: img.ColorRgb8(255, 255, 255));
+
+    // -------------------------------------------------------------------------
+    // PLACE RECTIFIED REGION AT ITS EXACT LOGICAL POSITION
+    // -------------------------------------------------------------------------
+
+    img.compositeImage(
+      normalized,
+      rectifiedMarkerRegion,
+      dstX: destinationLeft,
+      dstY: destinationTop,
+    );
+
+    return normalized;
   }
 
-  // ============================================================
-  // A5 ASPECT RATIO
-  // ============================================================
+  // ---------------------------------------------------------------------------
+  // HOMOGRAPHY
+  // ---------------------------------------------------------------------------
 
-  static double get a5AspectRatio {
-    return _a5AspectRatio;
+  static List<double> _solveHomography(
+    List<_Point2D> source,
+    List<_Point2D> destination,
+  ) {
+    if (source.length != 4 || destination.length != 4) {
+      throw Exception('Homography requires exactly four point pairs.');
+    }
+
+    final List<List<double>> matrix = List<List<double>>.generate(
+      8,
+      (_) => List<double>.filled(9, 0),
+    );
+
+    for (int i = 0; i < 4; i++) {
+      final double x = source[i].x;
+      final double y = source[i].y;
+
+      final double u = destination[i].x;
+      final double v = destination[i].y;
+
+      final int row1 = i * 2;
+      final int row2 = row1 + 1;
+
+      matrix[row1][0] = x;
+      matrix[row1][1] = y;
+      matrix[row1][2] = 1;
+
+      matrix[row1][3] = 0;
+      matrix[row1][4] = 0;
+      matrix[row1][5] = 0;
+
+      matrix[row1][6] = -u * x;
+      matrix[row1][7] = -u * y;
+      matrix[row1][8] = u;
+
+      matrix[row2][0] = 0;
+      matrix[row2][1] = 0;
+      matrix[row2][2] = 0;
+
+      matrix[row2][3] = x;
+      matrix[row2][4] = y;
+      matrix[row2][5] = 1;
+
+      matrix[row2][6] = -v * x;
+      matrix[row2][7] = -v * y;
+      matrix[row2][8] = v;
+    }
+
+    for (int column = 0; column < 8; column++) {
+      int pivot = column;
+
+      for (int row = column + 1; row < 8; row++) {
+        if (matrix[row][column].abs() > matrix[pivot][column].abs()) {
+          pivot = row;
+        }
+      }
+
+      if (matrix[pivot][column].abs() < 1e-12) {
+        throw Exception('Unable to calculate perspective transform.');
+      }
+
+      if (pivot != column) {
+        final List<double> temp = matrix[column];
+
+        matrix[column] = matrix[pivot];
+        matrix[pivot] = temp;
+      }
+
+      final double divisor = matrix[column][column];
+
+      for (int j = column; j < 9; j++) {
+        matrix[column][j] /= divisor;
+      }
+
+      for (int row = 0; row < 8; row++) {
+        if (row == column) {
+          continue;
+        }
+
+        final double factor = matrix[row][column];
+
+        if (factor.abs() < 1e-15) {
+          continue;
+        }
+
+        for (int j = column; j < 9; j++) {
+          matrix[row][j] -= factor * matrix[column][j];
+        }
+      }
+    }
+
+    return <double>[
+      matrix[0][8],
+      matrix[1][8],
+      matrix[2][8],
+      matrix[3][8],
+      matrix[4][8],
+      matrix[5][8],
+      matrix[6][8],
+      matrix[7][8],
+      1.0,
+    ];
+  }
+
+  static List<double> _invertHomography(List<double> h) {
+    final double a = h[0];
+    final double b = h[1];
+    final double c = h[2];
+
+    final double d = h[3];
+    final double e = h[4];
+    final double f = h[5];
+
+    final double g = h[6];
+    final double k = h[7];
+    final double l = h[8];
+
+    final double determinant =
+        a * (e * l - f * k) - b * (d * l - f * g) + c * (d * k - e * g);
+
+    if (determinant.abs() < 1e-12) {
+      throw Exception('Perspective transform cannot be inverted.');
+    }
+
+    return <double>[
+      (e * l - f * k) / determinant,
+      (c * k - b * l) / determinant,
+      (b * f - c * e) / determinant,
+
+      (f * g - d * l) / determinant,
+      (a * l - c * g) / determinant,
+      (c * d - a * f) / determinant,
+
+      (d * k - e * g) / determinant,
+      (b * g - a * k) / determinant,
+      (a * e - b * d) / determinant,
+    ];
+  }
+
+  static _Point2D _applyHomography(List<double> h, _Point2D point) {
+    final double denominator = h[6] * point.x + h[7] * point.y + h[8];
+
+    if (denominator.abs() < 1e-12) {
+      throw Exception('Invalid perspective transform.');
+    }
+
+    final double x = (h[0] * point.x + h[1] * point.y + h[2]) / denominator;
+
+    final double y = (h[3] * point.x + h[4] * point.y + h[5]) / denominator;
+
+    return _Point2D(x, y);
+  }
+
+  // ---------------------------------------------------------------------------
+  // HELPERS
+  // ---------------------------------------------------------------------------
+
+  static double _distance(double x1, double y1, double x2, double y2) {
+    final double dx = x2 - x1;
+    final double dy = y2 - y1;
+
+    return math.sqrt(dx * dx + dy * dy);
   }
 }
 
-// ============================================================
-// INTERNAL HELPER CLASSES
-// ============================================================
+// -----------------------------------------------------------------------------
+// SUPPORT CLASSES
+// -----------------------------------------------------------------------------
 
-class _GridPoint {
+class _Point2D {
+  final double x;
+  final double y;
+
+  const _Point2D(this.x, this.y);
+}
+
+class _PixelPoint {
   final int x;
   final int y;
 
-  const _GridPoint(
-    this.x,
-    this.y,
-  );
+  const _PixelPoint(this.x, this.y);
+}
+
+class _CornerRegion {
+  final String name;
+
+  final double minX;
+  final double maxX;
+
+  final double minY;
+  final double maxY;
+
+  final double cornerX;
+  final double cornerY;
+
+  const _CornerRegion({
+    required this.name,
+    required this.minX,
+    required this.maxX,
+    required this.minY,
+    required this.maxY,
+    required this.cornerX,
+    required this.cornerY,
+  });
+}
+
+class _MarkerCandidate {
+  final double centerX;
+  final double centerY;
+
+  final int area;
+
+  final double width;
+  final double height;
+
+  final double fillRatio;
+
+  final double distanceToCorner;
+
+  const _MarkerCandidate({
+    required this.centerX,
+    required this.centerY,
+    required this.area,
+    required this.width,
+    required this.height,
+    required this.fillRatio,
+    required this.distanceToCorner,
+  });
+
+  double get averageSize => (width + height) / 2.0;
+
+  double get individualScore {
+    /*
+     * Prefer:
+     *
+     * - objects near the appropriate image corner
+     * - square objects
+     * - strongly filled objects
+     */
+    final double squarePenalty = (width - height).abs() * 2.0;
+
+    final double fillPenalty = (1.0 - fillRatio) * 80.0;
+
+    return distanceToCorner + squarePenalty + fillPenalty;
+  }
+}
+
+class _MarkerSet {
+  final _MarkerCandidate topLeft;
+  final _MarkerCandidate topRight;
+  final _MarkerCandidate bottomRight;
+  final _MarkerCandidate bottomLeft;
+
+  const _MarkerSet({
+    required this.topLeft,
+    required this.topRight,
+    required this.bottomRight,
+    required this.bottomLeft,
+  });
+
+  double get score {
+    final List<_MarkerCandidate> markers = <_MarkerCandidate>[
+      topLeft,
+      topRight,
+      bottomRight,
+      bottomLeft,
+    ];
+
+    double total = 0.0;
+
+    // Individual candidate quality.
+    for (final _MarkerCandidate marker in markers) {
+      total += marker.individualScore;
+    }
+
+    // -----------------------------------------------------------------------
+    // SIZE CONSISTENCY
+    // -----------------------------------------------------------------------
+
+    final double averageSize =
+        markers.fold<double>(
+          0.0,
+          (double sum, _MarkerCandidate marker) => sum + marker.averageSize,
+        ) /
+        markers.length;
+
+    if (averageSize > 0) {
+      for (final _MarkerCandidate marker in markers) {
+        final double relativeDifference =
+            (marker.averageSize - averageSize).abs() / averageSize;
+
+        total += relativeDifference * 300.0;
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // FILL CONSISTENCY
+    // -----------------------------------------------------------------------
+
+    final double averageFill =
+        markers.fold<double>(
+          0.0,
+          (double sum, _MarkerCandidate marker) => sum + marker.fillRatio,
+        ) /
+        markers.length;
+
+    for (final _MarkerCandidate marker in markers) {
+      total += (marker.fillRatio - averageFill).abs() * 100.0;
+    }
+
+    return total;
+  }
 }
 
 class _Component {
   final int area;
+
   final int minX;
   final int maxX;
+
   final int minY;
   final int maxY;
 
@@ -812,19 +1108,5 @@ class _Component {
     required this.maxX,
     required this.minY,
     required this.maxY,
-  });
-}
-
-class _MarkerCandidate {
-  final RegistrationPoint point;
-  final int area;
-  final double width;
-  final double height;
-
-  const _MarkerCandidate({
-    required this.point,
-    required this.area,
-    required this.width,
-    required this.height,
   });
 }

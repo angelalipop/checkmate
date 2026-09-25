@@ -3,8 +3,10 @@ import 'dart:typed_data';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
-import '../services/answer_sheet_processor.dart';
+import 'package:checkmate/services/answer_sheet_processor.dart';
+
 import '../services/omr_processor.dart';
+import '../services/scoring_service.dart';
 
 class AnswerSheetUploadScreen extends StatefulWidget {
   final dynamic examId;
@@ -22,10 +24,10 @@ class AnswerSheetUploadScreen extends StatefulWidget {
       _AnswerSheetUploadScreenState();
 }
 
-class _AnswerSheetUploadScreenState
-    extends State<AnswerSheetUploadScreen> {
+class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   Uint8List? _imageBytes;
   Uint8List? _processedImageBytes;
+  Uint8List? _omrDebugImageBytes;
   String? _fileName;
 
   bool _isProcessing = false;
@@ -33,22 +35,19 @@ class _AnswerSheetUploadScreenState
   List<RegistrationPoint>? _detectedMarkers;
 
   OMRProcessingResult? _omrResult;
+  ScoringResult? _scoringResult;
+
+  // ------------------------------------------------------------
+  // PICK IMAGE
+  // ------------------------------------------------------------
 
   Future<void> _pickImage() async {
     const XTypeGroup imageTypeGroup = XTypeGroup(
       label: 'Images',
-      extensions: [
-        'jpg',
-        'jpeg',
-        'png',
-      ],
+      extensions: ['jpg', 'jpeg', 'png'],
     );
 
-    final XFile? file = await openFile(
-      acceptedTypeGroups: [
-        imageTypeGroup,
-      ],
-    );
+    final XFile? file = await openFile(acceptedTypeGroups: [imageTypeGroup]);
 
     if (file == null) {
       return;
@@ -63,11 +62,18 @@ class _AnswerSheetUploadScreenState
     setState(() {
       _imageBytes = bytes;
       _processedImageBytes = null;
+      _omrDebugImageBytes = null;
       _detectedMarkers = null;
       _omrResult = null;
+      _scoringResult = null;
       _fileName = file.name;
+      _isProcessing = false;
     });
   }
+
+  // ------------------------------------------------------------
+  // PROCESS ANSWER SHEET
+  // ------------------------------------------------------------
 
   Future<void> _processImage() async {
     if (_imageBytes == null) {
@@ -77,13 +83,14 @@ class _AnswerSheetUploadScreenState
     setState(() {
       _isProcessing = true;
       _processedImageBytes = null;
+      _omrDebugImageBytes = null;
       _detectedMarkers = null;
       _omrResult = null;
+      _scoringResult = null;
     });
 
     try {
-      final result =
-          await AnswerSheetProcessor.processAnswerSheet(
+      final result = await AnswerSheetProcessor.processAnswerSheet(
         _imageBytes!,
       );
 
@@ -98,11 +105,7 @@ class _AnswerSheetUploadScreenState
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Answer sheet processed successfully.',
-          ),
-        ),
+        const SnackBar(content: Text('Answer sheet processed successfully.')),
       );
     } catch (e) {
       if (!mounted) {
@@ -115,23 +118,21 @@ class _AnswerSheetUploadScreenState
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Processing failed: $e',
-          ),
+          content: Text('Processing failed: $e'),
           duration: const Duration(seconds: 5),
         ),
       );
     }
   }
 
+  // ------------------------------------------------------------
+  // RUN OMR + SCORING
+  // ------------------------------------------------------------
+
   Future<void> _runOMR() async {
     if (_processedImageBytes == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Please process the answer sheet first.',
-          ),
-        ),
+        const SnackBar(content: Text('Please process the answer sheet first.')),
       );
 
       return;
@@ -139,11 +140,7 @@ class _AnswerSheetUploadScreenState
 
     if (widget.sections.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'No exam sections were provided.',
-          ),
-        ),
+        const SnackBar(content: Text('No exam sections were provided.')),
       );
 
       return;
@@ -154,9 +151,21 @@ class _AnswerSheetUploadScreenState
     });
 
     try {
-      final OMRProcessingResult result =
-          await OMRProcessor.process(
+      // ----------------------------------------------------------
+      // STEP 1: RUN OMR
+      // ----------------------------------------------------------
+
+      final OMRProcessingResult result = await OMRProcessor.process(
         _processedImageBytes!,
+        sections: widget.sections,
+      );
+
+      // ----------------------------------------------------------
+      // STEP 2: SCORE THE DETECTED ANSWERS
+      // ----------------------------------------------------------
+
+      final ScoringResult scoringResult = ScoringService.score(
+        omrResult: result,
         sections: widget.sections,
       );
 
@@ -164,12 +173,22 @@ class _AnswerSheetUploadScreenState
         return;
       }
 
+      // ----------------------------------------------------------
+      // STEP 3: SAVE RESULTS TO SCREEN STATE
+      // ----------------------------------------------------------
+
       setState(() {
         _omrResult = result;
+        _scoringResult = scoringResult;
+        _omrDebugImageBytes = result.debugImageBytes;
         _isProcessing = false;
       });
 
-      await _showOMRResults(result);
+      // ----------------------------------------------------------
+      // STEP 4: SHOW OMR + SCORE RESULTS
+      // ----------------------------------------------------------
+
+      await _showOMRResults(result, scoringResult);
     } catch (e) {
       if (!mounted) {
         return;
@@ -181,29 +200,30 @@ class _AnswerSheetUploadScreenState
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'OMR processing failed: $e',
-          ),
+          content: Text('OMR processing failed: $e'),
           duration: const Duration(seconds: 5),
         ),
       );
     }
   }
 
+  // ------------------------------------------------------------
+  // OMR RESULTS DIALOG
+  // ------------------------------------------------------------
+
   Future<void> _showOMRResults(
     OMRProcessingResult result,
+    ScoringResult scoringResult,
   ) async {
     await showDialog<void>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text(
-            'OMR Detection Results',
-          ),
+          title: const Text('OMR Detection & Score'),
           content: SizedBox(
             width: 650,
             height: 500,
-            child: _buildOMRDialogContent(result),
+            child: _buildOMRDialogContent(result, scoringResult),
           ),
           actions: [
             TextButton(
@@ -220,6 +240,7 @@ class _AnswerSheetUploadScreenState
 
   Widget _buildOMRDialogContent(
     OMRProcessingResult result,
+    ScoringResult scoringResult,
   ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -233,14 +254,72 @@ class _AnswerSheetUploadScreenState
           '${result.answeredQuestions} answered',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
+
         const SizedBox(height: 16),
+
+        // --------------------------------------------------------
+        // SCORE CARD
+        // --------------------------------------------------------
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Score',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                ),
+
+                const SizedBox(height: 8),
+
+                Text(
+                  '${scoringResult.earnedPoints.toStringAsFixed(2)} '
+                  '/ '
+                  '${scoringResult.totalPoints.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+
+                const SizedBox(height: 4),
+
+                Text(
+                  '${scoringResult.percentage.toStringAsFixed(1)}%',
+                  style: const TextStyle(fontSize: 16),
+                ),
+
+                const SizedBox(height: 4),
+
+                Text(
+                  '${scoringResult.correctAnswers} '
+                  'correct out of '
+                  '${scoringResult.totalQuestions}',
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // --------------------------------------------------------
+        // SECTION RESULTS
+        // --------------------------------------------------------
         Expanded(
           child: ListView.builder(
             itemCount: result.sections.length,
             itemBuilder: (context, index) {
-              return _buildSectionResult(
-                result.sections[index],
-              );
+              final OMRSectionResult omrSection = result.sections[index];
+
+              ScoredSection? scoredSection;
+
+              if (index < scoringResult.sections.length) {
+                scoredSection = scoringResult.sections[index];
+              }
+
+              return _buildSectionResult(omrSection, scoredSection);
             },
           ),
         ),
@@ -248,11 +327,15 @@ class _AnswerSheetUploadScreenState
     );
   }
 
+  // ------------------------------------------------------------
+  // SECTION RESULT
+  // ------------------------------------------------------------
+
   Widget _buildSectionResult(
     OMRSectionResult section,
+    ScoredSection? scoredSection,
   ) {
-    final String displayType =
-        _displaySectionType(section.sectionType);
+    final String displayType = _displaySectionType(section.sectionType);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -264,9 +347,7 @@ class _AnswerSheetUploadScreenState
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Icon(
-                  _sectionIcon(section.sectionType),
-                ),
+                Icon(_sectionIcon(section.sectionType)),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -279,36 +360,51 @@ class _AnswerSheetUploadScreenState
                 ),
               ],
             ),
+
             const SizedBox(height: 4),
+
             Text(
               '$displayType • '
               '${section.questionCount} questions',
             ),
+
+            if (scoredSection != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Score: '
+                '${scoredSection.earnedPoints.toStringAsFixed(2)}'
+                ' / '
+                '${scoredSection.totalPoints.toStringAsFixed(2)}',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ],
+
             const Divider(),
 
             // Use Column instead of another ListView.
             //
-            // The outer dialog already contains the single
-            // scrollable ListView.
+            // The outer dialog already contains the
+            // single scrollable ListView.
             for (final answer in section.answers)
-              _buildAnswerRow(
-                answer,
-                section.sectionType,
-              ),
+              _buildAnswerRow(answer, section.sectionType, scoredSection),
           ],
         ),
       ),
     );
   }
 
+  // ------------------------------------------------------------
+  // ANSWER ROW
+  // ------------------------------------------------------------
+
   Widget _buildAnswerRow(
     OMRAnswer answer,
     String sectionType,
+    ScoredSection? scoredSection,
   ) {
     final bool unanswered = answer.isUnanswered;
 
-    final bool ocrPending =
-        answer.answer == 'OCR Pending';
+    final bool ocrPending = answer.answer == 'OCR Pending';
 
     String answerText = answer.answer;
 
@@ -320,10 +416,19 @@ class _AnswerSheetUploadScreenState
       }
     }
 
+    ScoredAnswer? scoredAnswer;
+
+    if (scoredSection != null) {
+      for (final item in scoredSection.answers) {
+        if (item.questionNumber == answer.questionNumber) {
+          scoredAnswer = item;
+          break;
+        }
+      }
+    }
+
     return Padding(
-      padding: const EdgeInsets.symmetric(
-        vertical: 4,
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -331,35 +436,38 @@ class _AnswerSheetUploadScreenState
             width: 55,
             child: Text(
               'Q${answer.questionNumber}',
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
-          Expanded(
-            child: Text(
-              answerText,
-            ),
-          ),
-          if (!unanswered &&
-              !ocrPending &&
-              answer.confidence > 0)
+
+          Expanded(child: Text(answerText)),
+
+          // Correct / incorrect indicator
+          if (scoredAnswer != null && !unanswered && !ocrPending)
             Padding(
-              padding: const EdgeInsets.only(
-                left: 8,
+              padding: const EdgeInsets.only(left: 8),
+              child: Icon(
+                scoredAnswer.isCorrect ? Icons.check_circle : Icons.cancel,
+                size: 18,
               ),
-              child: Text(
-                '${(answer.confidence * 100).round()}%',
-              ),
+            ),
+
+          // OMR confidence
+          if (!unanswered && !ocrPending && answer.confidence > 0)
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: Text('${(answer.confidence * 100).round()}%'),
             ),
         ],
       ),
     );
   }
 
-  String _displaySectionType(
-    String type,
-  ) {
+  // ------------------------------------------------------------
+  // DISPLAY SECTION TYPE
+  // ------------------------------------------------------------
+
+  String _displaySectionType(String type) {
     switch (type) {
       case 'multiple_choice':
         return 'Multiple Choice • A–D';
@@ -375,9 +483,11 @@ class _AnswerSheetUploadScreenState
     }
   }
 
-  IconData _sectionIcon(
-    String type,
-  ) {
+  // ------------------------------------------------------------
+  // SECTION ICON
+  // ------------------------------------------------------------
+
+  IconData _sectionIcon(String type) {
     switch (type) {
       case 'multiple_choice':
         return Icons.radio_button_checked;
@@ -393,39 +503,39 @@ class _AnswerSheetUploadScreenState
     }
   }
 
+  // ------------------------------------------------------------
+  // CHOOSE ANOTHER IMAGE
+  // ------------------------------------------------------------
+
   void _chooseAnother() {
     setState(() {
       _imageBytes = null;
       _processedImageBytes = null;
+      _omrDebugImageBytes = null;
       _detectedMarkers = null;
       _omrResult = null;
+      _scoringResult = null;
       _fileName = null;
       _isProcessing = false;
     });
   }
 
+  // ------------------------------------------------------------
+  // BUILD
+  // ------------------------------------------------------------
+
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'Answer Sheet Scanner',
-        ),
-      ),
+      appBar: AppBar(title: const Text('Answer Sheet Scanner')),
       body: LayoutBuilder(
         builder: (context, constraints) {
           return SingleChildScrollView(
             child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minHeight: constraints.maxHeight,
-              ),
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
               child: Center(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: 1000,
-                  ),
+                  constraints: const BoxConstraints(maxWidth: 1000),
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: _buildContent(),
@@ -439,6 +549,10 @@ class _AnswerSheetUploadScreenState
     );
   }
 
+  // ------------------------------------------------------------
+  // MAIN CONTENT
+  // ------------------------------------------------------------
+
   Widget _buildContent() {
     if (_imageBytes == null) {
       return _buildEmptyState();
@@ -451,23 +565,20 @@ class _AnswerSheetUploadScreenState
           'Selected Answer Sheet',
           style: Theme.of(context).textTheme.headlineSmall,
         ),
+
         const SizedBox(height: 8),
-        Text(
-          _fileName ?? 'Image',
-        ),
-        const SizedBox(height: 20),
 
-        _buildImagePreview(
-          _imageBytes!,
-        ),
+        Text(_fileName ?? 'Image'),
 
         const SizedBox(height: 20),
 
-        if (_isProcessing)
-          _buildProcessingCard(),
+        _buildImagePreview(_imageBytes!),
 
-        if (_processedImageBytes != null &&
-            !_isProcessing)
+        const SizedBox(height: 20),
+
+        if (_isProcessing) _buildProcessingCard(),
+
+        if (_processedImageBytes != null && !_isProcessing)
           _buildProcessedResult(),
 
         const SizedBox(height: 20),
@@ -477,51 +588,51 @@ class _AnswerSheetUploadScreenState
     );
   }
 
+  // ------------------------------------------------------------
+  // EMPTY STATE
+  // ------------------------------------------------------------
+
   Widget _buildEmptyState() {
     return SizedBox(
       width: double.infinity,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(
-            Icons.upload_file,
-            size: 70,
-          ),
+          const Icon(Icons.upload_file, size: 70),
+
           const SizedBox(height: 20),
+
           const Text(
             'Upload an Answer Sheet',
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
           ),
+
           const SizedBox(height: 8),
-          const Text(
-            'Upload a JPG, JPEG, or PNG image.',
-          ),
+
+          const Text('Upload a JPG, JPEG, or PNG image.'),
+
           const SizedBox(height: 24),
+
           ElevatedButton.icon(
             onPressed: _pickImage,
             icon: const Icon(Icons.upload),
-            label: const Text(
-              'Choose Image',
-            ),
+            label: const Text('Choose Image'),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildImagePreview(
-    Uint8List bytes,
-  ) {
+  // ------------------------------------------------------------
+  // IMAGE PREVIEW
+  // ------------------------------------------------------------
+
+  Widget _buildImagePreview(Uint8List bytes) {
     return Container(
       width: double.infinity,
       height: 500,
       decoration: BoxDecoration(
-        border: Border.all(
-          color: Colors.grey.shade300,
-        ),
+        border: Border.all(color: Colors.grey.shade300),
         borderRadius: BorderRadius.circular(8),
       ),
       child: ClipRRect(
@@ -536,6 +647,10 @@ class _AnswerSheetUploadScreenState
     );
   }
 
+  // ------------------------------------------------------------
+  // PROCESSING CARD
+  // ------------------------------------------------------------
+
   Widget _buildProcessingCard() {
     return Card(
       child: Padding(
@@ -547,7 +662,9 @@ class _AnswerSheetUploadScreenState
               height: 24,
               child: CircularProgressIndicator(),
             ),
+
             const SizedBox(width: 16),
+
             const Expanded(
               child: Text(
                 'Detecting markers, correcting '
@@ -561,6 +678,10 @@ class _AnswerSheetUploadScreenState
     );
   }
 
+  // ------------------------------------------------------------
+  // PROCESSED RESULT
+  // ------------------------------------------------------------
+
   Widget _buildProcessedResult() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -569,46 +690,67 @@ class _AnswerSheetUploadScreenState
           'Processed Answer Sheet',
           style: Theme.of(context).textTheme.titleLarge,
         ),
+
         const SizedBox(height: 12),
 
-        _buildImagePreview(
-          _processedImageBytes!,
-        ),
+        _buildImagePreview(_processedImageBytes!),
 
         const SizedBox(height: 16),
 
-        if (_detectedMarkers != null)
-          _buildMarkerInformation(),
+        if (_detectedMarkers != null) _buildMarkerInformation(),
 
         const SizedBox(height: 16),
 
-        // Do NOT render the OMR result list here.
+        if (_omrDebugImageBytes != null) ...[
+          Text(
+            'OMR Debug Overlay',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Red = Multiple Choice sampling points. '
+            'Blue = True/False sampling points. '
+            'Each crosshair should sit in the center of its printed bubble.',
+          ),
+          const SizedBox(height: 12),
+          _buildImagePreview(_omrDebugImageBytes!),
+          const SizedBox(height: 16),
+        ],
+
+        // Do NOT render the full OMR result list here.
         //
-        // The complete result is already displayed in
-        // the dialog after Run OMR.
-        if (_omrResult != null)
-          _buildOMRSummary(_omrResult!),
+        // The complete result is displayed in the dialog
+        // after Run OMR.
+        if (_omrResult != null) _buildOMRSummary(_omrResult!),
+
+        if (_scoringResult != null) ...[
+          const SizedBox(height: 12),
+          _buildScoringSummary(_scoringResult!),
+        ],
       ],
     );
   }
 
-  Widget _buildOMRSummary(
-    OMRProcessingResult result,
-  ) {
+  // ------------------------------------------------------------
+  // OMR SUMMARY
+  // ------------------------------------------------------------
+
+  Widget _buildOMRSummary(OMRProcessingResult result) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
-            const Icon(
-              Icons.check_circle_outline,
-            ),
+            const Icon(Icons.check_circle_outline),
+
             const SizedBox(width: 12),
+
             Expanded(
               child: Text(
                 'OMR complete: '
                 '${result.answeredQuestions} of '
-                '${result.detectedQuestions} questions answered.',
+                '${result.detectedQuestions} '
+                'questions answered.',
               ),
             ),
           ],
@@ -617,9 +759,54 @@ class _AnswerSheetUploadScreenState
     );
   }
 
+  // ------------------------------------------------------------
+  // SCORING SUMMARY
+  // ------------------------------------------------------------
+
+  Widget _buildScoringSummary(ScoringResult result) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Score',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+
+            const SizedBox(height: 8),
+
+            Text(
+              '${result.earnedPoints.toStringAsFixed(2)} '
+              '/ '
+              '${result.totalPoints.toStringAsFixed(2)}',
+              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+            ),
+
+            const SizedBox(height: 4),
+
+            Text('${result.percentage.toStringAsFixed(1)}%'),
+
+            const SizedBox(height: 4),
+
+            Text(
+              '${result.correctAnswers} correct • '
+              '${result.answeredQuestions} answered • '
+              '${result.totalQuestions} total',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // MARKER INFORMATION
+  // ------------------------------------------------------------
+
   Widget _buildMarkerInformation() {
-    final List<RegistrationPoint> markers =
-        _detectedMarkers!;
+    final List<RegistrationPoint> markers = _detectedMarkers!;
 
     return Card(
       child: Padding(
@@ -629,16 +816,14 @@ class _AnswerSheetUploadScreenState
           children: [
             const Text(
               'Registration Markers',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontWeight: FontWeight.bold),
             ),
+
             const SizedBox(height: 8),
+
             for (int i = 0; i < markers.length; i++)
               Padding(
-                padding: const EdgeInsets.symmetric(
-                  vertical: 2,
-                ),
+                padding: const EdgeInsets.symmetric(vertical: 2),
                 child: Text(
                   '${_markerName(i)}: '
                   '(${markers[i].x.toStringAsFixed(1)}, '
@@ -651,9 +836,11 @@ class _AnswerSheetUploadScreenState
     );
   }
 
-  String _markerName(
-    int index,
-  ) {
+  // ------------------------------------------------------------
+  // MARKER NAME
+  // ------------------------------------------------------------
+
+  String _markerName(int index) {
     switch (index) {
       case 0:
         return 'Top Left';
@@ -672,42 +859,33 @@ class _AnswerSheetUploadScreenState
     }
   }
 
+  // ------------------------------------------------------------
+  // ACTION BUTTONS
+  // ------------------------------------------------------------
+
   Widget _buildActionButtons() {
     return Wrap(
       spacing: 12,
       runSpacing: 12,
       children: [
         OutlinedButton.icon(
-          onPressed:
-              _isProcessing ? null : _chooseAnother,
+          onPressed: _isProcessing ? null : _chooseAnother,
           icon: const Icon(Icons.refresh),
-          label: const Text(
-            'Choose Another',
-          ),
+          label: const Text('Choose Another'),
         ),
 
         if (_processedImageBytes == null)
           ElevatedButton.icon(
-            onPressed:
-                _isProcessing ? null : _processImage,
-            icon: const Icon(
-              Icons.auto_fix_high,
-            ),
-            label: const Text(
-              'Process Answer Sheet',
-            ),
+            onPressed: _isProcessing ? null : _processImage,
+            icon: const Icon(Icons.auto_fix_high),
+            label: const Text('Process Answer Sheet'),
           ),
 
         if (_processedImageBytes != null)
           ElevatedButton.icon(
-            onPressed:
-                _isProcessing ? null : _runOMR,
-            icon: const Icon(
-              Icons.document_scanner,
-            ),
-            label: const Text(
-              'Run OMR',
-            ),
+            onPressed: _isProcessing ? null : _runOMR,
+            icon: const Icon(Icons.document_scanner),
+            label: const Text('Run OMR'),
           ),
       ],
     );
