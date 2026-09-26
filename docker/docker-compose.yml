@@ -3,17 +3,37 @@ services:
     image: postgres:17
     container_name: checkmate-postgres
     restart: unless-stopped
-
     environment:
       POSTGRES_USER: checkmate
       POSTGRES_PASSWORD: checkmate_dev_password
       POSTGRES_DB: checkmate
-
     ports:
       - "5433:5432"
-
     volumes:
       - checkmate_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U checkmate -d checkmate"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ../server
+      dockerfile: Dockerfile
+    container_name: checkmate-api
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: checkmate
+      DB_USER: checkmate
+      DB_PASSWORD: checkmate_dev_password
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   checkmate_postgres_data:
