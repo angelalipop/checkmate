@@ -4,8 +4,8 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import 'package:checkmate/services/answer_sheet_processor.dart';
-
 import '../services/omr_processor.dart';
+import '../services/opencv_omr_service.dart';
 import '../services/scoring_service.dart';
 
 class AnswerSheetUploadScreen extends StatefulWidget {
@@ -24,7 +24,8 @@ class AnswerSheetUploadScreen extends StatefulWidget {
       _AnswerSheetUploadScreenState();
 }
 
-class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
+class _AnswerSheetUploadScreenState
+    extends State<AnswerSheetUploadScreen> {
   Uint8List? _imageBytes;
   Uint8List? _processedImageBytes;
   Uint8List? _omrDebugImageBytes;
@@ -44,10 +45,18 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   Future<void> _pickImage() async {
     const XTypeGroup imageTypeGroup = XTypeGroup(
       label: 'Images',
-      extensions: ['jpg', 'jpeg', 'png'],
+      extensions: [
+        'jpg',
+        'jpeg',
+        'png',
+      ],
     );
 
-    final XFile? file = await openFile(acceptedTypeGroups: [imageTypeGroup]);
+    final XFile? file = await openFile(
+      acceptedTypeGroups: [
+        imageTypeGroup,
+      ],
+    );
 
     if (file == null) {
       return;
@@ -90,7 +99,8 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
     });
 
     try {
-      final result = await AnswerSheetProcessor.processAnswerSheet(
+      final result =
+          await AnswerSheetProcessor.processAnswerSheet(
         _imageBytes!,
       );
 
@@ -105,7 +115,11 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Answer sheet processed successfully.')),
+        const SnackBar(
+          content: Text(
+            'Answer sheet processed successfully.',
+          ),
+        ),
       );
     } catch (e) {
       if (!mounted) {
@@ -118,7 +132,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Processing failed: $e'),
+          content: Text(
+            'Processing failed: $e',
+          ),
           duration: const Duration(seconds: 5),
         ),
       );
@@ -132,7 +148,11 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   Future<void> _runOMR() async {
     if (_processedImageBytes == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please process the answer sheet first.')),
+        const SnackBar(
+          content: Text(
+            'Please process the answer sheet first.',
+          ),
+        ),
       );
 
       return;
@@ -140,7 +160,11 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
 
     if (widget.sections.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No exam sections were provided.')),
+        const SnackBar(
+          content: Text(
+            'No exam sections were provided.',
+          ),
+        ),
       );
 
       return;
@@ -155,16 +179,21 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       // STEP 1: RUN OMR
       // ----------------------------------------------------------
 
-      final OMRProcessingResult result = await OMRProcessor.process(
+      final OpenCVOMRResult openCVResult = await OpenCVOMRService.process(
         _processedImageBytes!,
         sections: widget.sections,
+      );
+
+      final OMRProcessingResult result = _convertOpenCVResult(
+        openCVResult,
       );
 
       // ----------------------------------------------------------
       // STEP 2: SCORE THE DETECTED ANSWERS
       // ----------------------------------------------------------
 
-      final ScoringResult scoringResult = ScoringService.score(
+      final ScoringResult scoringResult =
+          ScoringService.score(
         omrResult: result,
         sections: widget.sections,
       );
@@ -188,7 +217,10 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       // STEP 4: SHOW OMR + SCORE RESULTS
       // ----------------------------------------------------------
 
-      await _showOMRResults(result, scoringResult);
+      await _showOMRResults(
+        result,
+        scoringResult,
+      );
     } catch (e) {
       if (!mounted) {
         return;
@@ -200,10 +232,160 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('OMR processing failed: $e'),
+          content: Text(
+            'OMR processing failed: $e',
+          ),
           duration: const Duration(seconds: 5),
         ),
       );
+    }
+  }
+
+  // ------------------------------------------------------------
+  // CONVERT OPENCV MEASUREMENTS TO APP OMR RESULTS
+  // ------------------------------------------------------------
+
+  OMRProcessingResult _convertOpenCVResult(
+    OpenCVOMRResult openCVResult,
+  ) {
+    const double markedThreshold = 0.55;
+
+    final List<OMRSectionResult> convertedSections = [];
+    int openCVSectionIndex = 0;
+
+    for (final Map<String, dynamic> sourceSection in widget.sections) {
+      final String sectionType = _normalizeQuestionType(
+        sourceSection['question_type'] ?? sourceSection['type'],
+      );
+      final String sectionName = sourceSection['display_name']?.toString() ??
+          sourceSection['section_name']?.toString() ??
+          sourceSection['name']?.toString() ??
+          'Section';
+      final List<dynamic> questions = sourceSection['questions'] is List
+          ? List<dynamic>.from(sourceSection['questions'] as List)
+          : <dynamic>[];
+      final int questionCount = questions.isNotEmpty
+          ? questions.length
+          : int.tryParse(sourceSection['question_count']?.toString() ?? '0') ?? 0;
+
+      if (sectionType == 'identification') {
+        convertedSections.add(OMRSectionResult(
+          sectionName: sectionName,
+          sectionType: sectionType,
+          questionCount: questionCount,
+          answers: List<OMRAnswer>.generate(
+            questionCount,
+            (int index) => OMRAnswer(
+              questionNumber: index + 1,
+              answer: 'OCR Pending',
+              confidence: 0,
+            ),
+          ),
+        ));
+        continue;
+      }
+
+      if (sectionType != 'multiple_choice' && sectionType != 'true_false') {
+        continue;
+      }
+
+      if (openCVSectionIndex >= openCVResult.sections.length) {
+        convertedSections.add(OMRSectionResult(
+          sectionName: sectionName,
+          sectionType: sectionType,
+          questionCount: questionCount,
+          answers: List<OMRAnswer>.generate(
+            questionCount,
+            (int index) => OMRAnswer(
+              questionNumber: index + 1,
+              answer: 'Unanswered',
+              confidence: 0,
+            ),
+          ),
+        ));
+        continue;
+      }
+
+      final OpenCVSectionMeasurement measuredSection =
+          openCVResult.sections[openCVSectionIndex++];
+      final List<OMRAnswer> answers = [];
+
+      for (final OpenCVQuestionMeasurement question in measuredSection.questions) {
+        final List<OpenCVBubbleMeasurement> bubbles =
+            List<OpenCVBubbleMeasurement>.from(question.bubbles)
+              ..sort((a, b) => b.fillRatio.compareTo(a.fillRatio));
+
+        if (bubbles.isEmpty) {
+          answers.add(OMRAnswer(
+            questionNumber: question.questionNumber,
+            answer: 'Unanswered',
+            confidence: 0,
+          ));
+          continue;
+        }
+
+        final OpenCVBubbleMeasurement strongest = bubbles.first;
+        final OpenCVBubbleMeasurement? second =
+            bubbles.length > 1 ? bubbles[1] : null;
+
+        if (strongest.fillRatio < markedThreshold) {
+          answers.add(OMRAnswer(
+            questionNumber: question.questionNumber,
+            answer: 'Unanswered',
+            confidence: strongest.fillRatio,
+          ));
+          continue;
+        }
+
+        if (second != null && second.fillRatio >= markedThreshold) {
+          answers.add(OMRAnswer(
+            questionNumber: question.questionNumber,
+            answer: 'Multiple',
+            confidence: strongest.fillRatio,
+          ));
+          continue;
+        }
+
+        answers.add(OMRAnswer(
+          questionNumber: question.questionNumber,
+          answer: strongest.label,
+          confidence: strongest.fillRatio,
+        ));
+      }
+
+      convertedSections.add(OMRSectionResult(
+        sectionName: sectionName,
+        sectionType: sectionType,
+        questionCount: questionCount,
+        answers: answers,
+      ));
+    }
+
+    return OMRProcessingResult(
+      sections: convertedSections,
+      debugImageBytes: openCVResult.debugImageBytes,
+    );
+  }
+
+  String _normalizeQuestionType(dynamic value) {
+    final String type = value?.toString().trim().toLowerCase() ?? '';
+    switch (type) {
+      case 'multiple choice':
+      case 'mc':
+      case 'mcq':
+      case 'multiple_choice':
+        return 'multiple_choice';
+      case 'true or false':
+      case 'true/false':
+      case 'tf':
+      case 'true_false':
+        return 'true_false';
+      case 'identification':
+      case 'identify':
+      case 'id':
+        return 'identification';
+      default:
+        return type;
     }
   }
 
@@ -219,11 +401,16 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('OMR Detection & Score'),
+          title: const Text(
+            'OMR Detection & Score',
+          ),
           content: SizedBox(
             width: 650,
             height: 500,
-            child: _buildOMRDialogContent(result, scoringResult),
+            child: _buildOMRDialogContent(
+              result,
+              scoringResult,
+            ),
           ),
           actions: [
             TextButton(
@@ -260,6 +447,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         // --------------------------------------------------------
         // SCORE CARD
         // --------------------------------------------------------
+
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -268,7 +456,10 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
               children: [
                 const Text(
                   'Score',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 18,
+                  ),
                 ),
 
                 const SizedBox(height: 8),
@@ -287,7 +478,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
 
                 Text(
                   '${scoringResult.percentage.toStringAsFixed(1)}%',
-                  style: const TextStyle(fontSize: 16),
+                  style: const TextStyle(
+                    fontSize: 16,
+                  ),
                 ),
 
                 const SizedBox(height: 4),
@@ -307,19 +500,25 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         // --------------------------------------------------------
         // SECTION RESULTS
         // --------------------------------------------------------
+
         Expanded(
           child: ListView.builder(
             itemCount: result.sections.length,
             itemBuilder: (context, index) {
-              final OMRSectionResult omrSection = result.sections[index];
+              final OMRSectionResult omrSection =
+                  result.sections[index];
 
               ScoredSection? scoredSection;
 
               if (index < scoringResult.sections.length) {
-                scoredSection = scoringResult.sections[index];
+                scoredSection =
+                    scoringResult.sections[index];
               }
 
-              return _buildSectionResult(omrSection, scoredSection);
+              return _buildSectionResult(
+                omrSection,
+                scoredSection,
+              );
             },
           ),
         ),
@@ -335,7 +534,8 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
     OMRSectionResult section,
     ScoredSection? scoredSection,
   ) {
-    final String displayType = _displaySectionType(section.sectionType);
+    final String displayType =
+        _displaySectionType(section.sectionType);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -347,7 +547,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Icon(_sectionIcon(section.sectionType)),
+                Icon(
+                  _sectionIcon(section.sectionType),
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -375,7 +577,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
                 '${scoredSection.earnedPoints.toStringAsFixed(2)}'
                 ' / '
                 '${scoredSection.totalPoints.toStringAsFixed(2)}',
-                style: const TextStyle(fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
 
@@ -386,7 +590,11 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
             // The outer dialog already contains the
             // single scrollable ListView.
             for (final answer in section.answers)
-              _buildAnswerRow(answer, section.sectionType, scoredSection),
+              _buildAnswerRow(
+                answer,
+                section.sectionType,
+                scoredSection,
+              ),
           ],
         ),
       ),
@@ -404,7 +612,8 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   ) {
     final bool unanswered = answer.isUnanswered;
 
-    final bool ocrPending = answer.answer == 'OCR Pending';
+    final bool ocrPending =
+        answer.answer == 'OCR Pending';
 
     String answerText = answer.answer;
 
@@ -420,7 +629,8 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
 
     if (scoredSection != null) {
       for (final item in scoredSection.answers) {
-        if (item.questionNumber == answer.questionNumber) {
+        if (item.questionNumber ==
+            answer.questionNumber) {
           scoredAnswer = item;
           break;
         }
@@ -428,7 +638,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(
+        vertical: 4,
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -436,27 +648,45 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
             width: 55,
             child: Text(
               'Q${answer.questionNumber}',
-              style: const TextStyle(fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
 
-          Expanded(child: Text(answerText)),
+          Expanded(
+            child: Text(
+              answerText,
+            ),
+          ),
 
           // Correct / incorrect indicator
-          if (scoredAnswer != null && !unanswered && !ocrPending)
+          if (scoredAnswer != null &&
+              !unanswered &&
+              !ocrPending)
             Padding(
-              padding: const EdgeInsets.only(left: 8),
+              padding: const EdgeInsets.only(
+                left: 8,
+              ),
               child: Icon(
-                scoredAnswer.isCorrect ? Icons.check_circle : Icons.cancel,
+                scoredAnswer.isCorrect
+                    ? Icons.check_circle
+                    : Icons.cancel,
                 size: 18,
               ),
             ),
 
           // OMR confidence
-          if (!unanswered && !ocrPending && answer.confidence > 0)
+          if (!unanswered &&
+              !ocrPending &&
+              answer.confidence > 0)
             Padding(
-              padding: const EdgeInsets.only(left: 8),
-              child: Text('${(answer.confidence * 100).round()}%'),
+              padding: const EdgeInsets.only(
+                left: 8,
+              ),
+              child: Text(
+                '${(answer.confidence * 100).round()}%',
+              ),
             ),
         ],
       ),
@@ -467,7 +697,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   // DISPLAY SECTION TYPE
   // ------------------------------------------------------------
 
-  String _displaySectionType(String type) {
+  String _displaySectionType(
+    String type,
+  ) {
     switch (type) {
       case 'multiple_choice':
         return 'Multiple Choice • A–D';
@@ -487,7 +719,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   // SECTION ICON
   // ------------------------------------------------------------
 
-  IconData _sectionIcon(String type) {
+  IconData _sectionIcon(
+    String type,
+  ) {
     switch (type) {
       case 'multiple_choice':
         return Icons.radio_button_checked;
@@ -525,17 +759,27 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   // ------------------------------------------------------------
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(
+    BuildContext context,
+  ) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Answer Sheet Scanner')),
+      appBar: AppBar(
+        title: const Text(
+          'Answer Sheet Scanner',
+        ),
+      ),
       body: LayoutBuilder(
         builder: (context, constraints) {
           return SingleChildScrollView(
             child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              constraints: BoxConstraints(
+                minHeight: constraints.maxHeight,
+              ),
               child: Center(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 1000),
+                  constraints: const BoxConstraints(
+                    maxWidth: 1000,
+                  ),
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: _buildContent(),
@@ -568,17 +812,23 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
 
         const SizedBox(height: 8),
 
-        Text(_fileName ?? 'Image'),
+        Text(
+          _fileName ?? 'Image',
+        ),
 
         const SizedBox(height: 20),
 
-        _buildImagePreview(_imageBytes!),
+        _buildImagePreview(
+          _imageBytes!,
+        ),
 
         const SizedBox(height: 20),
 
-        if (_isProcessing) _buildProcessingCard(),
+        if (_isProcessing)
+          _buildProcessingCard(),
 
-        if (_processedImageBytes != null && !_isProcessing)
+        if (_processedImageBytes != null &&
+            !_isProcessing)
           _buildProcessedResult(),
 
         const SizedBox(height: 20),
@@ -598,25 +848,35 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.upload_file, size: 70),
+          const Icon(
+            Icons.upload_file,
+            size: 70,
+          ),
 
           const SizedBox(height: 20),
 
           const Text(
             'Upload an Answer Sheet',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+            ),
           ),
 
           const SizedBox(height: 8),
 
-          const Text('Upload a JPG, JPEG, or PNG image.'),
+          const Text(
+            'Upload a JPG, JPEG, or PNG image.',
+          ),
 
           const SizedBox(height: 24),
 
           ElevatedButton.icon(
             onPressed: _pickImage,
             icon: const Icon(Icons.upload),
-            label: const Text('Choose Image'),
+            label: const Text(
+              'Choose Image',
+            ),
           ),
         ],
       ),
@@ -627,12 +887,16 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   // IMAGE PREVIEW
   // ------------------------------------------------------------
 
-  Widget _buildImagePreview(Uint8List bytes) {
+  Widget _buildImagePreview(
+    Uint8List bytes,
+  ) {
     return Container(
       width: double.infinity,
       height: 500,
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300),
+        border: Border.all(
+          color: Colors.grey.shade300,
+        ),
         borderRadius: BorderRadius.circular(8),
       ),
       child: ClipRRect(
@@ -693,11 +957,14 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
 
         const SizedBox(height: 12),
 
-        _buildImagePreview(_processedImageBytes!),
+        _buildImagePreview(
+          _processedImageBytes!,
+        ),
 
         const SizedBox(height: 16),
 
-        if (_detectedMarkers != null) _buildMarkerInformation(),
+        if (_detectedMarkers != null)
+          _buildMarkerInformation(),
 
         const SizedBox(height: 16),
 
@@ -721,11 +988,16 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         //
         // The complete result is displayed in the dialog
         // after Run OMR.
-        if (_omrResult != null) _buildOMRSummary(_omrResult!),
+        if (_omrResult != null)
+          _buildOMRSummary(
+            _omrResult!,
+          ),
 
         if (_scoringResult != null) ...[
           const SizedBox(height: 12),
-          _buildScoringSummary(_scoringResult!),
+          _buildScoringSummary(
+            _scoringResult!,
+          ),
         ],
       ],
     );
@@ -735,13 +1007,17 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   // OMR SUMMARY
   // ------------------------------------------------------------
 
-  Widget _buildOMRSummary(OMRProcessingResult result) {
+  Widget _buildOMRSummary(
+    OMRProcessingResult result,
+  ) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
-            const Icon(Icons.check_circle_outline),
+            const Icon(
+              Icons.check_circle_outline,
+            ),
 
             const SizedBox(width: 12),
 
@@ -763,16 +1039,22 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   // SCORING SUMMARY
   // ------------------------------------------------------------
 
-  Widget _buildScoringSummary(ScoringResult result) {
+  Widget _buildScoringSummary(
+    ScoringResult result,
+  ) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment:
+              CrossAxisAlignment.start,
           children: [
             const Text(
               'Score',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
             ),
 
             const SizedBox(height: 8),
@@ -781,12 +1063,17 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
               '${result.earnedPoints.toStringAsFixed(2)} '
               '/ '
               '${result.totalPoints.toStringAsFixed(2)}',
-              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
+              ),
             ),
 
             const SizedBox(height: 4),
 
-            Text('${result.percentage.toStringAsFixed(1)}%'),
+            Text(
+              '${result.percentage.toStringAsFixed(1)}%',
+            ),
 
             const SizedBox(height: 4),
 
@@ -806,24 +1093,31 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   // ------------------------------------------------------------
 
   Widget _buildMarkerInformation() {
-    final List<RegistrationPoint> markers = _detectedMarkers!;
+    final List<RegistrationPoint> markers =
+        _detectedMarkers!;
 
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment:
+              CrossAxisAlignment.start,
           children: [
             const Text(
               'Registration Markers',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+              ),
             ),
 
             const SizedBox(height: 8),
 
             for (int i = 0; i < markers.length; i++)
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
+                padding:
+                    const EdgeInsets.symmetric(
+                  vertical: 2,
+                ),
                 child: Text(
                   '${_markerName(i)}: '
                   '(${markers[i].x.toStringAsFixed(1)}, '
@@ -840,7 +1134,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   // MARKER NAME
   // ------------------------------------------------------------
 
-  String _markerName(int index) {
+  String _markerName(
+    int index,
+  ) {
     switch (index) {
       case 0:
         return 'Top Left';
@@ -869,23 +1165,42 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       runSpacing: 12,
       children: [
         OutlinedButton.icon(
-          onPressed: _isProcessing ? null : _chooseAnother,
+          onPressed:
+              _isProcessing
+                  ? null
+                  : _chooseAnother,
           icon: const Icon(Icons.refresh),
-          label: const Text('Choose Another'),
+          label: const Text(
+            'Choose Another',
+          ),
         ),
 
         if (_processedImageBytes == null)
           ElevatedButton.icon(
-            onPressed: _isProcessing ? null : _processImage,
-            icon: const Icon(Icons.auto_fix_high),
-            label: const Text('Process Answer Sheet'),
+            onPressed:
+                _isProcessing
+                    ? null
+                    : _processImage,
+            icon: const Icon(
+              Icons.auto_fix_high,
+            ),
+            label: const Text(
+              'Process Answer Sheet',
+            ),
           ),
 
         if (_processedImageBytes != null)
           ElevatedButton.icon(
-            onPressed: _isProcessing ? null : _runOMR,
-            icon: const Icon(Icons.document_scanner),
-            label: const Text('Run OMR'),
+            onPressed:
+                _isProcessing
+                    ? null
+                    : _runOMR,
+            icon: const Icon(
+              Icons.document_scanner,
+            ),
+            label: const Text(
+              'Run OMR',
+            ),
           ),
       ],
     );

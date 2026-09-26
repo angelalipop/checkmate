@@ -25,6 +25,8 @@ dependencies:
   camera: ^0.12.1
   file_selector: ^1.1.0
   image: ^4.10.1
+  opencv_dart: ^2.2.2
+  dartcv4: ^2.3.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -33,5 +35,11 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+hooks:
+  user_defines:
+    dartcv4:
+      ios:
+        deployment_target: "15.0"
 
 

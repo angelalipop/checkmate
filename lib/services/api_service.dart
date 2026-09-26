@@ -8,9 +8,8 @@ class ApiService {
     if (kIsWeb) {
       return 'http://localhost:8080';
     }
-
-    // Android emulator
-    return 'http://10.0.2.2:8080';
+    // Physical iPhone → Mac running the CheckMate backend.
+    return 'http://192.168.100.247:8080';
   }
 
   // =========================

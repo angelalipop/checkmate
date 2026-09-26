@@ -66,5 +66,10 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>CheckMate needs camera access to scan and process answer sheets.</string>
+
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>CheckMate needs photo library access to select answer sheet images for scanning.</string>
 </dict>
 </plist>

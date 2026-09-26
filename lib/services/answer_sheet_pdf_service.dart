@@ -4,6 +4,8 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:qr/qr.dart';
 
+import 'answer_sheet_layout.dart';
+
 class AnswerSheetPdfService {
   /*
     --------------------------------------------------------------------------
@@ -36,10 +38,10 @@ class AnswerSheetPdfService {
     The answer sheet is placed inside an A4 landscape page.
   */
 
-  static const double _sheetWidth = 397;
-  static const double _sheetHeight = 559;
+  static const double _sheetWidth = AnswerSheetLayout.sheetWidth;
+  static const double _sheetHeight = AnswerSheetLayout.sheetHeight;
 
-  static const double _sheetPadding = 10;
+  static const double _sheetPadding = AnswerSheetLayout.sheetPadding;
 
   // --------------------------------------------------------------------------
   // REGISTRATION MARKERS
@@ -57,10 +59,12 @@ class AnswerSheetPdfService {
     Keep these dimensions fixed.
   */
 
-  static const double _registrationMarkerSize = 10;
+  static const double _registrationMarkerSize =
+      AnswerSheetLayout.registrationMarkerSize;
 
   // Distance of the marker from the outside edge of the sheet.
-  static const double _registrationMarkerInset = 2;
+  static const double _registrationMarkerInset =
+      AnswerSheetLayout.registrationMarkerInset;
 
   // --------------------------------------------------------------------------
   // OMR SETTINGS
@@ -73,29 +77,33 @@ class AnswerSheetPdfService {
     question into a tiny space.
   */
 
-  static const double _bubbleSize = 11;
+  static const double _bubbleSize = AnswerSheetLayout.bubbleSize;
 
-  static const double _answerOptionWidth = 23;
+  static const double _answerOptionWidth = AnswerSheetLayout.answerOptionWidth;
 
-  static const double _questionNumberWidth = 17;
+  static const double _questionNumberWidth =
+      AnswerSheetLayout.questionNumberWidth;
 
-  static const double _omrRowHeight = 17;
+  static const double _omrRowHeight = AnswerSheetLayout.omrRowHeight;
 
   // --------------------------------------------------------------------------
   // IDENTIFICATION SETTINGS
   // --------------------------------------------------------------------------
 
-  static const double _identificationBoxHeight = 18;
+  static const double _identificationBoxHeight =
+      AnswerSheetLayout.identificationBoxHeight;
 
-  static const double _identificationRowSpacing = 3;
+  static const double _identificationRowSpacing =
+      AnswerSheetLayout.identificationRowSpacing;
 
   // --------------------------------------------------------------------------
   // SPACING
   // --------------------------------------------------------------------------
 
-  static const double _sectionTitleHeight = 18;
+  static const double _sectionTitleHeight =
+      AnswerSheetLayout.sectionTitleHeight;
 
-  static const double _sectionSpacing = 5;
+  static const double _sectionSpacing = AnswerSheetLayout.sectionSpacing;
 
   // --------------------------------------------------------------------------
   // MAIN PDF GENERATOR
@@ -302,25 +310,10 @@ class AnswerSheetPdfService {
     required String type,
     required int questionCount,
   }) {
-    if (type == 'multiple_choice' || type == 'true_false') {
-      final columns = _calculateOmrColumns(questionCount);
-
-      final rows = (questionCount / columns).ceil();
-
-      return _sectionTitleHeight + (rows * _omrRowHeight) + _sectionSpacing;
-    }
-
-    if (type == 'identification') {
-      return _sectionTitleHeight +
-          (questionCount *
-              (_identificationBoxHeight + _identificationRowSpacing)) +
-          _sectionSpacing;
-    }
-
-    /*
-      Unknown section type.
-    */
-    return 30;
+    return AnswerSheetLayout.calculateSectionHeight(
+      type: type,
+      questionCount: questionCount,
+    );
   }
 
   // --------------------------------------------------------------------------
@@ -336,11 +329,7 @@ class AnswerSheetPdfService {
       2 columns
     */
 
-    if (questionCount >= 10) {
-      return 2;
-    }
-
-    return 1;
+    return AnswerSheetLayout.calculateOmrColumns(questionCount);
   }
 
   // --------------------------------------------------------------------------
@@ -617,7 +606,7 @@ class AnswerSheetPdfService {
           ),
         ),
 
-        pw.SizedBox(height: 3),
+        pw.SizedBox(height: AnswerSheetLayout.sectionTitleGap),
 
         if (type == 'multiple_choice') _buildMultipleChoice(questions),
 

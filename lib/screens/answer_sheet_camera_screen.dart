@@ -282,11 +282,12 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
       final AnswerSheetProcessingResult result =
           await AnswerSheetProcessor.processAnswerSheet(_capturedImageBytes!);
 
-      final Uint8List thresholdImage = OpenCVTestService.adaptiveThreshold(
+      final Uint8List? thresholdImage =
+          await OpenCVTestService.adaptiveThreshold(
         result.correctedImageBytes,
       );
 
-      final OpenCVOMRResult omrResult = OpenCVOMRService.process(
+      final OpenCVOMRResult omrResult = await OpenCVOMRService.process(
         result.correctedImageBytes,
         sections: widget.sections,
       );
@@ -297,7 +298,7 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
         _correctedImageBytes = result.correctedImageBytes;
         _openCVThresholdImageBytes = thresholdImage;
         _openCVOmrResult = omrResult;
-        _showThresholdPreview = true;
+        _showThresholdPreview = thresholdImage != null;
         _showOmrDebugPreview = false;
         _detectedMarkers = result.markers;
         _isProcessing = false;
@@ -868,7 +869,8 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
                     'Detected ${_detectedMarkers.length} registration markers.',
                     style: const TextStyle(color: Colors.white70),
                   ),
-                  if (_openCVThresholdImageBytes != null) ...[
+                  if (_openCVThresholdImageBytes != null ||
+                      _openCVOmrResult?.debugImageBytes != null) ...[
                     const SizedBox(height: 10),
                     Text(
                       _showOmrDebugPreview
@@ -884,34 +886,35 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            setState(() {
-                              if (_showThresholdPreview ||
-                                  _showOmrDebugPreview) {
-                                _showThresholdPreview = false;
-                                _showOmrDebugPreview = false;
-                              } else {
-                                _showThresholdPreview = true;
-                                _showOmrDebugPreview = false;
-                              }
-                            });
-                          },
-                          icon: Icon(
-                            _showThresholdPreview && !_showOmrDebugPreview
-                                ? Icons.image_outlined
-                                : Icons.contrast,
+                        if (_openCVThresholdImageBytes != null)
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                if (_showThresholdPreview ||
+                                    _showOmrDebugPreview) {
+                                  _showThresholdPreview = false;
+                                  _showOmrDebugPreview = false;
+                                } else {
+                                  _showThresholdPreview = true;
+                                  _showOmrDebugPreview = false;
+                                }
+                              });
+                            },
+                            icon: Icon(
+                              _showThresholdPreview && !_showOmrDebugPreview
+                                  ? Icons.image_outlined
+                                  : Icons.contrast,
+                            ),
+                            label: Text(
+                              _showThresholdPreview && !_showOmrDebugPreview
+                                  ? 'View Corrected Image'
+                                  : 'View OpenCV Threshold',
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Colors.white54),
+                            ),
                           ),
-                          label: Text(
-                            _showThresholdPreview && !_showOmrDebugPreview
-                                ? 'View Corrected Image'
-                                : 'View OpenCV Threshold',
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            side: const BorderSide(color: Colors.white54),
-                          ),
-                        ),
                         if (_openCVOmrResult?.debugImageBytes != null)
                           OutlinedButton.icon(
                             onPressed: () {

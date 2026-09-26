@@ -352,6 +352,7 @@ class _AnswerSheetInputScreenState
 
           return AnswerSheetCameraScreen(
             examId: examId,
+            sections: scannerSections,
           );
         },
       ),
