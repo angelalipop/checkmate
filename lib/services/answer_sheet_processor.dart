@@ -639,140 +639,144 @@ class AnswerSheetProcessor {
       throw Exception('Perspective correction requires exactly four markers.');
     }
 
-    /*
-    * -------------------------------------------------------------------------
-    * IMPORTANT
-    * -------------------------------------------------------------------------
-    *
-    * We DO NOT estimate the physical paper corners anymore.
-    *
-    * The four registration-marker CENTERS are now the coordinate anchors.
-    *
-    * Generated answer-sheet coordinates:
-    *
-    * TL = (7, 7)
-    * TR = (390, 7)
-    * BR = (390, 552)
-    * BL = (7, 552)
-    *
-    * Therefore the known marker-to-marker region is:
-    *
-    * width  = 390 - 7 = 383 units
-    * height = 552 - 7 = 545 units
-    *
-    * We rectify that region directly and then place it inside a clean
-    * 397 x 559 logical canvas.
-    *
-    * This avoids extrapolating from the markers to uncertain photographed
-    * paper edges.
-    * -------------------------------------------------------------------------
-    */
-
     final RegistrationPoint topLeft = markers[0];
     final RegistrationPoint topRight = markers[1];
     final RegistrationPoint bottomRight = markers[2];
     final RegistrationPoint bottomLeft = markers[3];
 
-    // -------------------------------------------------------------------------
-    // FULL NORMALIZED OUTPUT
-    // -------------------------------------------------------------------------
-
-    const int outputWidth = _correctedWidth;
-    const int outputHeight = _correctedHeight;
-
     /*
-    * Scale factors from the generated PDF coordinate system to pixels.
-    *
-    * 397 logical units -> 1500 pixels
-    * 559 logical units -> 2129 pixels
-    */
-    const double scaleX = outputWidth / _pageWidth;
+     * The marker centers are known points in the generated 397 x 559 page:
+     *
+     * TL = (7, 7)
+     * TR = (390, 7)
+     * BR = (390, 552)
+     * BL = (7, 552)
+     *
+     * Solve the projective transform from LOGICAL PAGE coordinates to the
+     * photographed marker coordinates. Then use the inverse mapping for every
+     * output pixel. This lets the same transform extrapolate from the marker
+     * centers all the way to the true logical page edges (0..397, 0..559).
+     *
+     * Unlike the previous implementation, this does not rectify only the
+     * marker-to-marker rectangle and paste it into white margins.
+     */
 
-    const double scaleY = outputHeight / _pageHeight;
+    final List<_Point2D> logicalMarkerCenters = <_Point2D>[
+      const _Point2D(_markerCenterInset, _markerCenterInset),
+      const _Point2D(_pageWidth - _markerCenterInset, _markerCenterInset),
+      const _Point2D(
+        _pageWidth - _markerCenterInset,
+        _pageHeight - _markerCenterInset,
+      ),
+      const _Point2D(_markerCenterInset, _pageHeight - _markerCenterInset),
+    ];
 
-    /*
-    * Marker centers in the final normalized image.
-    */
-    final int destinationLeft = (_markerCenterInset * scaleX).round();
+    final List<_Point2D> photographedMarkerCenters = <_Point2D>[
+      _Point2D(topLeft.x, topLeft.y),
+      _Point2D(topRight.x, topRight.y),
+      _Point2D(bottomRight.x, bottomRight.y),
+      _Point2D(bottomLeft.x, bottomLeft.y),
+    ];
 
-    final int destinationTop = (_markerCenterInset * scaleY).round();
-
-    final int destinationRight = ((_pageWidth - _markerCenterInset) * scaleX)
-        .round();
-
-    final int destinationBottom = ((_pageHeight - _markerCenterInset) * scaleY)
-        .round();
-
-    /*
-    * Size of the marker-center-to-marker-center rectangle.
-    */
-    final int rectifiedWidth = destinationRight - destinationLeft;
-
-    final int rectifiedHeight = destinationBottom - destinationTop;
-
-    if (rectifiedWidth <= 0 || rectifiedHeight <= 0) {
-      throw Exception('Invalid normalized marker geometry.');
-    }
-
-    // -------------------------------------------------------------------------
-    // DIRECT MARKER-TO-MARKER RECTIFICATION
-    // -------------------------------------------------------------------------
-
-    /*
-    * copyRectify maps:
-    *
-    * detected TL marker center -> top-left of intermediate image
-    * detected TR marker center -> top-right
-    * detected BL marker center -> bottom-left
-    * detected BR marker center -> bottom-right
-    *
-    * No paper-edge extrapolation happens here.
-    */
-
-    final img.Image rectifiedMarkerRegion = img.copyRectify(
-      image,
-      topLeft: img.Point(topLeft.x.round(), topLeft.y.round()),
-      topRight: img.Point(topRight.x.round(), topRight.y.round()),
-      bottomLeft: img.Point(bottomLeft.x.round(), bottomLeft.y.round()),
-      bottomRight: img.Point(bottomRight.x.round(), bottomRight.y.round()),
-      interpolation: img.Interpolation.linear,
-      toImage: img.Image(width: rectifiedWidth, height: rectifiedHeight),
+    // Maps logical page coordinates -> photographed image coordinates.
+    // That is exactly the direction needed for inverse-mapped raster sampling:
+    // for each normalized output pixel, find the corresponding source pixel.
+    final List<double> logicalToPhoto = _solveHomography(
+      logicalMarkerCenters,
+      photographedMarkerCenters,
     );
-
-    // -------------------------------------------------------------------------
-    // CREATE FULL NORMALIZED SHEET
-    // -------------------------------------------------------------------------
-
-    /*
-    * The area outside the registration-marker centers is intentionally
-    * synthetic white space.
-    *
-    * We know from the PDF generator that each marker center is exactly
-    * 7 logical units from its corresponding page edge.
-    *
-    * We therefore do not need to guess where the photographed paper edge is.
-    */
 
     final img.Image normalized = img.Image(
-      width: outputWidth,
-      height: outputHeight,
+      width: _correctedWidth,
+      height: _correctedHeight,
     );
 
-    // Make the whole normalized sheet white.
     img.fill(normalized, color: img.ColorRgb8(255, 255, 255));
 
-    // -------------------------------------------------------------------------
-    // PLACE RECTIFIED REGION AT ITS EXACT LOGICAL POSITION
-    // -------------------------------------------------------------------------
+    final double outputScaleX = _pageWidth / _correctedWidth;
+    final double outputScaleY = _pageHeight / _correctedHeight;
 
-    img.compositeImage(
-      normalized,
-      rectifiedMarkerRegion,
-      dstX: destinationLeft,
-      dstY: destinationTop,
-    );
+    for (int y = 0; y < _correctedHeight; y++) {
+      final double logicalY = (y + 0.5) * outputScaleY;
+
+      for (int x = 0; x < _correctedWidth; x++) {
+        final double logicalX = (x + 0.5) * outputScaleX;
+
+        final _Point2D sourcePoint = _applyHomography(
+          logicalToPhoto,
+          _Point2D(logicalX, logicalY),
+        );
+
+        final double sx = sourcePoint.x;
+        final double sy = sourcePoint.y;
+
+        if (sx < 0 ||
+            sy < 0 ||
+            sx >= image.width - 1 ||
+            sy >= image.height - 1) {
+          continue;
+        }
+
+        final int x0 = sx.floor();
+        final int y0 = sy.floor();
+        final int x1 = x0 + 1;
+        final int y1 = y0 + 1;
+
+        final double dx = sx - x0;
+        final double dy = sy - y0;
+
+        final img.Pixel p00 = image.getPixel(x0, y0);
+        final img.Pixel p10 = image.getPixel(x1, y0);
+        final img.Pixel p01 = image.getPixel(x0, y1);
+        final img.Pixel p11 = image.getPixel(x1, y1);
+
+        final int r = _bilinearChannel(
+          p00.r.toDouble(),
+          p10.r.toDouble(),
+          p01.r.toDouble(),
+          p11.r.toDouble(),
+          dx,
+          dy,
+        );
+
+        final int g = _bilinearChannel(
+          p00.g.toDouble(),
+          p10.g.toDouble(),
+          p01.g.toDouble(),
+          p11.g.toDouble(),
+          dx,
+          dy,
+        );
+
+        final int b = _bilinearChannel(
+          p00.b.toDouble(),
+          p10.b.toDouble(),
+          p01.b.toDouble(),
+          p11.b.toDouble(),
+          dx,
+          dy,
+        );
+
+        normalized.setPixelRgb(x, y, r, g, b);
+      }
+    }
 
     return normalized;
+  }
+
+  static int _bilinearChannel(
+    double p00,
+    double p10,
+    double p01,
+    double p11,
+    double dx,
+    double dy,
+  ) {
+    final double top = p00 + ((p10 - p00) * dx);
+    final double bottom = p01 + ((p11 - p01) * dx);
+    final double value = top + ((bottom - top) * dy);
+
+    return value.round().clamp(0, 255).toInt();
   }
 
   // ---------------------------------------------------------------------------

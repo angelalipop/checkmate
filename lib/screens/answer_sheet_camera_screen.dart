@@ -5,7 +5,8 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import 'package:checkmate/services/answer_sheet_processor.dart';
-import 'package:checkmate/services/opencv_test_service.dart';
+import 'package:checkmate/services/document_scanner_models.dart';
+import 'package:checkmate/services/document_scanner_service.dart';
 import 'package:checkmate/services/opencv_omr_service.dart';
 
 class AnswerSheetCameraScreen extends StatefulWidget {
@@ -34,9 +35,8 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
 
   String? _errorMessage;
 
-  XFile? _capturedImage;
-
   Uint8List? _capturedImageBytes;
+  Uint8List? _smartAlignedImageBytes;
   Uint8List? _correctedImageBytes;
   Uint8List? _openCVThresholdImageBytes;
   OpenCVOMRResult? _openCVOmrResult;
@@ -167,10 +167,10 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
       }
 
       setState(() {
-        _capturedImage = image;
         _capturedImageBytes = imageBytes;
 
         // Reset previous processing results.
+        _smartAlignedImageBytes = null;
         _correctedImageBytes = null;
         _openCVThresholdImageBytes = null;
         _openCVOmrResult = null;
@@ -218,8 +218,8 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
       if (!mounted) return;
 
       setState(() {
-        _capturedImage = image;
         _capturedImageBytes = imageBytes;
+        _smartAlignedImageBytes = null;
         _correctedImageBytes = null;
         _openCVThresholdImageBytes = null;
         _openCVOmrResult = null;
@@ -247,8 +247,8 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
 
   void _retakePicture() {
     setState(() {
-      _capturedImage = null;
       _capturedImageBytes = null;
+      _smartAlignedImageBytes = null;
       _correctedImageBytes = null;
       _openCVThresholdImageBytes = null;
       _openCVOmrResult = null;
@@ -270,6 +270,7 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
 
     setState(() {
       _isProcessing = true;
+      _smartAlignedImageBytes = null;
       _correctedImageBytes = null;
       _openCVThresholdImageBytes = null;
       _openCVOmrResult = null;
@@ -279,14 +280,34 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
     });
 
     try {
+      Uint8List markerInputBytes = _capturedImageBytes!;
+      bool usedSmartAlignment = false;
+
+      // Stage 1: try coarse paper-boundary normalization first.
+      // Failure here is NOT fatal. CheckMate can still use its four
+      // registration markers directly from the original image.
+      try {
+        final DocumentScanResult scanResult =
+            await DocumentScannerService.process(_capturedImageBytes!);
+
+        markerInputBytes = scanResult.correctedImageBytes;
+        usedSmartAlignment = true;
+
+        if (mounted) {
+          setState(() {
+            _smartAlignedImageBytes = scanResult.correctedImageBytes;
+          });
+        }
+      } catch (e) {
+        markerInputBytes = _capturedImageBytes!;
+      }
+
+      // Stage 2: always use the existing CheckMate registration-marker
+      // processor for the precise 1500 x 2129 normalization.
       final AnswerSheetProcessingResult result =
-          await AnswerSheetProcessor.processAnswerSheet(_capturedImageBytes!);
+          await AnswerSheetProcessor.processAnswerSheet(markerInputBytes);
 
-      final Uint8List? thresholdImage =
-          await OpenCVTestService.adaptiveThreshold(
-        result.correctedImageBytes,
-      );
-
+      // Stage 3: keep the existing OpenCV OMR algorithm unchanged.
       final OpenCVOMRResult omrResult = await OpenCVOMRService.process(
         result.correctedImageBytes,
         sections: widget.sections,
@@ -296,18 +317,23 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
 
       setState(() {
         _correctedImageBytes = result.correctedImageBytes;
-        _openCVThresholdImageBytes = thresholdImage;
-        _openCVOmrResult = omrResult;
-        _showThresholdPreview = thresholdImage != null;
-        _showOmrDebugPreview = false;
         _detectedMarkers = result.markers;
+        _openCVOmrResult = omrResult;
         _isProcessing = false;
+        _showThresholdPreview = false;
+        _showOmrDebugPreview = false;
       });
 
+      final String alignmentMessage = usedSmartAlignment
+          ? 'Paper alignment + registration-marker correction complete.'
+          : 'Paper boundary was skipped; registration-marker fallback succeeded.';
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 5),
           content: Text(
-            'Four registration markers detected and perspective corrected.',
+            '$alignmentMessage '
+            'Detected ${result.markers.length} registration markers.',
           ),
         ),
       );
@@ -319,14 +345,12 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
         _correctedImageBytes = null;
         _openCVThresholdImageBytes = null;
         _openCVOmrResult = null;
-        _showThresholdPreview = false;
-        _showOmrDebugPreview = false;
         _detectedMarkers = <RegistrationPoint>[];
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          duration: const Duration(seconds: 5),
+          duration: const Duration(seconds: 7),
           content: Text('Answer sheet processing failed:\n$e'),
         ),
       );
@@ -352,6 +376,10 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
       return _correctedImageBytes;
     }
 
+    if (_smartAlignedImageBytes != null) {
+      return _smartAlignedImageBytes;
+    }
+
     return _capturedImageBytes;
   }
 
@@ -367,7 +395,9 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
               ? 'OMR Debug Overlay'
               : _showThresholdPreview
               ? 'OpenCV Threshold'
-              : 'Corrected Answer Sheet',
+              : _smartAlignedImageBytes != null
+              ? 'Smart-Aligned Answer Sheet'
+              : 'Original Answer Sheet',
         ),
       ),
     );
@@ -395,10 +425,9 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
       );
     }
 
-    final sorted = List<dynamic>.from(bubbles)
-      ..sort(
-        (a, b) => (b.fillRatio as double).compareTo(a.fillRatio as double),
-      );
+    final sorted = List<dynamic>.from(
+      bubbles,
+    )..sort((a, b) => (b.fillRatio as double).compareTo(a.fillRatio as double));
 
     final double strongest = sorted.first.fillRatio as double;
     final double secondStrongest = sorted.length > 1
@@ -756,7 +785,8 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
   // ============================================================
 
   Widget _buildPreviewScreen() {
-    final bool hasCorrectedImage = _correctedImageBytes != null;
+    final bool hasCorrectedImage =
+        _correctedImageBytes != null || _smartAlignedImageBytes != null;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -833,7 +863,7 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
                   ),
                   SizedBox(width: 10),
                   Text(
-                    'Detecting registration markers...',
+                    'Aligning sheet, detecting markers, and reading OMR...',
                     style: TextStyle(color: Colors.white),
                   ),
                 ],
@@ -984,8 +1014,9 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
                                           '${bubble.label}:${bubble.fillRatio.toStringAsFixed(3)}',
                                     )
                                     .join('  ');
-                                final classification =
-                                    _classifyQuestion(question);
+                                final classification = _classifyQuestion(
+                                  question,
+                                );
 
                                 return Padding(
                                   padding: const EdgeInsets.only(bottom: 8),
