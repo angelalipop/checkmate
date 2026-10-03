@@ -1,6 +1,6 @@
 import 'package:postgres/postgres.dart';
 
-import '../database.dart';
+import 'package:server/database.dart';
 
 class ClassService {
   static Future<List<Map<String, dynamic>>> getAll() async {

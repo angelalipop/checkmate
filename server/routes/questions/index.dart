@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:dart_frog/dart_frog.dart';
 
-import '../../lib/questions/question_service.dart';
+import 'package:server/questions/question_service.dart';
 
 Future<Response> onRequest(RequestContext context) async {
   if (context.request.method == HttpMethod.get) {

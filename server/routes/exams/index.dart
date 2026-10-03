@@ -1,6 +1,6 @@
 import 'package:dart_frog/dart_frog.dart';
 
-import '../../lib/exams/exam_service.dart';
+import 'package:server/exams/exam_service.dart';
 
 Future<Response> onRequest(RequestContext context) async {
   try {
@@ -108,14 +108,14 @@ Future<Response> onRequest(RequestContext context) async {
           classId: classId,
           title: title,
           description:
-              description?.isEmpty == true
+              description?.isEmpty ?? false
                   ? null
                   : description,
           instructions:
-              instructions?.isEmpty == true
+              instructions?.isEmpty ?? false
                   ? null
                   : instructions,
-          status: status?.isEmpty == true
+          status: status?.isEmpty ?? false
               ? null
               : status,
         );

@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:dart_frog/dart_frog.dart';
 
-import '../../lib/exam_sections/exam_section_service.dart';
+import 'package:server/exam_sections/exam_section_service.dart';
 
 const allowedQuestionTypes = {
   'identification',

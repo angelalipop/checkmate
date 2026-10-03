@@ -1,7 +1,7 @@
 import 'package:dart_frog/dart_frog.dart';
 import 'package:postgres/postgres.dart';
 
-import '../../lib/database.dart';
+import 'package:server/database.dart';
 
 Future<Response> onRequest(RequestContext context) async {
   try {

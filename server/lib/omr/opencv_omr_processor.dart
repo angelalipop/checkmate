@@ -4,13 +4,13 @@ import 'dart:typed_data';
 
 import 'package:dartcv4/dartcv.dart' as cv;
 
-import 'answer_sheet_layout.dart';
+import 'package:server/omr/answer_sheet_layout.dart';
 
 class OpenCVBubbleMeasurement {
-  final String label;
-  final double fillRatio;
 
   const OpenCVBubbleMeasurement({required this.label, required this.fillRatio});
+  final String label;
+  final double fillRatio;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'label': label,
@@ -19,13 +19,13 @@ class OpenCVBubbleMeasurement {
 }
 
 class OpenCVQuestionMeasurement {
-  final int questionNumber;
-  final List<OpenCVBubbleMeasurement> bubbles;
 
   const OpenCVQuestionMeasurement({
     required this.questionNumber,
     required this.bubbles,
   });
+  final int questionNumber;
+  final List<OpenCVBubbleMeasurement> bubbles;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'questionNumber': questionNumber,
@@ -34,15 +34,15 @@ class OpenCVQuestionMeasurement {
 }
 
 class OpenCVSectionMeasurement {
-  final String sectionName;
-  final String sectionType;
-  final List<OpenCVQuestionMeasurement> questions;
 
   const OpenCVSectionMeasurement({
     required this.sectionName,
     required this.sectionType,
     required this.questions,
   });
+  final String sectionName;
+  final String sectionType;
+  final List<OpenCVQuestionMeasurement> questions;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'sectionName': sectionName,
@@ -52,13 +52,13 @@ class OpenCVSectionMeasurement {
 }
 
 class OpenCVOMRResult {
-  final List<OpenCVSectionMeasurement> sections;
-  final Uint8List? debugImageBytes;
 
   const OpenCVOMRResult({
     required this.sections,
     required this.debugImageBytes,
   });
+  final List<OpenCVSectionMeasurement> sections;
+  final Uint8List? debugImageBytes;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'sections': sections.map((section) => section.toJson()).toList(),
@@ -102,10 +102,10 @@ class ServerOpenCVOMRProcessor {
   // Anchor each OMR section to the TOPMOST real bubble row found near the
   // expected option columns. This avoids the repeating-grid ambiguity where
   // Q1 can accidentally snap to Q2.
-  static const double _topRowSearchUpLogical = 8.0;
-  static const double _topRowSearchDownLogical = 30.0;
-  static const double _topRowSearchLeftLogical = 14.0;
-  static const double _topRowSearchRightLogical = 14.0;
+  static const double _topRowSearchUpLogical = 8;
+  static const double _topRowSearchDownLogical = 30;
+  static const double _topRowSearchLeftLogical = 14;
+  static const double _topRowSearchRightLogical = 14;
   static const double _topRowTranslationStepLogical = 0.5;
   static const double _topRowXToleranceLogical = 2.8;
   static const double _topRowYToleranceLogical = 2.8;
@@ -114,7 +114,7 @@ class ServerOpenCVOMRProcessor {
     Uint8List correctedImageBytes, {
     required List<Map<String, dynamic>> sections,
   }) {
-    final cv.Mat source = cv.imdecode(correctedImageBytes, cv.IMREAD_COLOR);
+    final source = cv.imdecode(correctedImageBytes, cv.IMREAD_COLOR);
     if (source.isEmpty) {
       source.dispose();
       throw Exception('OpenCV could not decode the corrected answer sheet.');
@@ -138,8 +138,8 @@ class ServerOpenCVOMRProcessor {
       );
       debug = source.clone();
 
-      final double scaleX = source.cols.toDouble() / _sheetWidth;
-      final double scaleY = source.rows.toDouble() / _sheetHeight;
+      final scaleX = source.cols.toDouble() / _sheetWidth;
+      final scaleY = source.rows.toDouble() / _sheetHeight;
 
       // Detect printed bubble contours once for the whole corrected page.
       // This prevents the OMR reader from drifting onto section borders/text.
@@ -150,7 +150,7 @@ class ServerOpenCVOMRProcessor {
       );
 
       final results = <OpenCVSectionMeasurement>[];
-      double currentY = _firstSectionY;
+      var currentY = _firstSectionY;
 
       for (final section in sections) {
         final type = _normalizeType(
@@ -199,7 +199,7 @@ class ServerOpenCVOMRProcessor {
           (questions.length / questionsPerColumn).ceil(),
         );
         final totalBlockWidth = columnWidth * actualColumns;
-        final contentWidth = _sheetWidth - (_sheetPadding * 2);
+        const contentWidth = _sheetWidth - (_sheetPadding * 2);
         final blockLeft =
             _sheetPadding + ((contentWidth - totalBlockWidth) / 2.0);
 
@@ -226,7 +226,7 @@ class ServerOpenCVOMRProcessor {
 
         final measuredQuestions = <OpenCVQuestionMeasurement>[];
 
-        for (int i = 0; i < questions.length; i++) {
+        for (var i = 0; i < questions.length; i++) {
           final columnIndex = i ~/ questionsPerColumn;
           final rowIndex = i % questionsPerColumn;
           final question = questions[i];
@@ -238,7 +238,7 @@ class ServerOpenCVOMRProcessor {
           final bubbles = <OpenCVBubbleMeasurement>[];
 
           for (
-            int optionIndex = 0;
+            var optionIndex = 0;
             optionIndex < labels.length;
             optionIndex++
           ) {
@@ -293,7 +293,7 @@ class ServerOpenCVOMRProcessor {
                   )
                   .round(),
             );
-            final cv.Point centerPoint = cv.Point(
+            final centerPoint = cv.Point(
               measuredCenterX,
               measuredCenterY,
             );
@@ -302,7 +302,7 @@ class ServerOpenCVOMRProcessor {
               debug,
               centerPoint,
               debugRadius,
-              cv.Scalar(0, 0, 255, 0),
+              cv.Scalar(0, 0, 255),
               thickness: 2,
             );
 
@@ -310,7 +310,7 @@ class ServerOpenCVOMRProcessor {
               debug,
               centerPoint,
               2,
-              cv.Scalar(255, 0, 0, 0),
+              cv.Scalar(255, 0),
               thickness: -1,
             );
           }
@@ -365,14 +365,14 @@ class ServerOpenCVOMRProcessor {
     required double scaleY,
   }) {
     if (candidates.isEmpty) {
-      return const _SectionTranslation(dxLogical: 0.0, dyLogical: 0.0);
+      return const _SectionTranslation(dxLogical: 0, dyLogical: 0);
     }
 
     final expectedLogicalXs = <double>[];
-    for (int columnIndex = 0; columnIndex < actualColumns; columnIndex++) {
+    for (var columnIndex = 0; columnIndex < actualColumns; columnIndex++) {
       final columnLeft = blockLeft + columnIndex * columnWidth;
 
-      for (int optionIndex = 0; optionIndex < labelsCount; optionIndex++) {
+      for (var optionIndex = 0; optionIndex < labelsCount; optionIndex++) {
         expectedLogicalXs.add(
           columnLeft +
               _questionNumberWidth +
@@ -383,29 +383,29 @@ class ServerOpenCVOMRProcessor {
     }
 
     if (expectedLogicalXs.isEmpty) {
-      return const _SectionTranslation(dxLogical: 0.0, dyLogical: 0.0);
+      return const _SectionTranslation(dxLogical: 0, dyLogical: 0);
     }
 
     final baseLogicalY = measurementGridTop + (_bubbleSize / 2.0);
 
-    final double toleranceX = math
-        .max(2.0, _topRowXToleranceLogical * scaleX)
-        .toDouble();
-    final double toleranceY = math
-        .max(2.0, _topRowYToleranceLogical * scaleY)
-        .toDouble();
+    final toleranceX = math
+        .max(2, _topRowXToleranceLogical * scaleX)
+        ;
+    final toleranceY = math
+        .max(2, _topRowYToleranceLogical * scaleY)
+        ;
 
     // T/F should normally provide both bubbles. MC (and multi-column MC)
     // requires at least half of the expected circles in the physical first row.
-    final int requiredMatches = expectedLogicalXs.length <= 2
+    final requiredMatches = expectedLogicalXs.length <= 2
         ? expectedLogicalXs.length
-        : math.max(2, (expectedLogicalXs.length * 0.50).ceil()).toInt();
+        : math.max(2, (expectedLogicalXs.length * 0.50).ceil());
 
     _TopRowTranslationScore? bestInTopmostBand;
     double? firstValidDy;
 
     for (
-      double dy = -_topRowSearchUpLogical;
+      var dy = -_topRowSearchUpLogical;
       dy <= _topRowSearchDownLogical + 0.001;
       dy += _topRowTranslationStepLogical
     ) {
@@ -420,22 +420,22 @@ class ServerOpenCVOMRProcessor {
       _TopRowTranslationScore? bestAtThisY;
 
       for (
-        double dx = -_topRowSearchLeftLogical;
+        var dx = -_topRowSearchLeftLogical;
         dx <= _topRowSearchRightLogical + 0.001;
         dx += _topRowTranslationStepLogical
       ) {
         final targetY = (baseLogicalY + dy) * scaleY;
 
-        int matches = 0;
-        double quality = 0.0;
+        var matches = 0;
+        double quality = 0;
 
         for (final expectedLogicalX in expectedLogicalXs) {
           final targetX = (expectedLogicalX + dx) * scaleX;
-          double bestDistance = double.infinity;
+          var bestDistance = double.infinity;
 
           for (final candidate in candidates) {
-            final px = (candidate.centerX - targetX).abs().toDouble();
-            final py = (candidate.centerY - targetY).abs().toDouble();
+            final px = (candidate.centerX - targetX).abs();
+            final py = (candidate.centerY - targetY).abs();
 
             if (px > toleranceX || py > toleranceY) continue;
 
@@ -450,7 +450,7 @@ class ServerOpenCVOMRProcessor {
 
           if (bestDistance.isFinite) {
             matches++;
-            quality += 1.0 - math.min(0.85, bestDistance * 0.35).toDouble();
+            quality += 1.0 - math.min(0.85, bestDistance * 0.35);
           }
         }
 
@@ -480,7 +480,7 @@ class ServerOpenCVOMRProcessor {
     }
 
     if (bestInTopmostBand == null) {
-      return const _SectionTranslation(dxLogical: 0.0, dyLogical: 0.0);
+      return const _SectionTranslation(dxLogical: 0, dyLogical: 0);
     }
 
     return _SectionTranslation(
@@ -577,7 +577,7 @@ class ServerOpenCVOMRProcessor {
     final maxDy = _candidateMaxDyLogical * scaleY;
 
     _BubbleCandidate? best;
-    double bestScore = double.infinity;
+    var bestScore = double.infinity;
 
     for (final candidate in candidates) {
       final dx = (candidate.centerX - expectedX).abs().toDouble();
@@ -612,24 +612,24 @@ class ServerOpenCVOMRProcessor {
     final right = math.min(gray.cols - 1, (centerX + radiusX).ceil());
     final top = math.max(0, (centerY - radiusY).floor());
     final bottom = math.min(gray.rows - 1, (centerY + radiusY).ceil());
-    if (right <= left || bottom <= top) return 0.0;
+    if (right <= left || bottom <= top) return 0;
 
-    int total = 0;
-    double graySum = 0.0;
+    var total = 0;
+    var graySum = 0;
 
-    for (int y = top; y <= bottom; y++) {
+    for (var y = top; y <= bottom; y++) {
       final ny = (y - centerY) / radiusY;
-      for (int x = left; x <= right; x++) {
+      for (var x = left; x <= right; x++) {
         final nx = (x - centerX) / radiusX;
         if ((nx * nx) + (ny * ny) > 1.0) continue;
 
-        final int value = gray.at<int>(y, x);
-        graySum += value.toDouble();
+        final value = gray.at<int>(y, x);
+        graySum += value;
         total++;
       }
     }
 
-    if (total == 0) return 0.0;
+    if (total == 0) return 0;
 
     // 0.0 = white interior, 1.0 = black interior.
     // Because only the inner ~30% radius is sampled, the printed outline is
@@ -645,7 +645,7 @@ class ServerOpenCVOMRProcessor {
     if (raw is! List) return <Map<String, dynamic>>[];
     return raw
         .whereType<Map>()
-        .map((q) => Map<String, dynamic>.from(q))
+        .map(Map<String, dynamic>.from)
         .toList();
   }
 
@@ -674,17 +674,13 @@ class ServerOpenCVOMRProcessor {
 }
 
 class _SectionTranslation {
-  final double dxLogical;
-  final double dyLogical;
 
   const _SectionTranslation({required this.dxLogical, required this.dyLogical});
+  final double dxLogical;
+  final double dyLogical;
 }
 
 class _TopRowTranslationScore {
-  final double dxLogical;
-  final double dyLogical;
-  final int matches;
-  final double quality;
 
   const _TopRowTranslationScore({
     required this.dxLogical,
@@ -692,14 +688,13 @@ class _TopRowTranslationScore {
     required this.matches,
     required this.quality,
   });
+  final double dxLogical;
+  final double dyLogical;
+  final int matches;
+  final double quality;
 }
 
 class _BubbleCandidate {
-  final int centerX;
-  final int centerY;
-  final int width;
-  final int height;
-  final double circularity;
 
   const _BubbleCandidate({
     required this.centerX,
@@ -708,4 +703,9 @@ class _BubbleCandidate {
     required this.height,
     required this.circularity,
   });
+  final int centerX;
+  final int centerY;
+  final int width;
+  final int height;
+  final double circularity;
 }

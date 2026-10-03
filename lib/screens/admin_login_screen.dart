@@ -3,90 +3,17 @@ import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import 'admin_dashboard.dart';
-import 'admin_login_screen.dart';
-import 'teacher_dashboard.dart';
+import 'login_screen.dart' show CmColors, CmBrandPanel, kDesktopBreakpoint;
 
-class CmColors {
-  static const navy = Color(0xFF1E293B); 
-  static const slate = Color(0xFF64748B); 
-  static const bg = Color(0xFFF8FAFC); 
-  static const green = Color(0xFF10B981); 
-  static const amber = Color(0xFFF59E0B); 
-  static const line = Color(0xFFE2E8F0);
-}
 
-const double kDesktopBreakpoint = 900;
-
-class CmBrandPanel extends StatelessWidget {
-  const CmBrandPanel({
-    super.key,
-    required this.heading,
-    required this.subheading,
-    this.backgroundColor = CmColors.navy,
-    this.illustrationAsset = 'assets/login_illustration.png',
-  });
-
-  final String heading;
-  final String subheading;
-
-  final Color backgroundColor;
-
-  final String illustrationAsset;
+class AdminLoginScreen extends StatefulWidget {
+  const AdminLoginScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: backgroundColor,
-      padding: const EdgeInsets.fromLTRB(48, 48, 48, 56),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-
-          Expanded(
-            child: Center(
-              child: Image.asset(
-                illustrationAsset,
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) => Icon(
-                  Icons.laptop_mac_rounded,
-                  size: 140,
-                  color: Colors.white.withValues(alpha: 0.18),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            heading,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 28,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            subheading,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 14,
-              height: 1.4,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  State<AdminLoginScreen> createState() => _AdminLoginScreenState();
 }
 
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
-
-  @override
-  State<LoginScreen> createState() => _LoginScreenState();
-}
-
-class _LoginScreenState extends State<LoginScreen> {
+class _AdminLoginScreenState extends State<AdminLoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
@@ -129,7 +56,6 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      // Get JWT token.
       final token = result['token']?.toString();
 
       if (token == null || token.isEmpty) {
@@ -138,64 +64,45 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
 
-      // Save JWT securely.
-      await AuthStorage.saveToken(token);
-
-      // Get user information.
       final user = result['user'];
 
       if (user is! Map) {
-        throw Exception(
-          'Invalid user information received.',
-        );
+        throw Exception('Invalid user information received.');
       }
 
       final role = user['role']?.toString().toLowerCase();
 
-      debugPrint('LOGIN USER: $user');
-      debugPrint('LOGIN ROLE: $role');
+      debugPrint('ADMIN LOGIN USER: $user');
+      debugPrint('ADMIN LOGIN ROLE: $role');
 
-      // ADMIN
-      if (role == 'admin') {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const AdminDashboard(),
-          ),
+      if (role != 'admin') {
+        throw Exception(
+          'This account is not an admin account. '
+          'Use the regular sign-in screen instead.',
         );
+      }
 
+      await AuthStorage.saveToken(token);
+
+      if (!mounted) {
         return;
       }
 
-      // TEACHER
-      if (role == 'teacher') {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => TeacherDashboard(
-              teacherName: (user['name'] ?? user['email']).toString(),
-            ),
-          ),
-        );
-
-        return;
-      }
-
-      throw Exception(
-        'Unknown user role: ${user['role']}',
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => const AdminDashboard(),
+        ),
       );
     } catch (e) {
       if (!mounted) {
         return;
       }
 
-      debugPrint('LOGIN ERROR: $e');
+      debugPrint('ADMIN LOGIN ERROR: $e');
 
       setState(() {
-        _error = e.toString().replaceFirst(
-              'Exception: ',
-              '',
-            );
+        _error = e.toString().replaceFirst('Exception: ', '');
       });
     } finally {
       if (mounted) {
@@ -206,24 +113,12 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Future<void> _goToAdminLogin() async {
-    // Clear any lingering error before leaving — LoginScreen's State stays
-    // alive underneath the pushed route, so without this the old error
-    // banner would still be showing when the user comes back here.
+  void _goBackToTeacherLogin() {
+    // Clear this screen's own error before popping, purely defensive —
+    // AdminLoginScreen gets a fresh State each time it's pushed, but this
+    // keeps the two screens' back-navigation behavior symmetric.
     setState(() => _error = null);
-
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const AdminLoginScreen(),
-      ),
-    );
-
-    // Belt-and-suspenders: also clear on return, in case an error was set
-    // by some other path while this screen was covered.
-    if (mounted) {
-      setState(() => _error = null);
-    }
+    Navigator.pop(context);
   }
 
   InputDecoration _fieldDecoration({
@@ -267,14 +162,12 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Logo mark — place the file at assets/logo.png and register
-              // it in pubspec.yaml under flutter: assets:
               Center(
                 child: Image.asset(
                   'assets/logo.png',
                   height: 150,
                   errorBuilder: (context, error, stackTrace) => const Icon(
-                    Icons.fact_check_rounded,
+                    Icons.admin_panel_settings_outlined,
                     size: 72,
                     color: CmColors.navy,
                   
@@ -285,7 +178,7 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 20),
 
               const Text(
-                'Welcome to CheckMate',
+                'Admin',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 24,
@@ -296,14 +189,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const SizedBox(height: 6),
 
-              Text(
-                'Sign in to continue.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: CmColors.slate,
-                ),
-              ),
 
               const SizedBox(height: 28),
 
@@ -312,7 +197,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
                 decoration: _fieldDecoration(
-                  label: 'Email',
+                  label: 'Admin email',
                   icon: Icons.email_outlined,
                 ),
               ),
@@ -364,8 +249,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const SizedBox(height: 24),
 
-              // Both buttons share the same height/radius so they read as
-              // one consistent pair rather than primary + smaller variant.
+              // Same height as LoginScreen's buttons for visual consistency.
               SizedBox(
                 height: 52,
                 child: FilledButton(
@@ -396,18 +280,14 @@ class _LoginScreenState extends State<LoginScreen> {
 
               SizedBox(
                 height: 52,
-                child: OutlinedButton(
-                  onPressed: _loading ? null : _goToAdminLogin,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: CmColors.navy,
-                    side: const BorderSide(color: CmColors.line),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
+                child: TextButton(
+                  onPressed: _loading ? null : _goBackToTeacherLogin,
                   child: const Text(
-                    'Sign in as Admin',
-                    style: TextStyle(fontWeight: FontWeight.w700),
+                    'Back to teacher sign in',
+                    style: TextStyle(
+                      color: CmColors.slate,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),
@@ -424,7 +304,7 @@ class _LoginScreenState extends State<LoginScreen> {
       padding: const EdgeInsets.all(24),
       child: Center(child: _buildFormCard(context)),
     );
-
+    
     return Scaffold(
       backgroundColor: CmColors.bg,
       body: LayoutBuilder(
@@ -438,10 +318,12 @@ class _LoginScreenState extends State<LoginScreen> {
               Expanded(child: scrollableForm),
               Expanded(
                 child: CmBrandPanel(
-                  heading: 'Sign in to CheckMate',
+                  heading: 'Admin console',
                   subheading:
-                      'Automated exam checking, item analysis, and '
-                      'results delivery for your whole department.',
+                      'Finalize exam questionnaires, manage teacher '
+                      'accounts, and oversee enrollment by section.',
+                  backgroundColor: CmColors.navy,
+                  illustrationAsset: 'assets/admin_illustration.png',
                 ),
               ),
             ],

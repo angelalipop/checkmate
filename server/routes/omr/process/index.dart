@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:dart_frog/dart_frog.dart';
 
-import '../../../lib/omr/opencv_omr_processor.dart';
+import 'package:server/omr/opencv_omr_processor.dart';
 
 const Map<String, String> _corsHeaders = <String, String>{
   'Access-Control-Allow-Origin': '*',
@@ -49,7 +49,7 @@ Future<Response> onRequest(RequestContext context) async {
     final imageBytes = base64Decode(imageBase64);
     final sections = rawSections
         .whereType<Map>()
-        .map((section) => Map<String, dynamic>.from(section))
+        .map(Map<String, dynamic>.from)
         .toList();
 
     final result = ServerOpenCVOMRProcessor.process(

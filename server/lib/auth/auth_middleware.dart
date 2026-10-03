@@ -1,6 +1,6 @@
 import 'package:dart_frog/dart_frog.dart';
 
-import 'jwt_service.dart';
+import 'package:server/auth/jwt_service.dart';
 
 Middleware authMiddleware() {
   return (handler) {

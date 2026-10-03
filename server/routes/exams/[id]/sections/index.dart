@@ -1,6 +1,6 @@
 import 'package:dart_frog/dart_frog.dart';
 
-import '../../../../lib/exams/exam_section_service.dart';
+import 'package:server/exams/exam_section_service.dart';
 
 Future<Response> onRequest(
   RequestContext context,

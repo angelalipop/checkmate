@@ -1,6 +1,6 @@
 import 'package:dart_frog/dart_frog.dart';
 
-import '../../lib/students/student_service.dart';
+import 'package:server/students/student_service.dart';
 
 Future<Response> onRequest(RequestContext context) async {
   try {

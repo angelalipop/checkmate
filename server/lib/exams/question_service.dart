@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:postgres/postgres.dart';
 
-import '../database.dart';
+import 'package:server/database.dart';
 
 class QuestionService {
   static Future<List<Map<String, dynamic>>> getAll({

@@ -1,11 +1,11 @@
 import 'package:dart_frog/dart_frog.dart';
 
-import '../../../../../../lib/answers/answer_service.dart';
+import 'package:server/answers/answer_service.dart';
 
 Future<Response> onRequest(
   RequestContext context,
   String id,
-  String answer_id,
+  String answerId,
 ) async {
   if (context.request.method != HttpMethod.post) {
     return Response.json(
@@ -18,9 +18,9 @@ Future<Response> onRequest(
   }
 
   final attemptId = int.tryParse(id);
-  final answerId = int.tryParse(answer_id);
+  final parsedAnswerId = int.tryParse(answerId);
 
-  if (attemptId == null || answerId == null) {
+  if (attemptId == null || parsedAnswerId == null) {
     return Response.json(
       statusCode: 400,
       body: {
@@ -65,7 +65,7 @@ Future<Response> onRequest(
 
     final answer = await AnswerService.verify(
       attemptId: attemptId,
-      answerId: answerId,
+      answerId: parsedAnswerId,
       isCorrect: isCorrect,
       pointsEarned: pointsEarned,
       recognizedAnswer: recognizedAnswer,

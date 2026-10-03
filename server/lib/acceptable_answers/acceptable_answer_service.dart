@@ -1,6 +1,6 @@
 import 'package:postgres/postgres.dart';
 
-import '../database.dart';
+import 'package:server/database.dart';
 
 class AcceptableAnswerService {
   static Future<List<Map<String, dynamic>>> getByQuestion(

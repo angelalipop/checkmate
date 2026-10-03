@@ -1,6 +1,6 @@
 import 'package:dart_frog/dart_frog.dart';
 
-import '../../../lib/exams/exam_detail_service.dart';
+import 'package:server/exams/exam_detail_service.dart';
 
 Future<Response> onRequest(RequestContext context, String id) async {
   if (context.request.method != HttpMethod.get) {

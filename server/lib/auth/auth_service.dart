@@ -1,7 +1,6 @@
 import 'package:postgres/postgres.dart';
-
-import '../database.dart';
-import 'password.dart';
+import 'package:server/auth/password.dart';
+import 'package:server/database.dart';
 
 class AuthService {
   static Future<Map<String, dynamic>?> login({
@@ -26,7 +25,7 @@ class AuthService {
 
     final row = result.first;
 
-    final passwordHash = row[3] as String;
+    final passwordHash = row[3]! as String;
 
     if (!Password.verify(password, passwordHash)) {
       return null;

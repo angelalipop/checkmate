@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:printing/printing.dart';
 
+import '../services/answer_sheet_pdf_service.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import 'answer_sheet_camera_screen.dart';
@@ -20,6 +22,7 @@ class _AnswerSheetInputScreenState
     extends State<AnswerSheetInputScreen> {
   bool _isLoading = true;
   bool _isLoadingSections = false;
+  bool _isDownloadingSheet = false;
 
   List<Map<String, dynamic>> _exams = [];
 
@@ -749,10 +752,104 @@ class _AnswerSheetInputScreenState
                         ),
                       ),
                     ),
+
+                  if (_exams.isNotEmpty && _selectedExam != null) ...[
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: (_isDownloadingSheet || _isLoadingSections)
+                            ? null
+                            : _downloadAnswerSheet,
+                        icon: _isDownloadingSheet
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.download),
+                        label: Text(
+                          _isDownloadingSheet
+                              ? 'Preparing PDF...'
+                              : 'Download Answer Sheet PDF',
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 17),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
     );
+  }
+
+  // =========================
+  // DOWNLOAD BLANK ANSWER SHEET
+  // =========================
+
+  Future<void> _downloadAnswerSheet() async {
+    if (_selectedExam == null) {
+      return;
+    }
+
+    final examId = int.tryParse(_selectedExam['id'].toString());
+    if (examId == null) {
+      return;
+    }
+
+    setState(() => _isDownloadingSheet = true);
+
+    try {
+      final token = await AuthStorage.getToken();
+
+      if (token == null || token.isEmpty) {
+        throw Exception('Your session has expired. Please log in again.');
+      }
+
+      final exam = Map<String, dynamic>.from(_selectedExam as Map);
+      final sections = await ApiService.getExamSections(token, examId);
+
+      final questions = <int, List<Map<String, dynamic>>>{};
+      for (final section in sections) {
+        final sectionId = int.tryParse(section['id']?.toString() ?? '');
+        if (sectionId == null) continue;
+        questions[sectionId] = await ApiService.getQuestions(token, sectionId);
+      }
+
+      final pdfBytes = await AnswerSheetPdfService.generate(
+        exam: exam,
+        sections: sections,
+        questions: questions,
+      );
+
+      final title = (exam['title']?.toString() ?? 'exam')
+          .trim()
+          .replaceAll(RegExp(r'[^A-Za-z0-9]+'), '_')
+          .replaceAll(RegExp(r'^_+|_+$'), '');
+
+      await Printing.sharePdf(
+        bytes: pdfBytes,
+        filename: 'answer_sheet_${title.isEmpty ? 'exam' : title}.pdf',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isDownloadingSheet = false);
+      }
+    }
   }
 
   // =========================

@@ -2,9 +2,21 @@ import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
+import 'import_students_screen.dart';
+import 'login_screen.dart' show CmColors;
 
 class StudentsScreen extends StatefulWidget {
-  const StudentsScreen({super.key});
+  const StudentsScreen({
+    super.key,
+    this.isTeacher = false,
+    this.initialClassId,
+  });
+
+  /// Teacher mode changes what the import flow asks for (no Teacher field).
+  final bool isTeacher;
+
+  /// Pre-select a class/section (used when tapping a class on Classes).
+  final int? initialClassId;
 
   @override
   State<StudentsScreen> createState() => _StudentsScreenState();
@@ -16,13 +28,23 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
   int? _selectedClassId;
 
+  final _searchController = TextEditingController();
+  String _query = '';
+
   bool _loading = true;
   String? _error;
 
   @override
   void initState() {
     super.initState();
+    _selectedClassId = widget.initialClassId;
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -50,9 +72,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
       setState(() {
         _students =
-            results[0] as List<Map<String, dynamic>>;
+            results[0];
         _classes =
-            results[1] as List<Map<String, dynamic>>;
+            results[1];
         _loading = false;
       });
     } catch (e) {
@@ -181,7 +203,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     DropdownButtonFormField<int>(
-                      value: selectedClassId,
+                      initialValue: selectedClassId,
                       decoration: const InputDecoration(
                         labelText: 'Class',
                         prefixIcon: Icon(
@@ -245,7 +267,6 @@ class _StudentsScreenState extends State<StudentsScreen> {
                       decoration:
                           const InputDecoration(
                         labelText: 'Student Number',
-                        hintText: 'e.g. 2026-00001',
                         prefixIcon: Icon(
                           Icons.badge_outlined,
                         ),
@@ -363,25 +384,149 @@ class _StudentsScreenState extends State<StudentsScreen> {
     }
   }
 
-  String _getClassLabel(
-    Map<String, dynamic> item,
-  ) {
-    final section =
-        item['section']?.toString() ??
-            'Unknown Section';
+  // =========================
+  // ADD STUDENTS (chooser)
+  // =========================
 
+  Future<void> _showAddStudentsSheet() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Add Students',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: CmColors.navy,
+                ),
+              ),
+              const SizedBox(height: 14),
+              _optionTile(
+                icon: Icons.upload_file_outlined,
+                title: 'Import Excel',
+                subtitle: 'Upload a student list using an .xlsx file.',
+                onTap: () => Navigator.pop(context, 'import'),
+              ),
+              const SizedBox(height: 10),
+              _optionTile(
+                icon: Icons.person_add_alt_1_outlined,
+                title: 'Add Manually',
+                subtitle: 'Add one student at a time.',
+                onTap: () => Navigator.pop(context, 'manual'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (!mounted || choice == null) return;
+
+    if (choice == 'import') {
+      final changed = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ImportStudentsScreen(isTeacher: widget.isTeacher),
+        ),
+      );
+      if (changed == true && mounted) {
+        await _loadData();
+      }
+    } else {
+      if (_classes.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Create a class first, or import an Excel list to create '
+              'classes automatically.',
+            ),
+          ),
+        );
+        return;
+      }
+      await _showAddStudentDialog();
+    }
+  }
+
+  Widget _optionTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: CmColors.line),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: CmColors.bg,
+                foregroundColor: CmColors.navy,
+                child: Icon(icon),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        color: CmColors.slate,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: CmColors.slate),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // =========================
+  // HELPERS
+  // =========================
+
+  String _getClassLabel(Map<String, dynamic> item) {
+    final section = item['section']?.toString() ?? 'Unknown Section';
     final subject = item['subject'];
 
     if (subject is! Map) {
       return section;
     }
 
-    final name =
-        subject['name']?.toString() ??
-            'Unknown Subject';
-
-    final code =
-        subject['code']?.toString() ?? '';
+    final name = subject['name']?.toString() ?? 'Unknown Subject';
+    final code = subject['code']?.toString() ?? '';
 
     if (code.isEmpty) {
       return '$section - $name';
@@ -390,54 +535,230 @@ class _StudentsScreenState extends State<StudentsScreen> {
     return '$section - $code - $name';
   }
 
+  int? _studentClassId(Map<String, dynamic> student) {
+    final c = student['class'];
+    if (c is Map && c['id'] != null) {
+      return int.tryParse(c['id'].toString());
+    }
+    return int.tryParse(student['class_id']?.toString() ?? '');
+  }
+
+  String _studentSection(Map<String, dynamic> student) {
+    final c = student['class'];
+    if (c is Map) {
+      final s = c['section']?.toString() ?? '';
+      if (s.isNotEmpty) return s;
+    }
+    return 'No Section';
+  }
+
+  String _studentSubject(Map<String, dynamic> student) {
+    final c = student['class'];
+    if (c is Map && c['subject'] is Map) {
+      final s = c['subject'] as Map;
+      final name = s['name']?.toString() ?? '';
+      final code = s['code']?.toString() ?? '';
+      if (name.isEmpty) return code;
+      return code.isEmpty ? name : '$code - $name';
+    }
+    return '';
+  }
+
+  String _fullName(Map<String, dynamic> s) {
+    final first = s['first_name']?.toString() ?? '';
+    final last = s['last_name']?.toString() ?? '';
+    final full = '$first $last'.trim();
+    return full.isEmpty ? 'Unnamed Student' : full;
+  }
+
+  bool _matches(Map<String, dynamic> s) {
+    if (_query.isEmpty) return true;
+    final haystack = [
+      _fullName(s),
+      s['last_name']?.toString() ?? '',
+      s['student_number']?.toString() ?? '',
+      s['email']?.toString() ?? '',
+      _studentSection(s),
+    ].join(' ').toLowerCase();
+    return haystack.contains(_query);
+  }
+
+  /// Builds a flat list of header + student entries, grouped by class
+  /// (section), so a single ListView.builder stays fast for 50+ students.
+  List<Object> _buildEntries() {
+    final groups = <String, List<Map<String, dynamic>>>{};
+    final meta = <String, _GroupHeader>{};
+
+    for (final s in _students.where(_matches)) {
+      final id = _studentClassId(s);
+      final key = id?.toString() ?? 'none';
+      groups.putIfAbsent(key, () => []).add(s);
+      meta.putIfAbsent(
+        key,
+        () => _GroupHeader(
+          section: _studentSection(s),
+          subject: _studentSubject(s),
+          count: 0,
+        ),
+      );
+    }
+
+    final keys = groups.keys.toList()
+      ..sort((a, b) => meta[a]!.section
+          .toLowerCase()
+          .compareTo(meta[b]!.section.toLowerCase()));
+
+    final entries = <Object>[];
+    for (final k in keys) {
+      final list = groups[k]!
+        ..sort((a, b) => (a['last_name']?.toString() ?? '')
+            .toLowerCase()
+            .compareTo((b['last_name']?.toString() ?? '').toLowerCase()));
+      final m = meta[k]!;
+      entries.add(_GroupHeader(
+        section: m.section,
+        subject: m.subject,
+        count: list.length,
+      ));
+      entries.addAll(list);
+    }
+    return entries;
+  }
+
+  void _showStudentInfo(Map<String, dynamic> student) {
+    final email = student['email']?.toString() ?? '';
+    final c = student['class'];
+    final schoolYear = c is Map ? c['school_year']?.toString() ?? '' : '';
+    final semester = c is Map ? c['semester']?.toString() ?? '' : '';
+
+    Widget row(IconData icon, String label, String value) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, size: 20, color: CmColors.slate),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 96,
+                child: Text(
+                  label,
+                  style: const TextStyle(color: CmColors.slate),
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  value.isEmpty ? '—' : value,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+        );
+
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _fullName(student),
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: CmColors.navy,
+                ),
+              ),
+              const SizedBox(height: 8),
+              row(Icons.badge_outlined, 'Student No.',
+                  student['student_number']?.toString() ?? ''),
+              row(Icons.class_outlined, 'Section', _studentSection(student)),
+              row(Icons.menu_book_outlined, 'Subject',
+                  _studentSubject(student)),
+              row(Icons.calendar_month_outlined, 'Term',
+                  [semester, schoolYear].where((e) => e.isNotEmpty).join(' • ')),
+              row(Icons.email_outlined, 'Email', email),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // =========================
+  // BUILD
+  // =========================
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Students'),
       ),
-      floatingActionButton:
-          FloatingActionButton.extended(
-        onPressed: _showAddStudentDialog,
-        icon: const Icon(Icons.person_add),
-        label: const Text('Add Student'),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _showAddStudentsSheet,
+        icon: const Icon(Icons.group_add_outlined),
+        label: const Text('Add Students'),
       ),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: TextField(
+              controller: _searchController,
+              textInputAction: TextInputAction.search,
+              onChanged: (v) =>
+                  setState(() => _query = v.trim().toLowerCase()),
+              decoration: InputDecoration(
+                hintText: 'Search students...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Clear',
+                        icon: const Icon(Icons.close),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _query = '');
+                        },
+                      ),
+                border: const OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+          ),
           if (_classes.isNotEmpty)
             Padding(
-              padding:
-                  const EdgeInsets.fromLTRB(
-                16,
-                16,
-                16,
-                8,
-              ),
-              child:
-                  DropdownButtonFormField<int?>(
-                value: _selectedClassId,
-                decoration:
-                    const InputDecoration(
-                  labelText: 'Filter by Class',
-                  prefixIcon: Icon(
-                    Icons.filter_list,
-                  ),
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: DropdownButtonFormField<int?>(
+                initialValue: _selectedClassId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Filter by Section',
+                  prefixIcon: Icon(Icons.filter_list),
                   border: OutlineInputBorder(),
+                  isDense: true,
                 ),
                 items: [
                   const DropdownMenuItem<int?>(
                     value: null,
-                    child: Text('All Classes'),
+                    child: Text('All Sections'),
                   ),
                   ..._classes.map((item) {
-                    final id = int.parse(
-                      item['id'].toString(),
-                    );
+                    final id = int.parse(item['id'].toString());
 
                     return DropdownMenuItem<int?>(
                       value: id,
                       child: Text(
                         _getClassLabel(item),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     );
                   }),
@@ -502,26 +823,59 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
     if (_students.isEmpty) {
       return ListView(
+        children: [
+          const SizedBox(height: 100),
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Column(
+                children: [
+                  const Icon(
+                    Icons.people_outline,
+                    size: 56,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'No students yet.',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Add students individually or import\n'
+                    'an Excel student list.',
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 20),
+                  FilledButton.icon(
+                    onPressed: _showAddStudentsSheet,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add Students'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    final entries = _buildEntries();
+
+    if (entries.isEmpty) {
+      return ListView(
         children: const [
-          SizedBox(height: 120),
+          SizedBox(height: 100),
           Center(
             child: Column(
               children: [
-                Icon(
-                  Icons.people_outline,
-                  size: 56,
-                ),
-                SizedBox(height: 16),
+                Icon(Icons.search_off, size: 48, color: CmColors.slate),
+                SizedBox(height: 12),
                 Text(
-                  'No students yet.',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                SizedBox(height: 8),
-                Text(
-                  'Tap "Add Student" to enroll one.',
+                  'No matching students.',
+                  style: TextStyle(fontWeight: FontWeight.w600),
                 ),
               ],
             ),
@@ -531,116 +885,100 @@ class _StudentsScreenState extends State<StudentsScreen> {
     }
 
     return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: _students.length,
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+      itemCount: entries.length,
       itemBuilder: (context, index) {
-        final student = _students[index];
+        final entry = entries[index];
 
-        final studentNumber =
-            student['student_number']
-                    ?.toString() ??
-                '';
-
-        final firstName =
-            student['first_name']?.toString() ??
-                '';
-
-        final lastName =
-            student['last_name']?.toString() ??
-                '';
-
-        final email =
-            student['email']?.toString() ?? '';
-
-        final classData = student['class'];
-
-        String classLabel =
-            'Unknown Class';
-
-        if (classData is Map) {
-          final section =
-              classData['section']
-                      ?.toString() ??
-                  '';
-
-          final subject =
-              classData['subject'];
-
-          if (subject is Map) {
-            final subjectName =
-                subject['name']
-                        ?.toString() ??
-                    '';
-
-            final subjectCode =
-                subject['code']
-                        ?.toString() ??
-                    '';
-
-            classLabel =
-                subjectCode.isEmpty
-                    ? '$section - $subjectName'
-                    : '$section - '
-                        '$subjectCode - '
-                        '$subjectName';
-          } else {
-            classLabel = section;
-          }
+        if (entry is _GroupHeader) {
+          return Padding(
+            padding: EdgeInsets.fromLTRB(4, index == 0 ? 4 : 20, 4, 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        entry.section,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          color: CmColors.navy,
+                        ),
+                      ),
+                      if (entry.subject.isNotEmpty)
+                        Text(
+                          entry.subject,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: CmColors.slate,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: CmColors.navy.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${entry.count} Student${entry.count == 1 ? '' : 's'}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: CmColors.navy,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
         }
 
+        final student = entry as Map<String, dynamic>;
+        final firstName = student['first_name']?.toString() ?? '';
+
         return Card(
-          margin:
-              const EdgeInsets.only(
-            bottom: 12,
-          ),
+          margin: const EdgeInsets.only(bottom: 8),
           child: ListTile(
-            contentPadding:
-                const EdgeInsets.all(16),
+            onTap: () => _showStudentInfo(student),
+            minVerticalPadding: 10,
             leading: CircleAvatar(
               child: Text(
-                firstName.isNotEmpty
-                    ? firstName[0]
-                        .toUpperCase()
-                    : '?',
+                firstName.isNotEmpty ? firstName[0].toUpperCase() : '?',
               ),
             ),
             title: Text(
-              '$lastName, $firstName',
+              _fullName(student),
               style: const TextStyle(
-                fontSize: 17,
-                fontWeight:
-                    FontWeight.bold,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
               ),
             ),
-            subtitle: Padding(
-              padding:
-                  const EdgeInsets.only(
-                top: 8,
-              ),
-              child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    studentNumber,
-                    style:
-                        const TextStyle(
-                      fontWeight:
-                          FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(classLabel),
-                  if (email.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(email),
-                  ],
-                ],
-              ),
-            ),
+            subtitle: Text(student['student_number']?.toString() ?? ''),
+            trailing: const Icon(Icons.chevron_right),
           ),
         );
       },
     );
   }
+}
+
+class _GroupHeader {
+  const _GroupHeader({
+    required this.section,
+    required this.subject,
+    required this.count,
+  });
+
+  final String section;
+  final String subject;
+  final int count;
 }

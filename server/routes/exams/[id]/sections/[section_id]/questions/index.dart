@@ -1,16 +1,18 @@
 import 'package:dart_frog/dart_frog.dart';
 
-import '../../../../../../lib/exams/question_service.dart';
+import 'package:server/exams/question_service.dart';
 
 Future<Response> onRequest(
   RequestContext context,
   String id,
-  String section_id,
+  String sectionId,
 ) async {
+  // Convert the route parameters from String to int.
   final examId = int.tryParse(id);
-  final sectionId = int.tryParse(section_id);
+  final parsedSectionId = int.tryParse(sectionId);
 
-  if (examId == null || sectionId == null) {
+  // Make sure both IDs are valid integers.
+  if (examId == null || parsedSectionId == null) {
     return Response.json(
       statusCode: 400,
       body: {
@@ -20,10 +22,11 @@ Future<Response> onRequest(
     );
   }
 
+  // GET: Retrieve all questions belonging to this section.
   if (context.request.method == HttpMethod.get) {
     try {
       final questions = await QuestionService.getAll(
-        sectionId: sectionId,
+        sectionId: parsedSectionId,
       );
 
       return Response.json(
@@ -43,11 +46,12 @@ Future<Response> onRequest(
     }
   }
 
+  // POST: Create a new question for this section.
   if (context.request.method == HttpMethod.post) {
     try {
       final body = await context.request.json();
 
-      if (body is! Map) {
+      if (body is! Map<String, dynamic>) {
         return Response.json(
           statusCode: 400,
           body: {
@@ -74,6 +78,7 @@ Future<Response> onRequest(
       final correctAnswer = body['correct_answer']?.toString();
       final choices = body['choices'];
 
+      // Validate required question information.
       if (questionNumber == null ||
           questionNumber < 1 ||
           questionText == null ||
@@ -91,7 +96,7 @@ Future<Response> onRequest(
       }
 
       final question = await QuestionService.create(
-        sectionId: sectionId,
+        sectionId: parsedSectionId,
         questionNumber: questionNumber,
         questionText: questionText,
         points: points,
@@ -117,6 +122,7 @@ Future<Response> onRequest(
     }
   }
 
+  // Reject HTTP methods other than GET and POST.
   return Response.json(
     statusCode: 405,
     body: {

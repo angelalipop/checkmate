@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'screens/admin_dashboard.dart';
 import 'screens/login_screen.dart';
+import 'screens/teacher_dashboard.dart';
 import 'services/api_service.dart';
 import 'services/auth_storage.dart';
 
@@ -75,10 +76,12 @@ class _AuthCheckState extends State<AuthCheck> {
         return;
       }
 
-      // Teacher dashboard will be added later.
       if (role == 'teacher') {
-        await AuthStorage.deleteToken();
-        _setNextScreen(const LoginScreen());
+        _setNextScreen(
+          TeacherDashboard(
+            teacherName: (user['name'] ?? user['email'] ?? 'Teacher').toString(),
+          ),
+        );
         return;
       }
 

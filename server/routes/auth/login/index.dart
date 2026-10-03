@@ -1,7 +1,7 @@
 import 'package:dart_frog/dart_frog.dart';
 
-import '../../../lib/auth/auth_service.dart';
-import '../../../lib/auth/jwt_service.dart';
+import 'package:server/auth/auth_service.dart';
+import 'package:server/auth/jwt_service.dart';
 
 Future<Response> onRequest(RequestContext context) async {
   if (context.request.method != HttpMethod.post) {

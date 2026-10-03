@@ -1,6 +1,6 @@
 import 'package:postgres/postgres.dart';
 
-import '../database.dart';
+import 'package:server/database.dart';
 
 class AnswerService {
   static Future<Map<String, dynamic>> submit({

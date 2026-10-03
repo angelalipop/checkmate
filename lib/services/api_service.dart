@@ -198,7 +198,7 @@ class ApiService {
   static Future<Map<String, dynamic>> createClass({
     required String token,
     required int subjectId,
-    required int teacherId,
+    int? teacherId,
     required String section,
     String? schoolYear,
     String? semester,

@@ -1,6 +1,6 @@
 import 'package:postgres/postgres.dart';
 
-import '../database.dart';
+import 'package:server/database.dart';
 
 class AttemptService {
   static Future<Map<String, dynamic>> create({
@@ -291,7 +291,7 @@ class AttemptService {
       },
     );
 
-    final needsReview = (reviewResult.first[0] as num) > 0;
+    final needsReview = (reviewResult.first[0]! as num) > 0;
 
     if (needsReview) {
       throw Exception('Attempt has answers that need review');
@@ -317,7 +317,7 @@ class AttemptService {
       },
     );
 
-    final unansweredCount = unansweredResult.first[0] as num;
+    final unansweredCount = unansweredResult.first[0]! as num;
 
     if (unansweredCount > 0) {
       throw Exception('Attempt has unanswered questions');

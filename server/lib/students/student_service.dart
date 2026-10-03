@@ -1,6 +1,6 @@
 import 'package:postgres/postgres.dart';
 
-import '../database.dart';
+import 'package:server/database.dart';
 
 class StudentService {
   static Future<List<Map<String, dynamic>>> getAll({
@@ -91,7 +91,7 @@ class StudentService {
         'student_number': studentNumber.trim(),
         'first_name': firstName.trim(),
         'last_name': lastName.trim(),
-        'email': email?.trim().isEmpty == true
+        'email': email?.trim().isEmpty ?? false
             ? null
             : email?.trim(),
       },

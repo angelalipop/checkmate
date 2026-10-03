@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:postgres/postgres.dart';
 
-import '../database.dart';
+import 'package:server/database.dart';
 
 class QuestionService {
   static Future<List<Map<String, dynamic>>> getBySection(
@@ -104,7 +104,7 @@ class QuestionService {
         'choices': choices == null
             ? null
             : jsonEncode(choices),
-        'correct_answer': correctAnswer?.trim().isEmpty == true
+        'correct_answer': correctAnswer?.trim().isEmpty ?? false
             ? null
             : correctAnswer?.trim(),
       },

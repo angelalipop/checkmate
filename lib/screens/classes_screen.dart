@@ -147,7 +147,7 @@ class _ClassesScreenState extends State<ClassesScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     DropdownButtonFormField<int>(
-                      value: selectedSubjectId,
+                      initialValue: selectedSubjectId,
                       decoration: const InputDecoration(
                         labelText: 'Subject',
                         prefixIcon: Icon(
@@ -186,7 +186,7 @@ class _ClassesScreenState extends State<ClassesScreen> {
                     ),
                     const SizedBox(height: 16),
                     DropdownButtonFormField<int>(
-                      value: selectedTeacherId,
+                      initialValue: selectedTeacherId,
                       decoration: const InputDecoration(
                         labelText: 'Teacher',
                         prefixIcon: Icon(
@@ -244,7 +244,7 @@ class _ClassesScreenState extends State<ClassesScreen> {
                     ),
                     const SizedBox(height: 16),
                     DropdownButtonFormField<String>(
-                      value: selectedSemester,
+                      initialValue: selectedSemester,
                       decoration: const InputDecoration(
                         labelText: 'Semester',
                         prefixIcon: Icon(

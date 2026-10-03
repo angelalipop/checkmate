@@ -1,6 +1,6 @@
 import 'package:postgres/postgres.dart';
 
-import '../database.dart';
+import 'package:server/database.dart';
 
 class ExamDetailService {
   static Future<Map<String, dynamic>?> getById(int examId) async {
@@ -57,7 +57,7 @@ class ExamDetailService {
     final sections = <Map<String, dynamic>>[];
 
     for (final section in sectionResult) {
-      final sectionId = section[0] as int;
+      final sectionId = section[0]! as int;
 
       final questionResult = await Database.pool.execute(
         Sql.named('''

@@ -53,8 +53,8 @@ class _ExamsScreenState extends State<ExamsScreen> {
       if (!mounted) return;
 
       setState(() {
-        _exams = results[0] as List<Map<String, dynamic>>;
-        _classes = results[1] as List<Map<String, dynamic>>;
+        _exams = results[0];
+        _classes = results[1];
         _loading = false;
       });
     } catch (e) {

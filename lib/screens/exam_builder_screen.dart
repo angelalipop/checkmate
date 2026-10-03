@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
-import 'answer_sheet_camera_screen.dart';
 import '../services/answer_sheet_pdf_service.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
@@ -87,7 +86,7 @@ class _ExamBuilderScreenState
     }
   }
 
-  Future<void> _generateQuestionPaperPdf() async {
+  Future<void> _generateQuestionPaperPdf({bool download = false}) async {
     try {
       final token = await AuthStorage.getToken();
 
@@ -142,11 +141,18 @@ class _ExamBuilderScreenState
         questions: questions,
       );
 
-      await Printing.layoutPdf(
-        onLayout: (format) async {
-          return pdfBytes;
-        },
-      );
+      if (download) {
+        await Printing.sharePdf(
+          bytes: pdfBytes,
+          filename: _pdfFileName('question_paper', exam),
+        );
+      } else {
+        await Printing.layoutPdf(
+          onLayout: (format) async {
+            return pdfBytes;
+          },
+        );
+      }
     } catch (e) {
       if (!mounted) return;
 
@@ -163,7 +169,7 @@ class _ExamBuilderScreenState
     }
   }
 
-  Future<void> _generateAnswerSheetPdf() async {
+  Future<void> _generateAnswerSheetPdf({bool download = false}) async {
     try {
       final token = await AuthStorage.getToken();
 
@@ -218,11 +224,18 @@ class _ExamBuilderScreenState
         questions: questions,
       );
 
-      await Printing.layoutPdf(
-        onLayout: (format) async {
-          return pdfBytes;
-        },
-      );
+      if (download) {
+        await Printing.sharePdf(
+          bytes: pdfBytes,
+          filename: _pdfFileName('answer_sheet', exam),
+        );
+      } else {
+        await Printing.layoutPdf(
+          onLayout: (format) async {
+            return pdfBytes;
+          },
+        );
+      }
     } catch (e) {
       if (!mounted) return;
 
@@ -237,6 +250,14 @@ class _ExamBuilderScreenState
         ),
       );
     }
+  }
+
+  String _pdfFileName(String prefix, Map<String, dynamic> exam) {
+    final title = (exam['title']?.toString() ?? 'exam')
+        .trim()
+        .replaceAll(RegExp(r'[^A-Za-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    return '${prefix}_${title.isEmpty ? 'exam' : title}.pdf';
   }
 
   String _formatQuestionType(String type) {
@@ -350,8 +371,19 @@ class _ExamBuilderScreenState
             child: ElevatedButton(
               onPressed: _generateQuestionPaperPdf,
               child: const Text(
-                'Generate Question Paper PDF',
+                'Print Question Paper PDF',
               ),
+            ),
+          ),
+
+          const SizedBox(height: 10),
+
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _generateQuestionPaperPdf(download: true),
+              icon: const Icon(Icons.download),
+              label: const Text('Download Question Paper PDF'),
             ),
           ),
 
@@ -386,8 +418,19 @@ class _ExamBuilderScreenState
             child: ElevatedButton(
               onPressed: _generateAnswerSheetPdf,
               child: const Text(
-                'Generate Answer Sheet PDF',
+                'Print Answer Sheet PDF',
               ),
+            ),
+          ),
+
+          const SizedBox(height: 10),
+
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _generateAnswerSheetPdf(download: true),
+              icon: const Icon(Icons.download),
+              label: const Text('Download Answer Sheet PDF'),
             ),
           ),
 
