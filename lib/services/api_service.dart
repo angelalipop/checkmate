@@ -731,4 +731,203 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
 
   return Map<String, dynamic>.from(answerData);
   }
+
+  // =========================
+  // TEACHER MANAGEMENT (ADMIN ONLY)
+  // =========================
+  //
+  // Backend contract (all require an admin Bearer token):
+  //   POST   /teachers                    -> 201 { teacher }
+  //   PUT    /teachers/:id                -> 200 { teacher }
+  //   PUT    /teachers/:id/classes        -> 200 { teacher }
+  //   POST   /teachers/:id/reset-password -> 200 { temporary_password }
+  //   PATCH  /teachers/:id/active         -> 200 { teacher }
+  //   DELETE /teachers/:id                -> 200 { message }
+
+  static Map<String, String> _authHeaders(String token) => {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      };
+
+  /// Decodes a JSON object body, tolerating empty / non-JSON responses.
+  static Map<String, dynamic> _decodeBody(http.Response response) {
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+    } catch (_) {
+      // Non-JSON body; callers rely on the status code instead.
+    }
+    return <String, dynamic>{};
+  }
+
+  static Future<Map<String, dynamic>> createTeacher({
+    required String token,
+    required String name,
+    required String email,
+    required String username,
+    int? subjectId,
+    required String temporaryPassword,
+    List<int> classIds = const [],
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/teachers'),
+      headers: _authHeaders(token),
+      body: jsonEncode({
+        'name': name,
+        'email': email,
+        'username': username,
+        'subject_id': subjectId,
+        'temporary_password': temporaryPassword,
+        'class_ids': classIds,
+      }),
+    );
+
+    final data = _decodeBody(response);
+
+    if (response.statusCode != 201) {
+      throw Exception(
+        data['message']?.toString() ?? 'Failed to create teacher',
+      );
+    }
+
+    final teacher = data['teacher'];
+
+    return teacher is Map ? Map<String, dynamic>.from(teacher) : data;
+  }
+
+  static Future<Map<String, dynamic>> updateTeacher({
+    required String token,
+    required int teacherId,
+    required String name,
+    required String email,
+    required String username,
+    int? subjectId,
+  }) async {
+    final response = await http.put(
+      Uri.parse('$baseUrl/teachers/$teacherId'),
+      headers: _authHeaders(token),
+      body: jsonEncode({
+        'name': name,
+        'email': email,
+        'username': username,
+        'subject_id': subjectId,
+      }),
+    );
+
+    final data = _decodeBody(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        data['message']?.toString() ?? 'Failed to update teacher',
+      );
+    }
+
+    final teacher = data['teacher'];
+
+    return teacher is Map ? Map<String, dynamic>.from(teacher) : data;
+  }
+
+  static Future<Map<String, dynamic>> setTeacherClasses({
+    required String token,
+    required int teacherId,
+    required List<int> classIds,
+  }) async {
+    final response = await http.put(
+      Uri.parse('$baseUrl/teachers/$teacherId/classes'),
+      headers: _authHeaders(token),
+      body: jsonEncode({
+        'class_ids': classIds,
+      }),
+    );
+
+    final data = _decodeBody(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        data['message']?.toString() ?? 'Failed to update assigned sections',
+      );
+    }
+
+    final teacher = data['teacher'];
+
+    return teacher is Map ? Map<String, dynamic>.from(teacher) : data;
+  }
+
+  /// Returns the newly generated temporary password (shown once by the UI).
+  static Future<String> resetTeacherPassword({
+    required String token,
+    required int teacherId,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/teachers/$teacherId/reset-password'),
+      headers: _authHeaders(token),
+    );
+
+    final data = _decodeBody(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        data['message']?.toString() ?? 'Failed to reset password',
+      );
+    }
+
+    final password = data['temporary_password']?.toString();
+
+    if (password == null || password.isEmpty) {
+      throw Exception(
+        'Password was reset, but no temporary password was returned.',
+      );
+    }
+
+    return password;
+  }
+
+  static Future<Map<String, dynamic>> setTeacherActive({
+    required String token,
+    required int teacherId,
+    required bool active,
+  }) async {
+    final response = await http.patch(
+      Uri.parse('$baseUrl/teachers/$teacherId/active'),
+      headers: _authHeaders(token),
+      body: jsonEncode({
+        'is_active': active,
+      }),
+    );
+
+    final data = _decodeBody(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        data['message']?.toString() ??
+            (active
+                ? 'Failed to enable account'
+                : 'Failed to disable account'),
+      );
+    }
+
+    final teacher = data['teacher'];
+
+    return teacher is Map ? Map<String, dynamic>.from(teacher) : data;
+  }
+
+  static Future<void> deleteTeacher({
+    required String token,
+    required int teacherId,
+  }) async {
+    final response = await http.delete(
+      Uri.parse('$baseUrl/teachers/$teacherId'),
+      headers: _authHeaders(token),
+    );
+
+    if (response.statusCode != 200 && response.statusCode != 204) {
+      final data = _decodeBody(response);
+
+      throw Exception(
+        data['message']?.toString() ?? 'Failed to delete teacher',
+      );
+    }
+  }
 }

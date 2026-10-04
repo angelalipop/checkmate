@@ -12,6 +12,7 @@ import 'exams_screen.dart';
 import 'login_screen.dart' show CmColors, LoginScreen;
 import 'students_screen.dart';
 import 'subjects_screen.dart';
+import 'teachers_admin_screen.dart';
 
 // =============================================================
 // CheckMate — Admin app shell + Dashboard home
@@ -164,10 +165,12 @@ Widget? _screenFor(AdminPage page) {
       return const StudentsScreen();
     case AdminPage.exams:
       return const ExamsScreen();
+    case AdminPage.teachers:
+      return const TeachersScreen();
     case AdminPage.scans:
       return const AnswerSheetInputScreen();
     default:
-      return null; // dashboard / teachers / attempts / results
+      return null; // dashboard / attempts / results
   }
 }
 
@@ -887,7 +890,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     final screen = _screenFor(page);
     if (screen == null) {
-      // Teachers / Attempts / Results have no screen yet.
+      // Attempts / Results have no screen yet.
       _soon(context, page.label);
       return;
     }
