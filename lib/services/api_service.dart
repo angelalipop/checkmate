@@ -373,6 +373,49 @@ class ApiService {
   }
 
   // =========================
+  // UPDATE STUDENT
+  // =========================
+
+  static Future<Map<String, dynamic>> updateStudent({
+    required String token,
+    required int studentId,
+    String? email,
+  }) async {
+    final response = await http.put(
+      Uri.parse('$baseUrl/students/$studentId'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode({
+        'email': email,
+      }),
+    );
+
+    Map<String, dynamic> data = {};
+
+    try {
+      final decoded = jsonDecode(response.body);
+
+      if (decoded is Map<String, dynamic>) {
+        data = decoded;
+      }
+    } catch (_) {
+      // Non-JSON body; handled by the status check below.
+    }
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        data['message'] ?? 'Failed to update student',
+      );
+    }
+
+    final student = data['student'];
+
+    return student is Map ? Map<String, dynamic>.from(student) : data;
+  }
+
+  // =========================
   // GET EXAMS
   // =========================
 

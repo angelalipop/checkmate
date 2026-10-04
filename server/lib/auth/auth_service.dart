@@ -1,6 +1,7 @@
 import 'package:postgres/postgres.dart';
-import 'package:server/auth/password.dart';
+
 import 'package:server/database.dart';
+import 'package:server/auth/password.dart';
 
 class AuthService {
   static Future<Map<String, dynamic>?> login({

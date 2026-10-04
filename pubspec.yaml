@@ -45,6 +45,8 @@ flutter:
     - assets/admin_illustration.png
     - assets/dashboard_logo.png
     - assets/transparent_logo1.png
+    - assets/logo_circle.png
+    - assets/logo_circle1.png
 
 hooks:
   user_defines:

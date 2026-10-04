@@ -1,6 +1,7 @@
 import 'package:postgres/postgres.dart';
-import 'package:server/auth/password.dart';
-import 'package:server/database.dart';
+
+import '../database.dart';
+import '../auth/password.dart';
 
 class UserService {
   static Future<Map<String, dynamic>> createTeacher({

@@ -1,6 +1,8 @@
 import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -10,6 +12,9 @@ import '../services/student_import_service.dart';
 import 'login_screen.dart' show CmColors;
 
 enum _Stage { pick, reading, review, importing, done }
+
+/// Muted green for success states (not neon).
+const Color _ok = Color(0xFF2F8F72);
 
 /// Step-by-step Excel import:
 /// 1 Choose file -> 2 Review -> 3 Import -> 4 Done.
@@ -50,6 +55,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
   bool _checking = false;
   int _done = 0;
   int _total = 0;
+  int _classCount = 0;
   ImportResult? _result;
 
   @override
@@ -139,21 +145,45 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
   }
 
   Future<void> _downloadTemplate() async {
+    const fileName = 'CheckMate_Student_Template.xlsx';
+    const mime =
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
     try {
       final bytes = StudentImportService.buildTemplate();
-      await SharePlus.instance.share(
-        ShareParams(
-          files: [
-            XFile.fromData(
-              Uint8List.fromList(bytes),
-              name: 'CheckMate_Student_Template.xlsx',
-              mimeType:
-                  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            ),
-          ],
-          subject: 'CheckMate student import template',
-        ),
+      final file = XFile.fromData(
+        Uint8List.fromList(bytes),
+        name: fileName,
+        mimeType: mime,
       );
+
+      final isDesktop = defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.macOS ||
+          defaultTargetPlatform == TargetPlatform.linux;
+
+      if (kIsWeb) {
+        // Triggers a normal browser download.
+        await file.saveTo(fileName);
+        _snack('Template downloaded.');
+      } else if (isDesktop) {
+        final location = await getSaveLocation(
+          suggestedName: fileName,
+          acceptedTypeGroups: const [
+            XTypeGroup(label: 'Excel', extensions: ['xlsx']),
+          ],
+        );
+        if (location == null) return;
+        await file.saveTo(location.path);
+        _snack('Template saved.');
+      } else {
+        // Phones/tablets: hand the file to the share sheet (Save to Files, etc.).
+        await SharePlus.instance.share(
+          ShareParams(
+            files: [file],
+            subject: 'CheckMate student import template',
+          ),
+        );
+      }
     } catch (e) {
       _snack('Could not create the template: '
           '${e.toString().replaceFirst('Exception: ', '')}');
@@ -228,6 +258,8 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
         _stage = _Stage.importing;
         _done = 0;
         _total = plan.studentsToAdd;
+        _classCount =
+            plan.sections.where((s) => s.toAdd.isNotEmpty).length;
       });
 
       final result = await StudentImportService.execute(
@@ -336,63 +368,105 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: _dialogShape,
-        title: const Text('Confirm import', style: TextStyle(fontSize: 18)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'This will add ${plan.studentsToAdd} '
-                'student${plan.studentsToAdd == 1 ? '' : 's'}'
-                '${plan.newClasses > 0 ? ' and create ${plan.newClasses} new '
-                    'class${plan.newClasses == 1 ? '' : 'es'}' : ''}.',
-              ),
-              const SizedBox(height: 12),
-              for (final s in plan.sections.where((s) => s.toAdd.isNotEmpty))
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Icon(Icons.class_outlined,
-                          size: 18, color: CmColors.slate),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          '$subjectName — ${s.section}\n'
-                          '${s.toAdd.length} student'
-                          '${s.toAdd.length == 1 ? '' : 's'} • '
-                          '${s.existingClassId == null ? 'new class' : 'existing class'}',
-                          style: const TextStyle(fontSize: 13, height: 1.35),
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        title: const Text(
+          'Confirm import',
+          style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'This will add ${plan.studentsToAdd} '
+                  'student${plan.studentsToAdd == 1 ? '' : 's'}'
+                  '${plan.newClasses > 0 ? ' and create ${plan.newClasses} new '
+                      'class${plan.newClasses == 1 ? '' : 'es'}' : ''}.',
+                  style: const TextStyle(color: CmColors.slate),
+                ),
+                const SizedBox(height: 12),
+                for (final s in plan.sections.where((s) => s.toAdd.isNotEmpty))
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: CmColors.line),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.menu_book_outlined,
+                            size: 18, color: CmColors.slate),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '$subjectName — ${s.section}',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: CmColors.navy,
+                                ),
+                              ),
+                              Text(
+                                '${s.toAdd.length} student'
+                                '${s.toAdd.length == 1 ? '' : 's'} • '
+                                '${s.existingClassId == null ? 'new class' : 'existing class'}',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: CmColors.slate,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
+                  ),
+                Center(
+                  child: Text(
+                    '$_semester • $_schoolYear',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: CmColors.slate,
+                    ),
                   ),
                 ),
-              Text(
-                '$_semester • $_schoolYear',
-                style: const TextStyle(fontSize: 13, color: CmColors.slate),
-              ),
-              if (skippedRows > 0) ...[
-                const SizedBox(height: 10),
-                Text(
-                  '$skippedRows row${skippedRows == 1 ? '' : 's'} with '
-                  'problems will be skipped.',
-                  style: const TextStyle(fontSize: 13, color: CmColors.amber),
-                ),
+                if (skippedRows > 0) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    '$skippedRows row${skippedRows == 1 ? '' : 's'} with '
+                    'problems will be skipped.',
+                    style:
+                        const TextStyle(fontSize: 13, color: CmColors.amber),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
+            style: TextButton.styleFrom(foregroundColor: CmColors.navy),
             child: const Text('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: CmColors.navy),
+            style: FilledButton.styleFrom(
+              backgroundColor: CmColors.navy,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
             child: const Text('Confirm'),
           ),
         ],
@@ -449,11 +523,22 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
         body: SafeArea(
           child: Column(
             children: [
-              _StepIndicator(current: _stepIndex),
+              _StepIndicator(
+                current: _stepIndex,
+                onBack: _stage == _Stage.importing || _busy
+                    ? null
+                    : () {
+                        if (_stage == _Stage.review) {
+                          _reset();
+                        } else {
+                          Navigator.maybePop(context);
+                        }
+                      },
+              ),
               Expanded(
                 child: Center(
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 640),
+                    constraints: const BoxConstraints(maxWidth: 740),
                     child: _buildStage(),
                   ),
                 ),
@@ -524,10 +609,11 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
           const SizedBox(height: 16),
         ],
         Card(
-          elevation: 0,
+          elevation: 1,
+          shadowColor: const Color(0x1A000000),
           color: Colors.white,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(20),
             side: const BorderSide(color: CmColors.line),
           ),
           child: Padding(
@@ -535,8 +621,18 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(Icons.upload_file_outlined,
-                    size: 48, color: CmColors.navy),
+                Center(
+                  child: Container(
+                    width: 58,
+                    height: 58,
+                    decoration: BoxDecoration(
+                      color: CmColors.bg,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Icon(Icons.upload_file_outlined,
+                        size: 28, color: CmColors.navy),
+                  ),
+                ),
                 const SizedBox(height: 12),
                 const Text(
                   'Upload a student list',
@@ -551,6 +647,13 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                 ),
                 const SizedBox(height: 14),
                 _formatPreview(),
+                const SizedBox(height: 8),
+                const Text(
+                  'Student No., Name and Section are required. '
+                  'Email is optional and can be added later.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: CmColors.slate, fontSize: 12),
+                ),
                 const SizedBox(height: 20),
                 SizedBox(
                   height: 52,
@@ -623,6 +726,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
             cell('Student No.', head: true),
             cell('Name', head: true),
             cell('Section', head: true),
+            cell('Email', head: true),
           ]),
         ],
       ),
@@ -686,10 +790,11 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
       padding: const EdgeInsets.all(20),
       children: [
         Card(
-          elevation: 0,
+          elevation: 1,
+          shadowColor: const Color(0x1A000000),
           color: Colors.white,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(20),
             side: const BorderSide(color: CmColors.line),
           ),
           child: Padding(
@@ -738,8 +843,8 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 6),
                     child: Row(
                       children: [
-                        const Icon(Icons.check_circle,
-                            color: CmColors.green, size: 20),
+                        const Icon(Icons.check_circle_outline,
+                            color: _ok, size: 20),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
@@ -852,10 +957,11 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
       ..sort();
 
     return Card(
-      elevation: 0,
+      elevation: 1,
+      shadowColor: const Color(0x1A000000),
       color: Colors.white,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
         side: const BorderSide(color: CmColors.line),
       ),
       child: Padding(
@@ -976,7 +1082,6 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
             ),
             const SizedBox(width: 12),
             Expanded(
-              flex: 2,
               child: SizedBox(
                 height: 52,
                 child: FilledButton(
@@ -1011,39 +1116,65 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
 
   Widget _buildImporting() {
     final value = _total == 0 ? null : _done / _total;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Importing students…',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+    final percent = _total == 0 ? 0 : ((_done / _total) * 100).round();
+
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Card(
+          elevation: 1,
+          shadowColor: const Color(0x1A000000),
+          color: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: const BorderSide(color: CmColors.line),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(32, 28, 32, 28),
+            child: Column(
+              children: [
+                const Text(
+                  'Importing students…',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: CmColors.navy,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Adding $_total student${_total == 1 ? '' : 's'} '
+                  'to $_classCount class${_classCount == 1 ? '' : 'es'}.',
+                  style: const TextStyle(color: CmColors.slate),
+                ),
+                const SizedBox(height: 22),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: LinearProgressIndicator(
+                    value: value,
+                    minHeight: 10,
+                    color: _ok,
+                    backgroundColor: CmColors.line,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '$percent%',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: CmColors.navy,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Please keep this screen open.',
+                  style: TextStyle(color: CmColors.slate, fontSize: 13),
+                ),
+              ],
             ),
-            const SizedBox(height: 20),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: LinearProgressIndicator(
-                value: value,
-                minHeight: 10,
-                color: CmColors.navy,
-                backgroundColor: CmColors.line,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              '$_done of $_total',
-              style: const TextStyle(color: CmColors.slate),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Please keep this screen open.',
-              style: TextStyle(color: CmColors.slate, fontSize: 13),
-            ),
-          ],
+          ),
         ),
-      ),
+      ],
     );
   }
 
@@ -1053,92 +1184,116 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
     final r = _result!;
     final failed = r.failures;
     final allFailed = r.studentsAdded == 0;
+    final accent = allFailed ? const Color(0xFFDC2626) : _ok;
 
     return ListView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       children: [
-        const SizedBox(height: 16),
-        Icon(
-          allFailed ? Icons.error_outline : Icons.check_circle,
-          size: 72,
-          color: allFailed ? const Color(0xFFDC2626) : CmColors.green,
-        ),
-        const SizedBox(height: 16),
-        Text(
-          allFailed
-              ? 'Import failed.'
-              : failed.isEmpty
-                  ? 'Students imported successfully.'
-                  : 'Import finished with some errors.',
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-            color: CmColors.navy,
+        Card(
+          elevation: 1,
+          shadowColor: const Color(0x1A000000),
+          color: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: const BorderSide(color: CmColors.line),
           ),
-        ),
-        const SizedBox(height: 12),
-        Text(
-          '${r.studentsAdded} student${r.studentsAdded == 1 ? '' : 's'} added',
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 16),
-        ),
-        Text(
-          '${r.classesCreated} class${r.classesCreated == 1 ? '' : 'es'} created',
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 16),
-        ),
-        if (failed.isNotEmpty) ...[
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFEF2F2),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFFECACA)),
-            ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(32, 32, 32, 32),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '${failed.length} student${failed.length == 1 ? '' : 's'} '
-                  'could not be added:',
-                  style: const TextStyle(
-                    color: Color(0xFFDC2626),
-                    fontWeight: FontWeight.w700,
+                Container(
+                  width: 70,
+                  height: 70,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: accent.withValues(alpha: 0.14),
+                  ),
+                  child: Icon(
+                    allFailed
+                        ? Icons.error_outline
+                        : Icons.check_circle_outline,
+                    size: 36,
+                    color: accent,
                   ),
                 ),
-                const SizedBox(height: 8),
-                for (final f in failed.take(10))
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text(
-                      'Row ${f.rowNumber}: ${f.message}',
-                      style: const TextStyle(
-                          fontSize: 13, color: Color(0xFF7F1D1D)),
+                const SizedBox(height: 16),
+                Text(
+                  allFailed
+                      ? 'Import failed'
+                      : failed.isEmpty
+                          ? 'Import complete'
+                          : 'Import finished with some errors',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: CmColors.navy,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '${r.studentsAdded} student${r.studentsAdded == 1 ? '' : 's'} '
+                  'added across $_classCount class${_classCount == 1 ? '' : 'es'}.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: CmColors.slate),
+                ),
+                if (failed.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF2F2),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFFECACA)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${failed.length} student${failed.length == 1 ? '' : 's'} '
+                          'could not be added:',
+                          style: const TextStyle(
+                            color: Color(0xFFDC2626),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        for (final f in failed.take(10))
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Text(
+                              'Row ${f.rowNumber}: ${f.message}',
+                              style: const TextStyle(
+                                  fontSize: 13, color: Color(0xFF7F1D1D)),
+                            ),
+                          ),
+                        if (failed.length > 10)
+                          Text('…and ${failed.length - 10} more',
+                              style: const TextStyle(
+                                  fontSize: 13, color: Color(0xFF7F1D1D))),
+                      ],
                     ),
                   ),
-                if (failed.length > 10)
-                  Text('…and ${failed.length - 10} more',
-                      style: const TextStyle(
-                          fontSize: 13, color: Color(0xFF7F1D1D))),
+                ],
+                const SizedBox(height: 24),
+                SizedBox(
+                  height: 52,
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: CmColors.navy,
+                      padding: const EdgeInsets.symmetric(horizontal: 32),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Back to Students',
+                        style: TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ),
               ],
             ),
-          ),
-        ],
-        const SizedBox(height: 28),
-        SizedBox(
-          height: 52,
-          child: FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: CmColors.navy,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: const Text('Done',
-                style: TextStyle(fontWeight: FontWeight.w700)),
           ),
         ),
       ],
@@ -1149,39 +1304,55 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
 // ---------- Step indicator ----------
 
 class _StepIndicator extends StatelessWidget {
-  const _StepIndicator({required this.current});
+  const _StepIndicator({required this.current, this.onBack});
   final int current;
+  final VoidCallback? onBack;
 
   static const _labels = ['File', 'Review', 'Import', 'Done'];
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      child: Row(
-        children: [
-          for (var i = 0; i < _labels.length; i++) ...[
-            _dot(i),
-            const SizedBox(width: 6),
-            Text(
-              _labels[i],
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: i == current ? FontWeight.w700 : FontWeight.w500,
-                color: i <= current ? CmColors.navy : CmColors.slate,
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: CmColors.line)),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1140),
+          child: Row(
+            children: [
+              IconButton(
+                tooltip: 'Back',
+                icon: const Icon(Icons.arrow_back, size: 20),
+                color: CmColors.navy,
+                onPressed: onBack,
               ),
-            ),
-            if (i < _labels.length - 1)
-              Expanded(
-                child: Container(
-                  height: 1.5,
-                  margin: const EdgeInsets.symmetric(horizontal: 8),
-                  color: i < current ? CmColors.navy : CmColors.line,
+              const SizedBox(width: 4),
+              for (var i = 0; i < _labels.length; i++) ...[
+                _dot(i),
+                const SizedBox(width: 8),
+                Text(
+                  _labels[i],
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight:
+                        i == current ? FontWeight.w700 : FontWeight.w500,
+                    color: i <= current ? CmColors.navy : CmColors.slate,
+                  ),
                 ),
-              ),
-          ],
-        ],
+                if (i < _labels.length - 1)
+                  Expanded(
+                    child: Container(
+                      height: 1.5,
+                      margin: const EdgeInsets.symmetric(horizontal: 10),
+                      color: i < current ? CmColors.navy : CmColors.line,
+                    ),
+                  ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1190,8 +1361,8 @@ class _StepIndicator extends StatelessWidget {
     final done = i < current;
     final active = i == current;
     return Container(
-      width: 22,
-      height: 22,
+      width: 30,
+      height: 30,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
@@ -1202,11 +1373,11 @@ class _StepIndicator extends StatelessWidget {
         ),
       ),
       child: done
-          ? const Icon(Icons.check, size: 14, color: Colors.white)
+          ? const Icon(Icons.check, size: 16, color: Colors.white)
           : Text(
               '${i + 1}',
               style: TextStyle(
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: FontWeight.w700,
                 color: active ? Colors.white : CmColors.slate,
               ),

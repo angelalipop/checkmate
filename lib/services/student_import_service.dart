@@ -289,6 +289,7 @@ class ImportRow {
     required this.section,
     required this.firstName,
     required this.lastName,
+    this.email,
   });
 
   final int rowNumber;
@@ -297,6 +298,9 @@ class ImportRow {
   final String section;
   final String firstName;
   final String lastName;
+
+  /// Optional — can be added later from the student's info.
+  final String? email;
 }
 
 class ImportIssue {
@@ -380,6 +384,9 @@ class StudentImportService {
   static const _sectionAliases = {
     'section', 'class', 'classsection', 'sectionclass',
   };
+  static const _emailAliases = {
+    'email', 'emailaddress', 'studentemail', 'emailadd',
+  };
 
   static String _norm(String s) =>
       s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
@@ -418,13 +425,14 @@ class StudentImportService {
       throw ImportFileException('The spreadsheet is empty.');
     }
 
-    int numCol = -1, nameCol = -1, secCol = -1;
+    int numCol = -1, nameCol = -1, secCol = -1, emailCol = -1;
     final header = rows[headerIndex];
     for (var c = 0; c < header.length; c++) {
       final h = _norm(header[c]);
       if (numCol == -1 && _numberAliases.contains(h)) numCol = c;
       if (nameCol == -1 && _nameAliases.contains(h)) nameCol = c;
       if (secCol == -1 && _sectionAliases.contains(h)) secCol = c;
+      if (emailCol == -1 && _emailAliases.contains(h)) emailCol = c;
     }
 
     final missing = <String>[
@@ -453,14 +461,21 @@ class StudentImportService {
       final number = at(row, numCol);
       final name = at(row, nameCol).replaceAll(RegExp(r'\s+'), ' ').trim();
       final section = at(row, secCol);
+      final email = emailCol == -1 ? '' : at(row, emailCol);
 
       // Fully blank row: ignore silently (not a record).
-      if (number.isEmpty && name.isEmpty && section.isEmpty) continue;
+      if (number.isEmpty && name.isEmpty && section.isEmpty && email.isEmpty) {
+        continue;
+      }
 
       final problems = <String>[];
       if (number.isEmpty) problems.add('Student No. is empty');
       if (name.isEmpty) problems.add('Name is empty');
       if (section.isEmpty) problems.add('Section is empty');
+      // Email is optional, but if it is filled in it must be a real address.
+      if (email.isNotEmpty && !StudentValidation.isValidEmail(email)) {
+        problems.add('Email "$email" is not valid');
+      }
 
       ({String first, String last})? split;
       if (name.isNotEmpty) {
@@ -494,6 +509,7 @@ class StudentImportService {
         section: section,
         firstName: split!.first,
         lastName: split.last,
+        email: email.isEmpty ? null : email,
       ));
     }
 
@@ -549,8 +565,8 @@ class StudentImportService {
 
   static List<int> buildTemplate() => XlsxIO.write(
         sheetName: 'Students',
-        header: const ['Student No.', 'Name', 'Section'],
-        widths: const [18, 30, 16],
+        header: const ['Student No.', 'Name', 'Section', 'Email'],
+        widths: const [18, 30, 16, 32],
       );
 
   // ---------- Matching helpers ----------
@@ -717,7 +733,7 @@ class StudentImportService {
               studentNumber: r.studentNumber,
               firstName: r.firstName,
               lastName: r.lastName,
-              email: null,
+              email: r.email,
             );
             added++;
           } catch (e) {
@@ -739,5 +755,95 @@ class StudentImportService {
       classesCreated: classesCreated,
       failures: failures,
     );
+  }
+}
+
+// =============================================================
+// Input validation (manual add + email)
+// =============================================================
+
+class StudentValidation {
+  static final _emailRe = RegExp(
+    r'^[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}$',
+  );
+
+  static bool isValidEmail(String v) => _emailRe.hasMatch(v.trim());
+
+  /// Returns an error message, or null when the email is acceptable.
+  static String? email(String raw, {bool required = false}) {
+    final v = raw.trim();
+    if (v.isEmpty) return required ? 'Email is required.' : null;
+    return isValidEmail(v) ? null : 'Enter a valid email address.';
+  }
+
+  /// Digits only, 6–15 long, not one repeated digit.
+  static String? studentNumber(String raw) {
+    final v = raw.trim();
+    if (v.isEmpty) return 'Student number is required.';
+    if (!RegExp(r'^\d+$').hasMatch(v)) return 'Use numbers only.';
+    if (v.length < 6 || v.length > 15) {
+      return 'Student number must be 6 to 15 digits.';
+    }
+    if (RegExp(r'^(\d)\1+$').hasMatch(v)) {
+      return 'Enter a valid student number.';
+    }
+    return null;
+  }
+
+  static final _keyboardRuns = _buildKeyboardRuns();
+
+  static Set<String> _buildKeyboardRuns() {
+    final runs = <String>{};
+    for (final row in const ['qwertyuiop', 'asdfghjkl', 'zxcvbnm']) {
+      for (var i = 0; i + 5 <= row.length; i++) {
+        runs.add(row.substring(i, i + 5));
+      }
+    }
+    return runs;
+  }
+
+  /// Rejects empty values, symbols/numbers, and random-looking text
+  /// (no vowels, long consonant runs, repeated characters, keyboard mashing).
+  static String? name(
+    String raw, {
+    required String label,
+    bool required = true,
+  }) {
+    final v = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (v.isEmpty) return required ? '$label is required.' : null;
+
+    if (!RegExp(r"^[\p{L}][\p{L} .'’\-]*$", unicode: true).hasMatch(v)) {
+      return 'Use letters only.';
+    }
+
+    final invalid = 'Enter a valid ${label.toLowerCase()}.';
+    var totalLetters = 0;
+
+    for (final token in v.split(RegExp(r"[ \-]"))) {
+      final letters = token
+          .replaceAll(RegExp(r"[^\p{L}]", unicode: true), '')
+          .toLowerCase();
+      if (letters.isEmpty) continue;
+      totalLetters += letters.length;
+      if (letters.length < 3) continue; // e.g. "Ng", "De", "Jo"
+
+      if (!RegExp(r'[aeiouy]').hasMatch(letters)) return invalid;
+      if (RegExp(r'(.)\1\1').hasMatch(letters)) return invalid;
+      if (RegExp(r'[^aeiouy]{6,}').hasMatch(letters)) return invalid;
+      if (letters.length >= 5 && letters.split('').toSet().length <= 2) {
+        return invalid;
+      }
+      if (letters.length >= 6 && RegExp(r'^(.{2,3})\1+$').hasMatch(letters)) {
+        return invalid;
+      }
+      for (var i = 0; i + 5 <= letters.length; i++) {
+        if (_keyboardRuns.contains(letters.substring(i, i + 5))) {
+          return invalid;
+        }
+      }
+    }
+
+    if (totalLetters < 2) return invalid;
+    return null;
   }
 }

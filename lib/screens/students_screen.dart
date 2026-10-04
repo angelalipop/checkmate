@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
+import '../services/student_import_service.dart' show StudentValidation;
 import 'import_students_screen.dart';
 import 'login_screen.dart' show CmColors;
 
@@ -88,20 +90,84 @@ class _StudentsScreenState extends State<StudentsScreen> {
     }
   }
 
+  // =========================
+  // INPUT STYLE (shared by the dialogs)
+  // =========================
+
+  InputDecoration _fieldDecoration({String? errorText}) {
+    OutlineInputBorder border(Color c, [double w = 1]) => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: c, width: w),
+        );
+
+    return InputDecoration(
+      isDense: true,
+      filled: true,
+      fillColor: Colors.white,
+      errorText: errorText,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      border: border(CmColors.line),
+      enabledBorder: border(CmColors.line),
+      focusedBorder: border(CmColors.navy, 1.5),
+      errorBorder: border(const Color(0xFFDC2626)),
+      focusedErrorBorder: border(const Color(0xFFDC2626), 1.5),
+    );
+  }
+
+  Widget _labeled(String label, Widget field) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Text(
+            label,
+            style: const TextStyle(
+              fontSize: 13,
+              color: CmColors.slate,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        field,
+      ],
+    );
+  }
+
+  ButtonStyle get _primaryButtonStyle => FilledButton.styleFrom(
+        backgroundColor: CmColors.navy,
+        disabledBackgroundColor: const Color(0xFF9AA3B2),
+        disabledForegroundColor: Colors.white,
+        minimumSize: const Size.fromHeight(50),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+      );
+
+  ButtonStyle get _secondaryButtonStyle => OutlinedButton.styleFrom(
+        foregroundColor: CmColors.navy,
+        backgroundColor: CmColors.bg,
+        side: const BorderSide(color: CmColors.line),
+        minimumSize: const Size.fromHeight(50),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+      );
+
+  static final _nameFormatter = FilteringTextInputFormatter.allow(
+    RegExp(r"[\p{L} .'’\-]", unicode: true),
+  );
+
+  // =========================
+  // ADD STUDENT MANUALLY
+  // =========================
+
   Future<void> _showAddStudentDialog() async {
     int? selectedClassId = _selectedClassId;
 
-    final studentNumberController =
-        TextEditingController();
-
-    final firstNameController =
-        TextEditingController();
-
-    final lastNameController =
-        TextEditingController();
-
-    final emailController =
-        TextEditingController();
+    final studentNumberController = TextEditingController();
+    final lastNameController = TextEditingController();
+    final firstNameController = TextEditingController();
 
     final result = await showDialog<bool>(
       context: context,
@@ -111,50 +177,28 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            // Error text only appears once the field has something in it.
+            String? shown(TextEditingController c, String? error) =>
+                c.text.trim().isEmpty ? null : error;
+
+            final numberError =
+                StudentValidation.studentNumber(studentNumberController.text);
+            final lastError = StudentValidation.name(
+              lastNameController.text,
+              label: 'Last name',
+            );
+            final firstError = StudentValidation.name(
+              firstNameController.text,
+              label: 'First name',
+            );
+
+            final valid = selectedClassId != null &&
+                numberError == null &&
+                lastError == null &&
+                firstError == null;
+
             Future<void> saveStudent() async {
-              if (selectedClassId == null) {
-                setDialogState(() {
-                  dialogError =
-                      'Please select a class.';
-                });
-                return;
-              }
-
-              final studentNumber =
-                  studentNumberController.text.trim();
-
-              final firstName =
-                  firstNameController.text.trim();
-
-              final lastName =
-                  lastNameController.text.trim();
-
-              final email =
-                  emailController.text.trim();
-
-              if (studentNumber.isEmpty) {
-                setDialogState(() {
-                  dialogError =
-                      'Student number is required.';
-                });
-                return;
-              }
-
-              if (firstName.isEmpty) {
-                setDialogState(() {
-                  dialogError =
-                      'First name is required.';
-                });
-                return;
-              }
-
-              if (lastName.isEmpty) {
-                setDialogState(() {
-                  dialogError =
-                      'Last name is required.';
-                });
-                return;
-              }
+              if (!valid) return;
 
               setDialogState(() {
                 saving = true;
@@ -162,22 +206,23 @@ class _StudentsScreenState extends State<StudentsScreen> {
               });
 
               try {
-                final token =
-                    await AuthStorage.getToken();
+                final token = await AuthStorage.getToken();
 
                 if (token == null || token.isEmpty) {
-                  throw Exception(
-                    'Authentication token not found.',
-                  );
+                  throw Exception('Authentication token not found.');
                 }
+
+                String clean(String v) =>
+                    v.replaceAll(RegExp(r'\s+'), ' ').trim();
+
 
                 await ApiService.createStudent(
                   token: token,
                   classId: selectedClassId!,
-                  studentNumber: studentNumber,
-                  firstName: firstName,
-                  lastName: lastName,
-                  email: email.isEmpty ? null : email,
+                  studentNumber: studentNumberController.text.trim(),
+                  firstName: clean(firstNameController.text),
+                  lastName: clean(lastNameController.text),
+                  email: null,
                 );
 
                 if (!context.mounted) return;
@@ -186,178 +231,173 @@ class _StudentsScreenState extends State<StudentsScreen> {
               } catch (e) {
                 setDialogState(() {
                   saving = false;
-                  dialogError = e
-                      .toString()
-                      .replaceFirst(
-                        'Exception: ',
-                        '',
-                      );
+                  dialogError =
+                      e.toString().replaceFirst('Exception: ', '');
                 });
               }
             }
 
-            return AlertDialog(
-              title: const Text('Add Student'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    DropdownButtonFormField<int>(
-                      initialValue: selectedClassId,
-                      decoration: const InputDecoration(
-                        labelText: 'Class',
-                        prefixIcon: Icon(
-                          Icons.class_outlined,
-                        ),
-                        border: OutlineInputBorder(),
+            return Dialog(
+              backgroundColor: Colors.white,
+              surfaceTintColor: Colors.transparent,
+              insetPadding: const EdgeInsets.all(24),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 440),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Add Student Manually',
+                              style: TextStyle(
+                                fontSize: 19,
+                                fontWeight: FontWeight.w700,
+                                color: CmColors.navy,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Close',
+                            icon: const Icon(Icons.close, size: 20),
+                            onPressed: saving
+                                ? null
+                                : () => Navigator.pop(context, false),
+                          ),
+                        ],
                       ),
-                      items: _classes.map((item) {
-                        final id = int.parse(
-                          item['id'].toString(),
-                        );
-
-                        final section =
-                            item['section']
-                                    ?.toString() ??
-                                'Unknown Section';
-
-                        final subject =
-                            item['subject'];
-
-                        final subjectName =
-                            subject is Map
-                                ? subject['name']
-                                        ?.toString() ??
-                                    'Unknown Subject'
-                                : 'Unknown Subject';
-
-                        final subjectCode =
-                            subject is Map
-                                ? subject['code']
-                                        ?.toString() ??
-                                    ''
-                                : '';
-
-                        final label =
-                            subjectCode.isEmpty
-                                ? '$section - $subjectName'
-                                : '$section - '
-                                    '$subjectCode '
-                                    '- $subjectName';
-
-                        return DropdownMenuItem<int>(
-                          value: id,
-                          child: Text(label),
-                        );
-                      }).toList(),
-                      onChanged: saving
-                          ? null
-                          : (value) {
-                              setDialogState(() {
-                                selectedClassId =
-                                    value;
-                              });
-                            },
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller:
-                          studentNumberController,
-                      enabled: !saving,
-                      decoration:
-                          const InputDecoration(
-                        labelText: 'Student Number',
-                        prefixIcon: Icon(
-                          Icons.badge_outlined,
-                        ),
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: firstNameController,
-                      enabled: !saving,
-                      decoration:
-                          const InputDecoration(
-                        labelText: 'First Name',
-                        prefixIcon: Icon(
-                          Icons.person_outline,
-                        ),
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: lastNameController,
-                      enabled: !saving,
-                      decoration:
-                          const InputDecoration(
-                        labelText: 'Last Name',
-                        prefixIcon: Icon(
-                          Icons.person_outline,
-                        ),
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: emailController,
-                      enabled: !saving,
-                      keyboardType:
-                          TextInputType.emailAddress,
-                      decoration:
-                          const InputDecoration(
-                        labelText: 'Email',
-                        hintText:
-                            'Optional',
-                        prefixIcon: Icon(
-                          Icons.email_outlined,
-                        ),
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    if (dialogError != null) ...[
                       const SizedBox(height: 12),
-                      Text(
-                        dialogError!,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .error,
+                      _labeled(
+                        'Student Number',
+                        TextField(
+                          controller: studentNumberController,
+                          enabled: !saving,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(15),
+                          ],
+                          onChanged: (_) => setDialogState(() {}),
+                          decoration: _fieldDecoration(
+                            errorText: shown(
+                                studentNumberController, numberError),
+                          ),
                         ),
+                      ),
+                      const SizedBox(height: 14),
+                      _labeled(
+                        'Last Name',
+                        TextField(
+                          controller: lastNameController,
+                          enabled: !saving,
+                          textCapitalization: TextCapitalization.words,
+                          inputFormatters: [
+                            _nameFormatter,
+                            LengthLimitingTextInputFormatter(50),
+                          ],
+                          onChanged: (_) => setDialogState(() {}),
+                          decoration: _fieldDecoration(
+                            errorText: shown(lastNameController, lastError),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      _labeled(
+                        'First Name',
+                        TextField(
+                          controller: firstNameController,
+                          enabled: !saving,
+                          textCapitalization: TextCapitalization.words,
+                          inputFormatters: [
+                            _nameFormatter,
+                            LengthLimitingTextInputFormatter(50),
+                          ],
+                          onChanged: (_) => setDialogState(() {}),
+                          decoration: _fieldDecoration(
+                            errorText: shown(firstNameController, firstError),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      _labeled(
+                        'Section',
+                        DropdownButtonFormField<int>(
+                          initialValue: selectedClassId,
+                          isExpanded: true,
+                          decoration: _fieldDecoration(),
+                          items: _classes.map((item) {
+                            final id = int.parse(item['id'].toString());
+                            return DropdownMenuItem<int>(
+                              value: id,
+                              child: Text(
+                                _getClassLabel(item),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: saving
+                              ? null
+                              : (value) => setDialogState(() {
+                                    selectedClassId = value;
+                                  }),
+                        ),
+                      ),
+                      if (dialogError != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          dialogError!,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 20),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              style: _secondaryButtonStyle,
+                              onPressed: saving
+                                  ? null
+                                  : () => Navigator.pop(context, false),
+                              child: const Text('Cancel'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: FilledButton(
+                              style: _primaryButtonStyle,
+                              onPressed: valid && !saving ? saveStudent : null,
+                              child: saving
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Text(
+                                      'Add Student',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.w700),
+                                    ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
-                  ],
+                  ),
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: saving
-                      ? null
-                      : () {
-                          Navigator.pop(
-                            context,
-                            false,
-                          );
-                        },
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed:
-                      saving ? null : saveStudent,
-                  child: saving
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child:
-                              CircularProgressIndicator(
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : const Text('Save'),
-                ),
-              ],
             );
           },
         );
@@ -365,9 +405,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
     );
 
     studentNumberController.dispose();
-    firstNameController.dispose();
     lastNameController.dispose();
-    emailController.dispose();
+    firstNameController.dispose();
 
     if (result == true) {
       await _loadData();
@@ -376,10 +415,193 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Student added successfully.',
-          ),
+          content: Text('Student added successfully.'),
         ),
+      );
+    }
+  }
+
+  // =========================
+  // ADD / EDIT STUDENT INFO (email, not available from Excel)
+  // =========================
+
+  Future<void> _showAddInfoDialog(Map<String, dynamic> student) async {
+    final id = int.tryParse(student['id']?.toString() ?? '');
+    if (id == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This student cannot be updated.')),
+      );
+      return;
+    }
+
+    final emailController = TextEditingController(
+      text: student['email']?.toString() ?? '',
+    );
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        bool saving = false;
+        String? dialogError;
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final emailError = StudentValidation.email(
+              emailController.text,
+              required: true,
+            );
+
+            Future<void> save() async {
+              setDialogState(() {
+                saving = true;
+                dialogError = null;
+              });
+
+              try {
+                final token = await AuthStorage.getToken();
+
+                if (token == null || token.isEmpty) {
+                  throw Exception('Authentication token not found.');
+                }
+
+                await ApiService.updateStudent(
+                  token: token,
+                  studentId: id,
+                  email: emailController.text.trim(),
+                );
+
+                if (!context.mounted) return;
+
+                Navigator.pop(context, true);
+              } catch (e) {
+                setDialogState(() {
+                  saving = false;
+                  dialogError =
+                      e.toString().replaceFirst('Exception: ', '');
+                });
+              }
+            }
+
+            return Dialog(
+              backgroundColor: Colors.white,
+              surfaceTintColor: Colors.transparent,
+              insetPadding: const EdgeInsets.all(24),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 440),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Add Student Info',
+                              style: TextStyle(
+                                fontSize: 19,
+                                fontWeight: FontWeight.w700,
+                                color: CmColors.navy,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Close',
+                            icon: const Icon(Icons.close, size: 20),
+                            onPressed: saving
+                                ? null
+                                : () => Navigator.pop(context, false),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        _fullName(student),
+                        style: const TextStyle(color: CmColors.slate),
+                      ),
+                      const SizedBox(height: 16),
+                      _labeled(
+                        'Email',
+                        TextField(
+                          controller: emailController,
+                          enabled: !saving,
+                          keyboardType: TextInputType.emailAddress,
+                          onChanged: (_) => setDialogState(() {}),
+                          decoration: _fieldDecoration(
+                            errorText: emailController.text.trim().isEmpty
+                                ? null
+                                : emailError,
+                          ),
+                        ),
+                      ),
+                      if (dialogError != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          dialogError!,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 20),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              style: _secondaryButtonStyle,
+                              onPressed: saving
+                                  ? null
+                                  : () => Navigator.pop(context, false),
+                              child: const Text('Cancel'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: FilledButton(
+                              style: _primaryButtonStyle,
+                              onPressed:
+                                  emailError == null && !saving ? save : null,
+                              child: saving
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Text(
+                                      'Save',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.w700),
+                                    ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    emailController.dispose();
+
+    if (result == true) {
+      await _loadData();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Student info updated.')),
       );
     }
   }
@@ -477,10 +699,14 @@ class _StudentsScreenState extends State<StudentsScreen> {
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              CircleAvatar(
-                backgroundColor: CmColors.bg,
-                foregroundColor: CmColors.navy,
-                child: Icon(icon),
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: CmColors.bg,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(icon, color: CmColors.navy),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -505,7 +731,6 @@ class _StudentsScreenState extends State<StudentsScreen> {
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right, color: CmColors.slate),
             ],
           ),
         ),
@@ -685,6 +910,22 @@ class _StudentsScreenState extends State<StudentsScreen> {
               row(Icons.calendar_month_outlined, 'Term',
                   [semester, schoolYear].where((e) => e.isNotEmpty).join(' • ')),
               row(Icons.email_outlined, 'Email', email),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  style: _primaryButtonStyle,
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _showAddInfoDialog(student);
+                  },
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  label: Text(
+                    email.isEmpty ? 'Add Info' : 'Edit Info',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -704,14 +945,27 @@ class _StudentsScreenState extends State<StudentsScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showAddStudentsSheet,
-        icon: const Icon(Icons.group_add_outlined),
+        backgroundColor: CmColors.navy,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.person_add_alt_1_outlined),
         label: const Text('Add Students'),
       ),
       body: Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: TextField(
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x14000000),
+                    blurRadius: 8,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: TextField(
               controller: _searchController,
               textInputAction: TextInputAction.search,
               onChanged: (v) =>
@@ -729,47 +983,71 @@ class _StudentsScreenState extends State<StudentsScreen> {
                           setState(() => _query = '');
                         },
                       ),
-                border: const OutlineInputBorder(),
-                isDense: true,
+                filled: true,
+                fillColor: Colors.white,
+                contentPadding: const EdgeInsets.symmetric(vertical: 16),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: CmColors.line),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: CmColors.line),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide:
+                      const BorderSide(color: CmColors.navy, width: 1.5),
+                ),
               ),
+            ),
             ),
           ),
           if (_classes.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-              child: DropdownButtonFormField<int?>(
-                initialValue: _selectedClassId,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'Filter by Section',
-                  prefixIcon: Icon(Icons.filter_list),
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-                items: [
-                  const DropdownMenuItem<int?>(
-                    value: null,
-                    child: Text('All Sections'),
-                  ),
-                  ..._classes.map((item) {
-                    final id = int.parse(item['id'].toString());
-
-                    return DropdownMenuItem<int?>(
-                      value: id,
-                      child: Text(
-                        _getClassLabel(item),
-                        overflow: TextOverflow.ellipsis,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 440),
+                  child: _labeled(
+                    'Filter by Section',
+                    DropdownButtonFormField<int?>(
+                      initialValue: _selectedClassId,
+                      isExpanded: true,
+                      decoration: _fieldDecoration().copyWith(
+                        prefixIcon: const Icon(
+                          Icons.people_outline,
+                          color: CmColors.slate,
+                        ),
                       ),
-                    );
-                  }),
-                ],
-                onChanged: (value) {
-                  setState(() {
-                    _selectedClassId = value;
-                  });
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('All Sections'),
+                        ),
+                        ..._classes.map((item) {
+                          final id = int.parse(item['id'].toString());
 
-                  _loadData();
-                },
+                          return DropdownMenuItem<int?>(
+                            value: id,
+                            child: Text(
+                              _getClassLabel(item),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        }),
+                      ],
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedClassId = value;
+                        });
+
+                        _loadData();
+                      },
+                    ),
+                  ),
+                ),
               ),
             ),
           Expanded(
@@ -925,15 +1203,15 @@ class _StudentsScreenState extends State<StudentsScreen> {
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: CmColors.navy.withValues(alpha: 0.08),
+                    color: CmColors.slate.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    '${entry.count} Student${entry.count == 1 ? '' : 's'}',
+                    '${entry.count} student${entry.count == 1 ? '' : 's'}',
                     style: const TextStyle(
                       fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: CmColors.navy,
+                      fontWeight: FontWeight.w600,
+                      color: CmColors.slate,
                     ),
                   ),
                 ),
@@ -946,24 +1224,40 @@ class _StudentsScreenState extends State<StudentsScreen> {
         final firstName = student['first_name']?.toString() ?? '';
 
         return Card(
-          margin: const EdgeInsets.only(bottom: 8),
+          elevation: 0,
+          color: Colors.white,
+          margin: const EdgeInsets.only(bottom: 10),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: const BorderSide(color: CmColors.line),
+          ),
           child: ListTile(
             onTap: () => _showStudentInfo(student),
-            minVerticalPadding: 10,
+            minVerticalPadding: 14,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
             leading: CircleAvatar(
+              radius: 24,
+              backgroundColor: CmColors.navy.withValues(alpha: 0.07),
+              foregroundColor: CmColors.navy,
               child: Text(
                 firstName.isNotEmpty ? firstName[0].toUpperCase() : '?',
+                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
             title: Text(
               _fullName(student),
               style: const TextStyle(
                 fontSize: 16,
-                fontWeight: FontWeight.bold,
+                fontWeight: FontWeight.w600,
+                color: CmColors.navy,
               ),
             ),
-            subtitle: Text(student['student_number']?.toString() ?? ''),
-            trailing: const Icon(Icons.chevron_right),
+            subtitle: Text(
+              student['student_number']?.toString() ?? '',
+              style: const TextStyle(color: CmColors.slate),
+            ),
           ),
         );
       },
