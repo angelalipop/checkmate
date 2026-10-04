@@ -654,7 +654,7 @@ class _Sidebar extends StatelessWidget {
       return Column(
         children: [
           Image.asset(
-            'assets/logo_circle1.png',
+            'assets/logo_circle.png',
             width: 52,
             height: 52,
             fit: BoxFit.contain,
