@@ -27,24 +27,27 @@ Future<Response> onRequest(RequestContext context) async {
       );
     }
 
-    final email = body['email']?.toString();
+    // The app sends the field as "email"; it may hold an email OR a
+    // username. "username" is also accepted.
+    final identifier =
+        (body['email'] ?? body['username'])?.toString();
     final password = body['password']?.toString();
 
-    if (email == null ||
-        email.trim().isEmpty ||
+    if (identifier == null ||
+        identifier.trim().isEmpty ||
         password == null ||
         password.isEmpty) {
       return Response.json(
         statusCode: 400,
         body: {
           'status': 'error',
-          'message': 'Email and password are required',
+          'message': 'Email/username and password are required',
         },
       );
     }
 
     final user = await AuthService.login(
-      email: email,
+      identifier: identifier,
       password: password,
     );
 
@@ -53,7 +56,21 @@ Future<Response> onRequest(RequestContext context) async {
         statusCode: 401,
         body: {
           'status': 'error',
-          'message': 'Invalid email or password',
+          'message': 'Invalid email/username or password',
+        },
+      );
+    }
+
+    // Only reached with the correct password, so this does not reveal
+    // which accounts exist to someone guessing.
+    if (user['is_active'] != true) {
+      return Response.json(
+        statusCode: 403,
+        body: {
+          'status': 'error',
+          'message':
+              'This account has been disabled. Contact your administrator.',
+          'code': 'account_disabled',
         },
       );
     }
@@ -72,11 +89,14 @@ Future<Response> onRequest(RequestContext context) async {
       },
     );
   } catch (e) {
+    // ignore: avoid_print
+    print('LOGIN ERROR: $e');
+
     return Response.json(
       statusCode: 500,
       body: {
         'status': 'error',
-        'message': e.toString(),
+        'message': 'Internal server error',
       },
     );
   }

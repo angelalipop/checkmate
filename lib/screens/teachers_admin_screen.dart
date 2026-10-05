@@ -1,6 +1,5 @@
 import 'dart:math';
 
-import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -48,52 +47,124 @@ bool _tActive(Map<String, dynamic> t) {
   return true;
 }
 
-int? _tSubjectId(Map<String, dynamic> t) {
-  final s = t['subject'];
-  final raw = t['subject_id'] ?? (s is Map ? s['id'] : null);
-  return int.tryParse(raw?.toString() ?? '');
+// ---------- Teaching assignments (Subject + Section) ----------
+
+/// One section a teacher teaches for a subject.
+class _Sec {
+  const _Sec({
+    required this.section,
+    this.schoolYear = '',
+    this.semester = '',
+    this.yearLevel,
+  });
+
+  final String section;
+  final String schoolYear;
+  final String semester;
+  final int? yearLevel;
+
+  String get key => '${section.toLowerCase()}|$schoolYear|$semester';
 }
 
-Set<int> _tAssigned(Map<String, dynamic> t) {
-  final out = <int>{};
+/// A subject plus the sections the teacher teaches it in.
+class _SubjectAssignment {
+  _SubjectAssignment({
+    required this.subjectId,
+    required this.subjectName,
+    Map<String, _Sec>? sections,
+  }) : sections = sections ?? <String, _Sec>{};
 
-  final ids = t['class_ids'];
-  if (ids is List) {
-    for (final i in ids) {
-      final v = int.tryParse(i.toString());
-      if (v != null) out.add(v);
-    }
-  }
+  final int subjectId;
+  final String subjectName;
+  final Map<String, _Sec> sections;
+}
 
-  final classes = t['classes'];
-  if (classes is List) {
-    for (final c in classes) {
-      final raw = c is Map ? c['id'] : c;
-      final v = int.tryParse(raw?.toString() ?? '');
-      if (v != null) out.add(v);
+List<_SubjectAssignment> _tAssignments(Map<String, dynamic> t) {
+  final out = <_SubjectAssignment>[];
+  final raw = t['assignments'];
+  if (raw is! List) return out;
+
+  for (final a in raw) {
+    if (a is! Map) continue;
+
+    final subjectId = int.tryParse(a['subject_id']?.toString() ?? '');
+    if (subjectId == null) continue;
+
+    final item = _SubjectAssignment(
+      subjectId: subjectId,
+      subjectName: (a['subject_name'] ?? 'Subject').toString(),
+    );
+
+    final classes = a['classes'];
+    if (classes is List) {
+      for (final c in classes) {
+        if (c is! Map) continue;
+
+        final sec = _Sec(
+          section: (c['section'] ?? '').toString(),
+          schoolYear: (c['school_year'] ?? '').toString(),
+          semester: (c['semester'] ?? '').toString(),
+          yearLevel: int.tryParse(c['year_level']?.toString() ?? ''),
+        );
+
+        if (sec.section.isNotEmpty) item.sections[sec.key] = sec;
+      }
     }
+
+    if (item.sections.isNotEmpty) out.add(item);
   }
 
   return out;
 }
 
-String _classLabel(Map<String, dynamic> item) {
-  final section = item['section']?.toString() ?? 'Unknown Section';
-  final subject = item['subject'];
+List<Map<String, dynamic>> _assignmentPayload(
+  List<_SubjectAssignment> list,
+) =>
+    [
+      for (final a in list)
+        for (final s in a.sections.values)
+          {
+            'subject_id': a.subjectId,
+            'section': s.section,
+            'school_year': s.schoolYear,
+            'semester': s.semester,
+          },
+    ];
 
-  if (subject is! Map) return section;
+Set<String> _assignmentKeys(List<_SubjectAssignment> list) => {
+      for (final a in list)
+        for (final s in a.sections.values) '${a.subjectId}|${s.key}',
+    };
 
-  final name = subject['name']?.toString() ?? 'Unknown Subject';
-  final code = subject['code']?.toString() ?? '';
-
-  return code.isEmpty ? '$section - $name' : '$section - $code - $name';
+bool _assignmentsChanged(
+  List<_SubjectAssignment> before,
+  List<_SubjectAssignment> after,
+) {
+  final a = _assignmentKeys(before);
+  final b = _assignmentKeys(after);
+  return a.length != b.length || !a.containsAll(b);
 }
 
-String _subjectText(Map<String, dynamic> s) {
-  final name = s['name']?.toString() ?? '';
-  final code = s['code']?.toString() ?? '';
-  if (name.isEmpty) return code;
-  return code.isEmpty ? name : '$code - $name';
+String _assignmentSearchText(Map<String, dynamic> t) => [
+      for (final a in _tAssignments(t)) ...[
+        a.subjectName,
+        ...a.sections.values.map((s) => s.section),
+      ],
+    ].join(' ').toLowerCase();
+
+String _yearLabel(int? y) {
+  switch (y) {
+    case null:
+      return 'Other';
+    case 1:
+      return '1st Year';
+    case 2:
+      return '2nd Year';
+    case 3:
+      return '3rd Year';
+    default:
+      return '${y}th Year';
+  }
 }
 
 String _clean(Object e) => e.toString().replaceFirst('Exception: ', '');
@@ -213,7 +284,6 @@ class TeachersScreen extends StatefulWidget {
 
 class _TeachersScreenState extends State<TeachersScreen> {
   List<Map<String, dynamic>> _teachers = [];
-  List<Map<String, dynamic>> _classes = [];
   List<Map<String, dynamic>> _subjects = [];
 
   final _searchController = TextEditingController();
@@ -258,7 +328,6 @@ class _TeachersScreenState extends State<TeachersScreen> {
 
       final results = await Future.wait([
         ApiService.getTeachers(token),
-        ApiService.getClasses(token),
         ApiService.getSubjects(token),
       ]);
 
@@ -266,8 +335,7 @@ class _TeachersScreenState extends State<TeachersScreen> {
 
       setState(() {
         _teachers = results[0];
-        _classes = results[1];
-        _subjects = results[2];
+        _subjects = results[1];
         _loading = false;
         _error = null;
       });
@@ -293,36 +361,13 @@ class _TeachersScreenState extends State<TeachersScreen> {
 
   // ---------- lookups ----------
 
-  Map<String, dynamic>? _classById(int id) {
-    for (final c in _classes) {
-      if (int.tryParse(c['id']?.toString() ?? '') == id) return c;
-    }
-    return null;
-  }
-
-  String _subjectLabel(Map<String, dynamic> t) {
-    final s = t['subject'];
-    if (s is Map) return _subjectText(Map<String, dynamic>.from(s));
-    if (s is String && s.trim().isNotEmpty) return s.trim();
-
-    final id = _tSubjectId(t);
-    if (id != null) {
-      for (final sub in _subjects) {
-        if (int.tryParse(sub['id']?.toString() ?? '') == id) {
-          return _subjectText(sub);
-        }
-      }
-    }
-    return '';
-  }
-
   bool _matches(Map<String, dynamic> t) {
     if (_query.isEmpty) return true;
 
     return _tName(t).toLowerCase().contains(_query) ||
         _tEmail(t).toLowerCase().contains(_query) ||
         _tUsername(t).toLowerCase().contains(_query) ||
-        _subjectLabel(t).toLowerCase().contains(_query);
+        _assignmentSearchText(t).contains(_query);
   }
 
   // =========================
@@ -337,7 +382,6 @@ class _TeachersScreenState extends State<TeachersScreen> {
       barrierDismissible: false,
       builder: (_) => _TeacherFormDialog(
         teachers: _teachers,
-        classes: _classes,
         subjects: _subjects,
         onSubmit: (input) async {
           final token = await _token();
@@ -347,9 +391,8 @@ class _TeachersScreenState extends State<TeachersScreen> {
             name: input.name,
             email: input.email,
             username: input.username,
-            subjectId: input.subjectId,
             temporaryPassword: input.password!,
-            classIds: input.classIds.toList(),
+            assignments: _assignmentPayload(input.assignments),
           );
 
           creds = _Credentials(
@@ -379,35 +422,30 @@ class _TeachersScreenState extends State<TeachersScreen> {
     final id = _tId(teacher);
     if (id == null || _busy.contains(id)) return;
 
-    final before = _tAssigned(teacher);
+    final before = _tAssignments(teacher);
 
     final ok = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) => _TeacherFormDialog(
         teachers: _teachers,
-        classes: _classes,
         subjects: _subjects,
         teacher: teacher,
         onSubmit: (input) async {
           final token = await _token();
 
+          // Profile + assignments are saved in ONE server transaction, so a
+          // conflict (section already taken) saves nothing.
           await ApiService.updateTeacher(
             token: token,
             teacherId: id,
             name: input.name,
             email: input.email,
             username: input.username,
-            subjectId: input.subjectId,
+            assignments: _assignmentsChanged(before, input.assignments)
+                ? _assignmentPayload(input.assignments)
+                : null,
           );
-
-          if (!setEquals(before, input.classIds)) {
-            await ApiService.setTeacherClasses(
-              token: token,
-              teacherId: id,
-              classIds: input.classIds.toList(),
-            );
-          }
         },
       ),
     );
@@ -432,14 +470,15 @@ class _TeachersScreenState extends State<TeachersScreen> {
       barrierDismissible: false,
       builder: (_) => _AssignSectionsDialog(
         teacherName: _tName(teacher),
-        classes: _classes,
-        initial: _tAssigned(teacher),
-        onSave: (ids) async {
+        teacherId: id,
+        subjects: _subjects,
+        initial: _tAssignments(teacher),
+        onSave: (list) async {
           final token = await _token();
-          await ApiService.setTeacherClasses(
+          await ApiService.setTeacherAssignments(
             token: token,
             teacherId: id,
-            classIds: ids.toList(),
+            assignments: _assignmentPayload(list),
           );
         },
       ),
@@ -449,7 +488,7 @@ class _TeachersScreenState extends State<TeachersScreen> {
 
     await _load(silent: true);
     if (!mounted) return;
-    _snack('Sections updated.');
+    _snack('Assignments updated.');
   }
 
   // =========================
@@ -827,13 +866,9 @@ class _TeachersScreenState extends State<TeachersScreen> {
     final name = _tName(teacher);
     final email = _tEmail(teacher);
     final username = _tUsername(teacher);
-    final subject = _subjectLabel(teacher);
-    final assigned = _tAssigned(teacher).toList()..sort();
+    final assignments = _tAssignments(teacher);
 
-    final meta = [
-      if (username.isNotEmpty) '@$username',
-      if (subject.isNotEmpty) subject,
-    ].join('  •  ');
+    final meta = username.isNotEmpty ? '@$username' : '';
 
     return Card(
       elevation: 0,
@@ -908,31 +943,39 @@ class _TeachersScreenState extends State<TeachersScreen> {
                         ),
                       ),
                     const SizedBox(height: 8),
-                    if (assigned.isEmpty)
+                    if (assignments.isEmpty)
                       const Text(
-                        'No sections assigned',
+                        'No assignments yet',
                         style: TextStyle(color: CmColors.slate, fontSize: 12),
                       )
                     else
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
-                          for (final classId in assigned)
-                            Tooltip(
-                              message: _classById(classId) == null
-                                  ? 'Unknown section'
-                                  : _classLabel(_classById(classId)!),
-                              child: _chip(
-                                _classById(classId)?['section']?.toString() ??
-                                    'Unknown',
-                                color: CmColors.navy,
-                                background:
-                                    CmColors.navy.withValues(alpha: 0.07),
+                      for (final a in assignments)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                a.subjectName,
+                                style: const TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: CmColors.navy,
+                                ),
                               ),
-                            ),
-                        ],
-                      ),
+                              for (final sec in (a.sections.values.toList()
+                                ..sort((x, y) => x.section.compareTo(y.section))))
+                                _chip(
+                                  sec.section,
+                                  color: CmColors.navy,
+                                  background:
+                                      CmColors.navy.withValues(alpha: 0.07),
+                                ),
+                            ],
+                          ),
+                        ),
                   ],
                 ),
               ),
@@ -1001,30 +1044,26 @@ class _TeacherInput {
     required this.name,
     required this.email,
     required this.username,
-    required this.subjectId,
-    required this.classIds,
+    required this.assignments,
     this.password,
   });
 
   final String name;
   final String email;
   final String username;
-  final int? subjectId;
-  final Set<int> classIds;
+  final List<_SubjectAssignment> assignments;
   final String? password; // only set when creating
 }
 
 class _TeacherFormDialog extends StatefulWidget {
   const _TeacherFormDialog({
     required this.teachers,
-    required this.classes,
     required this.subjects,
     required this.onSubmit,
     this.teacher,
   });
 
   final List<Map<String, dynamic>> teachers;
-  final List<Map<String, dynamic>> classes;
   final List<Map<String, dynamic>> subjects;
   final Map<String, dynamic>? teacher;
   final Future<void> Function(_TeacherInput input) onSubmit;
@@ -1039,8 +1078,7 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
   final _username = TextEditingController();
   final _password = TextEditingController();
 
-  int? _subjectId;
-  final Set<int> _classIds = {};
+  final _editorKey = GlobalKey<_AssignmentEditorState>();
 
   bool _usernameTouched = false;
   bool _saving = false;
@@ -1059,12 +1097,6 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
       _email.text = _tEmail(t);
       _username.text = _tUsername(t);
       _usernameTouched = true;
-      _classIds.addAll(_tAssigned(t));
-
-      final sid = _tSubjectId(t);
-      final exists = widget.subjects
-          .any((s) => int.tryParse(s['id']?.toString() ?? '') == sid);
-      _subjectId = exists ? sid : null;
     }
   }
 
@@ -1159,18 +1191,17 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
     });
 
     try {
-      final validIds = widget.classes
-          .map((c) => int.tryParse(c['id']?.toString() ?? ''))
-          .whereType<int>()
-          .toSet();
+      // Sections ticked but not yet added with "Add assignment" are
+      // included, so nothing the admin selected is silently dropped.
+      final editor = _editorKey.currentState;
+      editor?.commitStaged();
 
       await widget.onSubmit(
         _TeacherInput(
           name: _name.text.replaceAll(RegExp(r'\s+'), ' ').trim(),
           email: _email.text.trim().toLowerCase(),
           username: _username.text.trim().toLowerCase(),
-          subjectId: _subjectId,
-          classIds: _classIds.where(validIds.contains).toSet(),
+          assignments: editor?.assignments ?? const [],
           password: _isEdit ? null : _password.text,
         ),
       );
@@ -1255,34 +1286,6 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
                   _fieldDecoration(errorText: shown(_username, usernameError)),
             ),
           ),
-          const SizedBox(height: 14),
-          _labeled(
-            'Subject',
-            DropdownButtonFormField<int?>(
-              initialValue: _subjectId,
-              isExpanded: true,
-              decoration: _fieldDecoration(),
-              items: [
-                const DropdownMenuItem<int?>(
-                  value: null,
-                  child: Text('No subject'),
-                ),
-                ...widget.subjects.map((s) {
-                  final id = int.tryParse(s['id']?.toString() ?? '');
-                  return DropdownMenuItem<int?>(
-                    value: id,
-                    child: Text(
-                      _subjectText(s),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  );
-                }),
-              ],
-              onChanged: _saving
-                  ? null
-                  : (value) => setState(() => _subjectId = value),
-            ),
-          ),
           if (!_isEdit) ...[
             const SizedBox(height: 14),
             _labeled(
@@ -1325,7 +1328,14 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
             ),
           ],
           const SizedBox(height: 14),
-          _labeled('Sections', _sectionPicker()),
+          _AssignmentEditor(
+            key: _editorKey,
+            subjects: widget.subjects,
+            initial:
+                _isEdit ? _tAssignments(widget.teacher!) : const [],
+            teacherId: _editId,
+            enabled: !_saving,
+          ),
           if (_error != null) ...[
             const SizedBox(height: 12),
             Text(
@@ -1365,75 +1375,479 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
     );
   }
 
-  Widget _sectionPicker() {
-    if (widget.classes.isEmpty) {
-      return const Text(
-        'No sections available yet.',
-        style: TextStyle(color: CmColors.slate),
-      );
-    }
-
-    return Container(
-      constraints: const BoxConstraints(maxHeight: 150),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: CmColors.line),
-      ),
-      child: SingleChildScrollView(
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final c in widget.classes)
-              Builder(builder: (context) {
-                final id = int.tryParse(c['id']?.toString() ?? '');
-                if (id == null) return const SizedBox.shrink();
-                final selected = _classIds.contains(id);
-
-                return FilterChip(
-                  label: Text(_classLabel(c)),
-                  selected: selected,
-                  showCheckmark: true,
-                  selectedColor: CmColors.navy.withValues(alpha: 0.12),
-                  onSelected: _saving
-                      ? null
-                      : (on) => setState(() {
-                            on ? _classIds.add(id) : _classIds.remove(id);
-                          }),
-                );
-              }),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 // =============================================================
 // ASSIGN SECTIONS
 // =============================================================
 
+class _AssignmentEditor extends StatefulWidget {
+  const _AssignmentEditor({
+    super.key,
+    required this.subjects,
+    required this.initial,
+    this.teacherId,
+    this.enabled = true,
+  });
+
+  final List<Map<String, dynamic>> subjects;
+  final List<_SubjectAssignment> initial;
+
+  /// The teacher being edited (null when creating). Sections owned by this
+  /// teacher stay selectable; sections owned by anyone else are disabled.
+  final int? teacherId;
+  final bool enabled;
+
+  @override
+  State<_AssignmentEditor> createState() => _AssignmentEditorState();
+}
+
+class _AssignmentEditorState extends State<_AssignmentEditor> {
+  late final Map<int, _SubjectAssignment> _draft = {
+    for (final a in widget.initial)
+      a.subjectId: _SubjectAssignment(
+        subjectId: a.subjectId,
+        subjectName: a.subjectName,
+        sections: {...a.sections},
+      ),
+  };
+
+  int? _subjectId;
+  int _dropdownResets = 0;
+  List<Map<String, dynamic>> _options = [];
+  final Set<String> _staged = {};
+  bool _loadingOptions = false;
+  String? _optionsError;
+  int _requestSeq = 0;
+
+  /// The full set to save (call [commitStaged] first).
+  List<_SubjectAssignment> get assignments => _draft.values.toList();
+
+  String _subjectName(int id) {
+    for (final s in widget.subjects) {
+      if (int.tryParse(s['id']?.toString() ?? '') == id) {
+        return (s['name'] ?? 'Subject').toString();
+      }
+    }
+    return 'Subject';
+  }
+
+  String _optKey(Map<String, dynamic> o) =>
+      '${(o['section'] ?? '').toString().toLowerCase()}|'
+      '${(o['school_year'] ?? '').toString()}|'
+      '${(o['semester'] ?? '').toString()}';
+
+  bool _ownedByOther(Map<String, dynamic> o) {
+    final owner = int.tryParse(o['teacher_id']?.toString() ?? '');
+    return owner != null && owner != widget.teacherId;
+  }
+
+  bool get _stagedChanged {
+    final id = _subjectId;
+    if (id == null) return false;
+    final current = _draft[id]?.sections.keys.toSet() ?? <String>{};
+    return current.length != _staged.length || !current.containsAll(_staged);
+  }
+
+  Future<void> _pickSubject(int? id) async {
+    setState(() {
+      _subjectId = id;
+      _options = [];
+      _optionsError = null;
+      _staged
+        ..clear()
+        ..addAll(
+          id == null ? const <String>[] : (_draft[id]?.sections.keys ?? []),
+        );
+    });
+
+    if (id != null) await _loadOptions(id);
+  }
+
+  Future<void> _loadOptions(int id) async {
+    final seq = ++_requestSeq;
+
+    setState(() {
+      _loadingOptions = true;
+      _optionsError = null;
+    });
+
+    try {
+      final token = await AuthStorage.getToken();
+
+      if (token == null || token.isEmpty) {
+        throw Exception('Your session has expired. Please log in again.');
+      }
+
+      final rows = await ApiService.getTeachingOptions(token, id);
+
+      if (!mounted || seq != _requestSeq) return;
+
+      setState(() {
+        _options = rows;
+        _loadingOptions = false;
+      });
+    } catch (e) {
+      if (!mounted || seq != _requestSeq) return;
+
+      setState(() {
+        _optionsError = _clean(e);
+        _loadingOptions = false;
+      });
+    }
+  }
+
+  void _commit() {
+    final id = _subjectId;
+    if (id == null) return;
+
+    final existing = _draft[id];
+
+    if (_staged.isEmpty) {
+      _draft.remove(id);
+    } else {
+      final sections = <String, _Sec>{};
+
+      for (final o in _options) {
+        final key = _optKey(o);
+        if (!_staged.contains(key)) continue;
+
+        sections[key] = _Sec(
+          section: (o['section'] ?? '').toString(),
+          schoolYear: (o['school_year'] ?? '').toString(),
+          semester: (o['semester'] ?? '').toString(),
+          yearLevel: int.tryParse(o['year_level']?.toString() ?? ''),
+        );
+      }
+
+      for (final key in _staged) {
+        final prev = existing?.sections[key];
+        if (prev != null) sections.putIfAbsent(key, () => prev);
+      }
+
+      _draft[id] = _SubjectAssignment(
+        subjectId: id,
+        subjectName: _subjectName(id),
+        sections: sections,
+      );
+    }
+
+    _subjectId = null;
+    _options = [];
+    _staged.clear();
+    _dropdownResets++;
+  }
+
+  /// Called by the parent right before saving.
+  void commitStaged() {
+    if (_subjectId != null && _stagedChanged) setState(_commit);
+  }
+
+  void _remove(int subjectId, String key) {
+    setState(() {
+      final a = _draft[subjectId];
+      if (a == null) return;
+
+      a.sections.remove(key);
+      if (a.sections.isEmpty) _draft.remove(subjectId);
+      if (_subjectId == subjectId) _staged.remove(key);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.enabled;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: CmColors.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Teaching assignments',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: CmColors.navy,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _labeled(
+            'Subject',
+            DropdownButtonFormField<int>(
+              key: ValueKey('subject-$_dropdownResets-$_subjectId'),
+              initialValue: _subjectId,
+              isExpanded: true,
+              decoration: _fieldDecoration(),
+              hint: const Text('Choose a subject'),
+              items: [
+                for (final s in widget.subjects)
+                  if (int.tryParse(s['id']?.toString() ?? '') != null)
+                    DropdownMenuItem<int>(
+                      value: int.parse(s['id'].toString()),
+                      child: Text(
+                        (s['name'] ?? '').toString(),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+              ],
+              onChanged: enabled ? _pickSubject : null,
+            ),
+          ),
+          if (_subjectId != null) ...[
+            const SizedBox(height: 14),
+            _sectionsArea(enabled),
+          ],
+          const SizedBox(height: 14),
+          _assignedList(enabled),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionsArea(bool enabled) {
+    if (_loadingOptions) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    if (_optionsError != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(_optionsError!, style: const TextStyle(color: _dangerRed)),
+          TextButton(
+            onPressed: () => _loadOptions(_subjectId!),
+            child: const Text('Retry'),
+          ),
+        ],
+      );
+    }
+
+    if (_options.isEmpty) {
+      return const Text(
+        'No sections exist yet. Add sections in Classes first.',
+        style: TextStyle(color: CmColors.slate),
+      );
+    }
+
+    final groups = <int?, List<Map<String, dynamic>>>{};
+    for (final o in _options) {
+      groups
+          .putIfAbsent(int.tryParse(o['year_level']?.toString() ?? ''), () => [])
+          .add(o);
+    }
+
+    final years = groups.keys.toList()
+      ..sort((a, b) {
+        if (a == null) return 1;
+        if (b == null) return -1;
+        return a.compareTo(b);
+      });
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final itemWidth = (constraints.maxWidth - 8) / 2;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Sections / classes',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: CmColors.navy,
+              ),
+            ),
+            for (final y in years) ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 10, bottom: 2),
+                child: Text(
+                  _yearLabel(y),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: CmColors.slate,
+                  ),
+                ),
+              ),
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final o in groups[y]!)
+                    SizedBox(
+                      width: itemWidth,
+                      child: _sectionTile(o, enabled),
+                    ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: CmColors.navy,
+                side: const BorderSide(color: CmColors.line),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onPressed:
+                  enabled && _stagedChanged ? () => setState(_commit) : null,
+              icon: const Icon(Icons.add, size: 18),
+              label: Text(
+                _draft.containsKey(_subjectId)
+                    ? 'Update assignment'
+                    : 'Add assignment',
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _sectionTile(Map<String, dynamic> o, bool enabled) {
+    final key = _optKey(o);
+    final blocked = _ownedByOther(o);
+    final owner = (o['teacher_name'] ?? 'another teacher').toString();
+
+    return CheckboxListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      controlAffinity: ListTileControlAffinity.leading,
+      activeColor: CmColors.navy,
+      value: !blocked && _staged.contains(key),
+      onChanged: (!enabled || blocked)
+          ? null
+          : (on) => setState(() {
+                on == true ? _staged.add(key) : _staged.remove(key);
+              }),
+      title: Text(
+        (o['section'] ?? '').toString(),
+        style: TextStyle(
+          fontSize: 14,
+          color: blocked
+              ? CmColors.slate.withValues(alpha: 0.6)
+              : CmColors.navy,
+        ),
+      ),
+      subtitle: blocked
+          ? Text(
+              'Assigned to $owner',
+              style: const TextStyle(fontSize: 11.5, color: CmColors.slate),
+            )
+          : null,
+    );
+  }
+
+  Widget _assignedList(bool enabled) {
+    if (_draft.isEmpty) {
+      return const Text(
+        'No assignments yet. Choose a subject, tick its sections, then '
+        'press "Add assignment".',
+        style: TextStyle(fontSize: 12.5, color: CmColors.slate),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Assigned to this teacher',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: CmColors.navy,
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (final a in _draft.values)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  a.subjectName,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: CmColors.navy,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    for (final e in (a.sections.entries.toList()
+                      ..sort((x, y) {
+                        final byYear = (x.value.yearLevel ?? 99)
+                            .compareTo(y.value.yearLevel ?? 99);
+                        return byYear != 0
+                            ? byYear
+                            : x.value.section.compareTo(y.value.section);
+                      })))
+                      InputChip(
+                        label: Text(e.value.section),
+                        labelStyle: const TextStyle(fontSize: 12.5),
+                        backgroundColor: Colors.white,
+                        side: const BorderSide(color: CmColors.line),
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        onDeleted:
+                            enabled ? () => _remove(a.subjectId, e.key) : null,
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class _AssignSectionsDialog extends StatefulWidget {
   const _AssignSectionsDialog({
     required this.teacherName,
-    required this.classes,
+    required this.teacherId,
+    required this.subjects,
     required this.initial,
     required this.onSave,
   });
 
   final String teacherName;
-  final List<Map<String, dynamic>> classes;
-  final Set<int> initial;
-  final Future<void> Function(Set<int> ids) onSave;
+  final int teacherId;
+  final List<Map<String, dynamic>> subjects;
+  final List<_SubjectAssignment> initial;
+  final Future<void> Function(List<_SubjectAssignment> list) onSave;
 
   @override
   State<_AssignSectionsDialog> createState() => _AssignSectionsDialogState();
 }
 
 class _AssignSectionsDialogState extends State<_AssignSectionsDialog> {
-  late final Set<int> _selected = {...widget.initial};
+  final _editorKey = GlobalKey<_AssignmentEditorState>();
   bool _saving = false;
   String? _error;
 
@@ -1446,7 +1860,11 @@ class _AssignSectionsDialogState extends State<_AssignSectionsDialog> {
     });
 
     try {
-      await widget.onSave(_selected);
+      final editor = _editorKey.currentState;
+      editor?.commitStaged();
+
+      await widget.onSave(editor?.assignments ?? const []);
+
       if (!mounted) return;
       Navigator.pop(context, true);
     } catch (e) {
@@ -1474,43 +1892,13 @@ class _AssignSectionsDialogState extends State<_AssignSectionsDialog> {
             style: const TextStyle(color: CmColors.slate),
           ),
           const SizedBox(height: 12),
-          if (widget.classes.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Center(child: Text('No sections available yet.')),
-            )
-          else
-            Container(
-              constraints: const BoxConstraints(maxHeight: 320),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: CmColors.line),
-              ),
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  for (final c in widget.classes)
-                    Builder(builder: (context) {
-                      final id = int.tryParse(c['id']?.toString() ?? '');
-                      if (id == null) return const SizedBox.shrink();
-
-                      return CheckboxListTile(
-                        value: _selected.contains(id),
-                        activeColor: CmColors.navy,
-                        controlAffinity: ListTileControlAffinity.leading,
-                        title: Text(_classLabel(c)),
-                        onChanged: _saving
-                            ? null
-                            : (on) => setState(() {
-                                  on == true
-                                      ? _selected.add(id)
-                                      : _selected.remove(id);
-                                }),
-                      );
-                    }),
-                ],
-              ),
-            ),
+          _AssignmentEditor(
+            key: _editorKey,
+            subjects: widget.subjects,
+            initial: widget.initial,
+            teacherId: widget.teacherId,
+            enabled: !_saving,
+          ),
           if (_error != null) ...[
             const SizedBox(height: 12),
             Text(

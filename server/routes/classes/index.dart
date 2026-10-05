@@ -1,12 +1,20 @@
 import 'package:dart_frog/dart_frog.dart';
+import 'package:postgres/postgres.dart';
 
 import 'package:server/classes/class_service.dart';
 
 Future<Response> onRequest(RequestContext context) async {
   try {
+    final user = context.read<Map<String, dynamic>>();
+    final isAdmin = user['role'] == 'admin';
+
     switch (context.request.method) {
       case HttpMethod.get:
-        final classes = await ClassService.getAll();
+        // Teachers only ever receive their own sections. The id comes
+        // from the verified token, never from the request.
+        final classes = await ClassService.getAll(
+          teacherId: isAdmin ? null : user['userId'] as int,
+        );
 
         return Response.json(
           body: {
@@ -16,6 +24,16 @@ Future<Response> onRequest(RequestContext context) async {
         );
 
       case HttpMethod.post:
+        if (!isAdmin) {
+          return Response.json(
+            statusCode: 403,
+            body: {
+              'status': 'error',
+              'message': 'Administrator access required.',
+            },
+          );
+        }
+
         final body = await context.request.json();
 
         if (body is! Map) {
@@ -38,11 +56,9 @@ Future<Response> onRequest(RequestContext context) async {
 
         final section = body['section']?.toString().trim();
 
-        final schoolYear =
-            body['school_year']?.toString().trim();
+        final schoolYear = body['school_year']?.toString().trim();
 
-        final semester =
-            body['semester']?.toString().trim();
+        final semester = body['semester']?.toString().trim();
 
         if (subjectId == null) {
           return Response.json(
@@ -79,13 +95,8 @@ Future<Response> onRequest(RequestContext context) async {
           teacherId: teacherId,
           section: section,
           schoolYear:
-              schoolYear == null || schoolYear.isEmpty
-                  ? null
-                  : schoolYear,
-          semester:
-              semester == null || semester.isEmpty
-                  ? null
-                  : semester,
+              schoolYear == null || schoolYear.isEmpty ? null : schoolYear,
+          semester: semester == null || semester.isEmpty ? null : semester,
         );
 
         return Response.json(
@@ -105,12 +116,33 @@ Future<Response> onRequest(RequestContext context) async {
           },
         );
     }
+  } on ServerException catch (e) {
+    if (e.code == '23505') {
+      return Response.json(
+        statusCode: 409,
+        body: {
+          'status': 'error',
+          'message': 'This subject and section already exist.',
+        },
+      );
+    }
+
+    // ignore: avoid_print
+    print('CLASSES ROUTE ERROR: $e');
+
+    return Response.json(
+      statusCode: 500,
+      body: {'status': 'error', 'message': 'Internal server error'},
+    );
   } catch (e) {
+    // ignore: avoid_print
+    print('CLASSES ROUTE ERROR: $e');
+
     return Response.json(
       statusCode: 500,
       body: {
         'status': 'error',
-        'message': e.toString(),
+        'message': 'Internal server error',
       },
     );
   }

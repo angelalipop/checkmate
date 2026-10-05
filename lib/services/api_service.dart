@@ -9,7 +9,7 @@ class ApiService {
       return 'http://localhost:8080';
     }
     // Physical iPhone → Mac running the CheckMate backend.
-    return 'http://192.168.100.247:8080';
+    return 'http://10.0.2.2:8080';
   }
 
   // =========================
@@ -762,14 +762,15 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
     return <String, dynamic>{};
   }
 
+  /// [assignments]: [{subject_id, section, school_year, semester}, ...]
+  /// A Subject + Section already owned by another teacher => HTTP 409.
   static Future<Map<String, dynamic>> createTeacher({
     required String token,
     required String name,
     required String email,
     required String username,
-    int? subjectId,
     required String temporaryPassword,
-    List<int> classIds = const [],
+    List<Map<String, dynamic>> assignments = const [],
   }) async {
     final response = await http.post(
       Uri.parse('$baseUrl/teachers'),
@@ -778,9 +779,8 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
         'name': name,
         'email': email,
         'username': username,
-        'subject_id': subjectId,
         'temporary_password': temporaryPassword,
-        'class_ids': classIds,
+        'assignments': assignments,
       }),
     );
 
@@ -797,13 +797,15 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
     return teacher is Map ? Map<String, dynamic>.from(teacher) : data;
   }
 
+  /// Pass [assignments] to change them in the same transaction as the
+  /// profile; leave it null to keep the teacher's assignments untouched.
   static Future<Map<String, dynamic>> updateTeacher({
     required String token,
     required int teacherId,
     required String name,
     required String email,
     required String username,
-    int? subjectId,
+    List<Map<String, dynamic>>? assignments,
   }) async {
     final response = await http.put(
       Uri.parse('$baseUrl/teachers/$teacherId'),
@@ -812,7 +814,7 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
         'name': name,
         'email': email,
         'username': username,
-        'subject_id': subjectId,
+        if (assignments != null) 'assignments': assignments,
       }),
     );
 
@@ -829,16 +831,17 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
     return teacher is Map ? Map<String, dynamic>.from(teacher) : data;
   }
 
-  static Future<Map<String, dynamic>> setTeacherClasses({
+  /// Replaces the teacher's whole set of Subject + Section assignments.
+  static Future<Map<String, dynamic>> setTeacherAssignments({
     required String token,
     required int teacherId,
-    required List<int> classIds,
+    required List<Map<String, dynamic>> assignments,
   }) async {
     final response = await http.put(
-      Uri.parse('$baseUrl/teachers/$teacherId/classes'),
+      Uri.parse('$baseUrl/teachers/$teacherId/assignments'),
       headers: _authHeaders(token),
       body: jsonEncode({
-        'class_ids': classIds,
+        'assignments': assignments,
       }),
     );
 
@@ -846,13 +849,44 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
 
     if (response.statusCode != 200) {
       throw Exception(
-        data['message']?.toString() ?? 'Failed to update assigned sections',
+        data['message']?.toString() ?? 'Failed to update assignments',
       );
     }
 
     final teacher = data['teacher'];
 
     return teacher is Map ? Map<String, dynamic>.from(teacher) : data;
+  }
+
+  /// Every known section with its current owner for [subjectId].
+  /// Rows: {section, school_year, semester, year_level,
+  ///        class_id, teacher_id, teacher_name}
+  static Future<List<Map<String, dynamic>>> getTeachingOptions(
+    String token,
+    int subjectId,
+  ) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/teaching-options?subject_id=$subjectId'),
+      headers: _authHeaders(token),
+    );
+
+    final data = _decodeBody(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        data['message']?.toString() ?? 'Failed to load sections',
+      );
+    }
+
+    final sections = data['sections'];
+
+    if (sections is! List) {
+      return [];
+    }
+
+    return sections
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
   }
 
   /// Returns the newly generated temporary password (shown once by the UI).
@@ -927,6 +961,33 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
 
       throw Exception(
         data['message']?.toString() ?? 'Failed to delete teacher',
+      );
+    }
+  }
+
+  // =========================
+  // CHANGE PASSWORD (own account)
+  // =========================
+
+  static Future<void> changePassword({
+    required String token,
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/auth/change-password'),
+      headers: _authHeaders(token),
+      body: jsonEncode({
+        'current_password': currentPassword,
+        'new_password': newPassword,
+      }),
+    );
+
+    final data = _decodeBody(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        data['message']?.toString() ?? 'Failed to change password',
       );
     }
   }

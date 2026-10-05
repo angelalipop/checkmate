@@ -3,7 +3,14 @@ import 'package:postgres/postgres.dart';
 import 'package:server/database.dart';
 
 class ClassService {
-  static Future<List<Map<String, dynamic>>> getAll() async {
+  /// "BSIT 1-A" -> 1, "BSIT-3A" -> 3. Null when no year digit (1-6) is found.
+  static int? inferYearLevel(String section) {
+    final match = RegExp(r'[1-6]').firstMatch(section);
+    return match == null ? null : int.parse(match.group(0)!);
+  }
+
+  /// When [teacherId] is given, only that teacher's sections are returned.
+  static Future<List<Map<String, dynamic>>> getAll({int? teacherId}) async {
     final result = await Database.pool.execute(
       Sql.named('''
         SELECT
@@ -16,12 +23,15 @@ class ClassService {
           s.code AS subject_code,
           c.teacher_id,
           u.name AS teacher_name,
-          c.created_at
+          c.created_at,
+          c.year_level
         FROM classes c
         JOIN subjects s ON s.id = c.subject_id
-        JOIN users u ON u.id = c.teacher_id
+        LEFT JOIN users u ON u.id = c.teacher_id
+        ${teacherId == null ? '' : 'WHERE c.teacher_id = @teacher_id'}
         ORDER BY c.id
       '''),
+      parameters: teacherId == null ? null : {'teacher_id': teacherId},
     );
 
     return result.map((row) {
@@ -40,6 +50,7 @@ class ClassService {
           'name': row[8],
         },
         'created_at': row[9].toString(),
+        'year_level': row[10],
       };
     }).toList();
   }
@@ -58,14 +69,16 @@ class ClassService {
           teacher_id,
           section,
           school_year,
-          semester
+          semester,
+          year_level
         )
         VALUES (
           @subject_id,
           @teacher_id,
           @section,
           @school_year,
-          @semester
+          @semester,
+          NULLIF(@year_level, 0)
         )
         RETURNING
           id,
@@ -74,7 +87,8 @@ class ClassService {
           section,
           school_year,
           semester,
-          created_at
+          created_at,
+          year_level
       '''),
       parameters: {
         'subject_id': subjectId,
@@ -82,6 +96,7 @@ class ClassService {
         'section': section.trim(),
         'school_year': schoolYear?.trim(),
         'semester': semester?.trim(),
+        'year_level': inferYearLevel(section) ?? 0,
       },
     );
 
@@ -95,6 +110,7 @@ class ClassService {
       'school_year': row[4],
       'semester': row[5],
       'created_at': row[6].toString(),
+      'year_level': row[7],
     };
   }
 }

@@ -4,6 +4,7 @@ import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import 'admin_dashboard.dart';
 import 'admin_login_screen.dart';
+import 'change_password_screen.dart';
 import 'teacher_dashboard.dart';
 
 class CmColors {
@@ -169,12 +170,29 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // TEACHER
       if (role == 'teacher') {
+        final teacherName = (user['name'] ?? user['email']).toString();
+
+        // Temporary password (new account or admin reset): the backend
+        // blocks every other route until it is changed.
+        if (user['must_change_password'] == true) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ChangePasswordScreen(
+                nextBuilder: (_) =>
+                    TeacherDashboard(teacherName: teacherName),
+              ),
+            ),
+          );
+
+          return;
+        }
+
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (context) => TeacherDashboard(
-              teacherName: (user['name'] ?? user['email']).toString(),
-            ),
+            builder: (context) =>
+                TeacherDashboard(teacherName: teacherName),
           ),
         );
 
@@ -312,7 +330,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
                 decoration: _fieldDecoration(
-                  label: 'Email',
+                  label: 'Email or username',
                   icon: Icons.email_outlined,
                 ),
               ),
