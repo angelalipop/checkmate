@@ -4,17 +4,11 @@ import 'package:postgres/postgres.dart';
 
 import 'package:server/auth/password.dart';
 import 'package:server/classes/class_service.dart';
+import 'package:server/teachers/teacher_exception.dart';
+import 'package:server/teachers/teacher_identity.dart';
 import 'package:server/database.dart';
 
-class TeacherException implements Exception {
-  TeacherException(this.message, {this.statusCode = 400});
-
-  final String message;
-  final int statusCode;
-
-  @override
-  String toString() => message;
-}
+export 'package:server/teachers/teacher_exception.dart';
 
 /// One Subject + Section the teacher teaches.
 class AssignmentInput {
@@ -35,47 +29,6 @@ class AssignmentInput {
 }
 
 class TeacherService {
-  static final _emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
-
-  // No '@' allowed, so a username can never be confused with an email
-  // when logging in with either.
-  static final _usernameRegex = RegExp(r'^[a-z0-9][a-z0-9._-]{2,99}$');
-
-  // ---------------------------------------------------------------
-  // Validation helpers
-  // ---------------------------------------------------------------
-
-  static ({String name, String email, String username}) _validateProfile({
-    required String name,
-    required String email,
-    required String username,
-  }) {
-    final cleanName = name.trim();
-    final cleanEmail = email.trim().toLowerCase();
-    final cleanUsername = username.trim().toLowerCase();
-
-    if (cleanName.isEmpty) {
-      throw TeacherException('Full name is required.');
-    }
-
-    if (cleanEmail.isEmpty || !_emailRegex.hasMatch(cleanEmail)) {
-      throw TeacherException('A valid email address is required.');
-    }
-
-    if (cleanUsername.isEmpty) {
-      throw TeacherException('Username is required.');
-    }
-
-    if (!_usernameRegex.hasMatch(cleanUsername)) {
-      throw TeacherException(
-        'Username must be 3-100 characters: letters, numbers, '
-        'dots, dashes or underscores.',
-      );
-    }
-
-    return (name: cleanName, email: cleanEmail, username: cleanUsername);
-  }
-
   /// Parses the "assignments" array sent by the app. Returns null when the
   /// key was not sent at all (so "leave assignments alone" and "remove all
   /// of them" stay different things).
@@ -119,22 +72,25 @@ class TeacherService {
 
   static Future<void> _assertUnique(
     Session session, {
+    required String teacherIdNo,
     required String email,
-    required String username,
     int excludeId = -1,
   }) async {
     final result = await session.execute(
       Sql.named('''
-        SELECT (LOWER(email) = LOWER(@email)) AS email_match,
-               (LOWER(username) = LOWER(@username)) AS username_match
+        SELECT
+          (LOWER(teacher_id_no) = LOWER(@teacher_id_no)) AS id_match,
+          (LOWER(email) = LOWER(@email)
+           OR LOWER(username) = LOWER(@email)) AS email_match
         FROM users
-        WHERE (LOWER(email) = LOWER(@email)
-               OR LOWER(username) = LOWER(@username))
+        WHERE (LOWER(teacher_id_no) = LOWER(@teacher_id_no)
+               OR LOWER(email) = LOWER(@email)
+               OR LOWER(username) = LOWER(@email))
           AND id <> @exclude_id
       '''),
       parameters: {
+        'teacher_id_no': teacherIdNo,
         'email': email,
-        'username': username,
         'exclude_id': excludeId,
       },
     );
@@ -142,7 +98,7 @@ class TeacherService {
     for (final row in result) {
       if (row[0] == true) {
         throw TeacherException(
-          'A user with this email already exists.',
+          'This Teacher ID No. already belongs to another teacher.',
           statusCode: 409,
         );
       }
@@ -151,7 +107,7 @@ class TeacherService {
     for (final row in result) {
       if (row[1] == true) {
         throw TeacherException(
-          'This username is already taken.',
+          'The generated email $email is already in use.',
           statusCode: 409,
         );
       }
@@ -295,9 +251,23 @@ class TeacherService {
         );
       }
 
+      if (constraint.contains('teacher_id')) {
+        return TeacherException(
+          'This Teacher ID No. already belongs to another teacher.',
+          statusCode: 409,
+        );
+      }
+
       return TeacherException(
-        'That email or username is already in use.',
+        'That email address is already in use.',
         statusCode: 409,
+      );
+    }
+
+    if (e.code == '23514') {
+      return TeacherException(
+        'The teacher details break a database rule (Teacher ID or email '
+        'domain). Check them and try again.',
       );
     }
 
@@ -336,7 +306,9 @@ class TeacherService {
     final teachers = await Database.pool.execute(
       Sql.named('''
         SELECT u.id, u.name, u.email, u.username, u.is_active,
-               u.must_change_password, u.created_at
+               u.must_change_password, u.created_at,
+               u.first_name, u.middle_name, u.last_name,
+               u.teacher_id_no, u.department
         FROM users u
         WHERE u.role = 'teacher'
         ${id == null ? '' : 'AND u.id = @id'}
@@ -401,6 +373,11 @@ class TeacherService {
               c['class_id'],
         ],
         'created_at': row[6].toString(),
+        'first_name': row[7],
+        'middle_name': row[8],
+        'last_name': row[9],
+        'teacher_id_no': row[10],
+        'department': row[11],
       };
     }).toList();
   }
@@ -472,16 +449,20 @@ class TeacherService {
   // ---------------------------------------------------------------
 
   static Future<Map<String, dynamic>> create({
-    required String name,
-    required String email,
-    required String username,
+    required String teacherIdNo,
+    required String firstName,
+    required String middleName,
+    required String lastName,
+    required String department,
     required String temporaryPassword,
     List<AssignmentInput> assignments = const [],
   }) async {
-    final profile = _validateProfile(
-      name: name,
-      email: email,
-      username: username,
+    final who = TeacherIdentity.validate(
+      teacherIdNo: teacherIdNo,
+      firstName: firstName,
+      middleName: middleName,
+      lastName: lastName,
+      department: department,
     );
 
     if (temporaryPassword.length < 8) {
@@ -496,27 +477,36 @@ class TeacherService {
       final id = await Database.pool.runTx((tx) async {
         await _assertUnique(
           tx,
-          email: profile.email,
-          username: profile.username,
+          teacherIdNo: who.teacherIdNo,
+          email: who.email,
         );
 
+        // The institutional email is also the login username.
         final result = await tx.execute(
           Sql.named('''
             INSERT INTO users (
-              name, email, password_hash, role, username,
+              name, first_name, middle_name, last_name,
+              teacher_id_no, department,
+              email, username, password_hash, role,
               is_active, must_change_password
             )
             VALUES (
-              @name, @email, @hash, 'teacher', @username,
+              @name, @first_name, NULLIF(@middle_name, ''), @last_name,
+              @teacher_id_no, @department,
+              @email, @email, @hash, 'teacher',
               TRUE, TRUE
             )
             RETURNING id
           '''),
           parameters: {
-            'name': profile.name,
-            'email': profile.email,
+            'name': who.fullName,
+            'first_name': who.firstName,
+            'middle_name': who.middleName,
+            'last_name': who.lastName,
+            'teacher_id_no': who.teacherIdNo,
+            'department': who.department,
+            'email': who.email,
             'hash': passwordHash,
-            'username': profile.username,
           },
         );
 
@@ -527,36 +517,43 @@ class TeacherService {
         return newId;
       });
 
-      return getById(id);
+      return await getById(id);
     } on ServerException catch (e) {
       throw _mapDbError(e);
     }
   }
 
   // ---------------------------------------------------------------
-  // Update profile (never touches the password)
+  // Update profile (never touches the password). Changing the Teacher ID
+  // or any name part regenerates the institutional email/username.
   // ---------------------------------------------------------------
 
   static Future<Map<String, dynamic>> update({
     required int id,
-    required String name,
-    required String email,
-    required String username,
+    required String teacherIdNo,
+    required String firstName,
+    required String middleName,
+    required String lastName,
+    required String department,
+    bool? isActive,
     List<AssignmentInput>? assignments,
   }) async {
-    final profile = _validateProfile(
-      name: name,
-      email: email,
-      username: username,
+    final who = TeacherIdentity.validate(
+      teacherIdNo: teacherIdNo,
+      firstName: firstName,
+      middleName: middleName,
+      lastName: lastName,
+      department: department,
     );
 
     try {
       await Database.pool.runTx((tx) async {
         await _requireTeacher(tx, id);
+
         await _assertUnique(
           tx,
-          email: profile.email,
-          username: profile.username,
+          teacherIdNo: who.teacherIdNo,
+          email: who.email,
           excludeId: id,
         );
 
@@ -564,16 +561,27 @@ class TeacherService {
           Sql.named('''
             UPDATE users
             SET name = @name,
+                first_name = @first_name,
+                middle_name = NULLIF(@middle_name, ''),
+                last_name = @last_name,
+                teacher_id_no = @teacher_id_no,
+                department = @department,
                 email = @email,
-                username = @username,
+                username = @email,
+                ${isActive == null ? '' : 'is_active = @active,'}
                 updated_at = NOW()
             WHERE id = @id
           '''),
           parameters: {
             'id': id,
-            'name': profile.name,
-            'email': profile.email,
-            'username': profile.username,
+            'name': who.fullName,
+            'first_name': who.firstName,
+            'middle_name': who.middleName,
+            'last_name': who.lastName,
+            'teacher_id_no': who.teacherIdNo,
+            'department': who.department,
+            'email': who.email,
+            if (isActive != null) 'active': isActive,
           },
         );
 
@@ -584,7 +592,7 @@ class TeacherService {
         }
       });
 
-      return getById(id);
+      return await getById(id);
     } on ServerException catch (e) {
       throw _mapDbError(e);
     }
@@ -604,7 +612,7 @@ class TeacherService {
         await _applyAssignments(tx, id, assignments);
       });
 
-      return getById(id);
+      return await getById(id);
     } on ServerException catch (e) {
       throw _mapDbError(e);
     }
@@ -657,19 +665,25 @@ class TeacherService {
       );
     });
 
-    return getById(id);
+    return await getById(id);
   }
 
   // ---------------------------------------------------------------
   // Delete (sections stay, unassigned)
   // ---------------------------------------------------------------
 
-  static Future<void> delete(int id) async {
-    await Database.pool.runTx((tx) async {
+  /// Returns how many Subject + Section assignments were released.
+  /// Sections, students and exams are never deleted: the sections simply
+  /// become unassigned (teacher_id = NULL) and can be given to someone else.
+  static Future<int> delete(int id) async {
+    return Database.pool.runTx((tx) async {
       await _requireTeacher(tx, id);
 
-      await tx.execute(
-        Sql.named('UPDATE classes SET teacher_id = NULL WHERE teacher_id = @id'),
+      final released = await tx.execute(
+        Sql.named(
+          'UPDATE classes SET teacher_id = NULL WHERE teacher_id = @id '
+          'RETURNING id',
+        ),
         parameters: {'id': id},
       );
 
@@ -677,6 +691,8 @@ class TeacherService {
         Sql.named("DELETE FROM users WHERE id = @id AND role = 'teacher'"),
         parameters: {'id': id},
       );
+
+      return released.length;
     });
   }
 }

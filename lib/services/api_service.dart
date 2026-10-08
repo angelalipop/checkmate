@@ -762,74 +762,113 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
     return <String, dynamic>{};
   }
 
+
+
+  /// Retrieves a list of all teacher departments.
+  static Future<List<String>> getTeacherDepartments(String token) async {
+  final response = await http.get(
+    Uri.parse('$baseUrl/teacher_departments'),
+    headers: _authHeaders(token),
+  );
+
+  final data = _decodeBody(response);
+
+  if (response.statusCode != 200) {
+    throw Exception(
+      data['message']?.toString() ?? 'Failed to load teacher departments',
+    );
+  }
+
+  final departments = data['departments'];
+
+  if (departments is! List) {
+    return <String>[];
+  }
+
+  return departments.map((item) => item.toString()).toList();
+}
+
   /// [assignments]: [{subject_id, section, school_year, semester}, ...]
   /// A Subject + Section already owned by another teacher => HTTP 409.
   static Future<Map<String, dynamic>> createTeacher({
     required String token,
-    required String name,
-    required String email,
-    required String username,
-    required String temporaryPassword,
+    required String teacherIdNo,
+    required String firstName,
+    String middleName = '',
+    required String lastName,
+   required String department,
+   required String temporaryPassword,
     List<Map<String, dynamic>> assignments = const [],
-  }) async {
+}) async {
     final response = await http.post(
       Uri.parse('$baseUrl/teachers'),
-      headers: _authHeaders(token),
-      body: jsonEncode({
-        'name': name,
-        'email': email,
-        'username': username,
-        'temporary_password': temporaryPassword,
-        'assignments': assignments,
+     headers: _authHeaders(token),
+     body: jsonEncode({
+      'teacher_id_no': teacherIdNo,
+      'first_name': firstName,
+      'middle_name': middleName,
+      'last_name': lastName,
+      'department': department,
+      'temporary_password': temporaryPassword,
+      'assignments': assignments,
       }),
+  );  
+
+  final data = _decodeBody(response);
+
+  if (response.statusCode != 201) {
+    throw Exception(
+      data['message']?.toString() ?? 'Failed to create teacher',
     );
-
-    final data = _decodeBody(response);
-
-    if (response.statusCode != 201) {
-      throw Exception(
-        data['message']?.toString() ?? 'Failed to create teacher',
-      );
-    }
-
-    final teacher = data['teacher'];
-
-    return teacher is Map ? Map<String, dynamic>.from(teacher) : data;
   }
+
+  final teacher = data['teacher'];
+
+  return teacher is Map ? Map<String, dynamic>.from(teacher) : data;
+}
 
   /// Pass [assignments] to change them in the same transaction as the
   /// profile; leave it null to keep the teacher's assignments untouched.
   static Future<Map<String, dynamic>> updateTeacher({
-    required String token,
-    required int teacherId,
-    required String name,
-    required String email,
-    required String username,
-    List<Map<String, dynamic>>? assignments,
-  }) async {
-    final response = await http.put(
-      Uri.parse('$baseUrl/teachers/$teacherId'),
-      headers: _authHeaders(token),
-      body: jsonEncode({
-        'name': name,
-        'email': email,
-        'username': username,
-        if (assignments != null) 'assignments': assignments,
-      }),
+  required String token,
+  required int teacherId,
+  required String teacherIdNo,
+  required String firstName,
+  String middleName = '',
+  required String lastName,
+  required String department,
+  bool? isActive,
+  List<Map<String, dynamic>>? assignments,
+}) async {
+  final response = await http.put(
+    Uri.parse('$baseUrl/teachers/$teacherId'),
+    headers: _authHeaders(token),
+    body: jsonEncode({
+      'teacher_id_no': teacherIdNo,
+      'first_name': firstName,
+      'middle_name': middleName,
+      'last_name': lastName,
+      'department': department,
+      if (isActive != null) 'is_active': isActive,
+      if (assignments != null) 'assignments': assignments,
+    }),
+  );
+
+  final data = _decodeBody(response);
+
+  if (response.statusCode != 200) {
+    throw Exception(
+      data['message']?.toString() ?? 'Failed to update teacher',
     );
-
-    final data = _decodeBody(response);
-
-    if (response.statusCode != 200) {
-      throw Exception(
-        data['message']?.toString() ?? 'Failed to update teacher',
-      );
-    }
-
-    final teacher = data['teacher'];
-
-    return teacher is Map ? Map<String, dynamic>.from(teacher) : data;
   }
+
+  final teacher = data['teacher'];
+
+  return teacher is Map
+      ? Map<String, dynamic>.from(teacher)
+      : data;
+}
+
 
   /// Replaces the teacher's whole set of Subject + Section assignments.
   static Future<Map<String, dynamic>> setTeacherAssignments({

@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
-import '../services/student_import_service.dart' show StudentValidation;
 import 'login_screen.dart' show CmColors;
 
 // =============================================================
@@ -33,6 +32,21 @@ String _tEmail(Map<String, dynamic> t) => (t['email'] ?? '').toString().trim();
 
 String _tUsername(Map<String, dynamic> t) =>
     (t['username'] ?? '').toString().trim();
+
+String _tFirst(Map<String, dynamic> t) =>
+    (t['first_name'] ?? '').toString().trim();
+
+String _tMiddle(Map<String, dynamic> t) =>
+    (t['middle_name'] ?? '').toString().trim();
+
+String _tLast(Map<String, dynamic> t) =>
+    (t['last_name'] ?? '').toString().trim();
+
+String _tTeacherId(Map<String, dynamic> t) =>
+    (t['teacher_id_no'] ?? '').toString().trim();
+
+String _tDepartment(Map<String, dynamic> t) =>
+    (t['department'] ?? '').toString().trim();
 
 bool _tActive(Map<String, dynamic> t) {
   final v = t['is_active'] ?? t['active'];
@@ -169,6 +183,161 @@ String _yearLabel(int? y) {
 
 String _clean(Object e) => e.toString().replaceFirst('Exception: ', '');
 
+/// Mirror of the server's name / email rules (teacher_identity.dart),
+/// used for instant feedback. The server re-checks everything on save.
+class _Identity {
+  _Identity._();
+
+  static const emailDomain = 'sti.checkmate.com';
+
+  // Latin letters (accents allowed), spaces, hyphens, apostrophes, periods.
+  static const _letter = 'A-Za-zÀ-ÖØ-öø-ÿĀ-ſ';
+  static final _nameChars = RegExp("^[$_letter][$_letter .'’-]*\$");
+  static final _lettersOnly = RegExp('[^$_letter]');
+  static final _teacherId = RegExp(r'^\d{3,20}$');
+
+  static const _fold = <String, String>{
+    'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a', 'å': 'a', 'ā': 'a',
+    'ă': 'a', 'ą': 'a', 'æ': 'ae', 'ç': 'c', 'ć': 'c', 'č': 'c', 'ď': 'd',
+    'đ': 'd', 'è': 'e', 'é': 'e', 'ê': 'e', 'ë': 'e', 'ē': 'e', 'ę': 'e',
+    'ě': 'e', 'ì': 'i', 'í': 'i', 'î': 'i', 'ï': 'i', 'ī': 'i', 'ł': 'l',
+    'ñ': 'n', 'ń': 'n', 'ň': 'n', 'ò': 'o', 'ó': 'o', 'ô': 'o', 'õ': 'o',
+    'ö': 'o', 'ø': 'o', 'ō': 'o', 'œ': 'oe', 'ř': 'r', 'ś': 's', 'š': 's',
+    'ş': 's', 'ß': 'ss', 'ť': 't', 'ù': 'u', 'ú': 'u', 'û': 'u', 'ü': 'u',
+    'ū': 'u', 'ů': 'u', 'ý': 'y', 'ÿ': 'y', 'ź': 'z', 'ż': 'z', 'ž': 'z',
+  };
+
+  // ------------------------------------------------------------------
+  // Name helpers
+  // ------------------------------------------------------------------
+
+  /// Trims and collapses repeated whitespace.
+  static String collapse(String raw) =>
+      raw.trim().replaceAll(RegExp(r'\s+'), ' ');
+
+  /// "juan miguel dela cruz" -> "Juan Miguel Dela Cruz";
+  /// "o'brien-REYES" -> "O'Brien-Reyes".
+  static String titleCase(String input) {
+    final out = StringBuffer();
+    var startOfWord = true;
+
+    for (final rune in input.runes) {
+      final ch = String.fromCharCode(rune);
+
+      if (' -\'’.'.contains(ch)) {
+        out.write(ch);
+        startOfWord = true;
+      } else {
+        out.write(startOfWord ? ch.toUpperCase() : ch.toLowerCase());
+        startOfWord = false;
+      }
+    }
+
+    return out.toString();
+  }
+
+  static String normalizeName(String raw) => titleCase(collapse(raw));
+
+  /// Returns an error message, or null when the name is acceptable.
+  static String? nameError(
+    String raw, {
+    required String label,
+    required bool isRequired,
+    int minLetters = 2,
+  }) {
+    final v = collapse(raw);
+
+    if (v.isEmpty) return isRequired ? '$label is required.' : null;
+
+    if (v.length > 50) return '$label must be 50 characters or fewer.';
+
+    if (RegExp(r'[0-9]').hasMatch(v)) {
+      return '$label cannot contain numbers.';
+    }
+
+    if (!_nameChars.hasMatch(v)) {
+      return '$label can only contain letters, spaces, hyphens (-), '
+          "apostrophes (') and periods (.).";
+    }
+
+    if (RegExp("[.'’-]{2,}|(^|\\s)[-'’]|[-'’](\\s|\$)").hasMatch(v)) {
+      return '$label has misplaced punctuation.';
+    }
+
+    if (v.replaceAll(_lettersOnly, '').length < minLetters) {
+      return minLetters > 1
+          ? '$label is too short.'
+          : '$label must contain a letter.';
+    }
+
+    return null;
+  }
+
+  static String? teacherIdError(String raw) {
+    final v = raw.trim();
+
+    if (v.isEmpty) return 'Teacher ID No. is required.';
+
+    if (!_teacherId.hasMatch(v)) {
+      return 'Teacher ID No. must contain 3–20 digits only.';
+    }
+
+    return null;
+  }
+
+  // ------------------------------------------------------------------
+  // Email
+  // ------------------------------------------------------------------
+
+  /// Lowercase a-z / 0-9 only; accents are folded (ñ -> n); everything
+  /// else (spaces, hyphens, apostrophes, periods) is dropped.
+  static String slug(String input) {
+    final out = StringBuffer();
+
+    for (final rune in input.toLowerCase().runes) {
+      final ch = String.fromCharCode(rune);
+      final code = rune;
+
+      final isLower = code >= 0x61 && code <= 0x7A;
+      final isDigit = code >= 0x30 && code <= 0x39;
+
+      if (isLower || isDigit) {
+        out.write(ch);
+      } else {
+        final folded = _fold[ch];
+        if (folded != null) out.write(folded);
+      }
+    }
+
+    return out.toString();
+  }
+
+  /// surname.f.m.teacherid@sti.checkmate.com  (no middle name: surname.f.id)
+  /// Returns null if a usable email cannot be built.
+  static String? buildEmail({
+    required String firstName,
+    required String middleName,
+    required String lastName,
+    required String teacherIdNo,
+  }) {
+    final surname = slug(lastName);
+    final first = slug(firstName);
+    final middle = slug(middleName);
+    final id = teacherIdNo.trim().toLowerCase();
+
+    if (surname.isEmpty || first.isEmpty || id.isEmpty) return null;
+
+    final local = [
+      surname,
+      first[0],
+      if (middle.isNotEmpty) middle[0],
+      id,
+    ].join('.');
+
+    return '$local@$emailDomain';
+  }
+}
+
 // ---------- Shared form styling (same look as the Students dialogs) ----------
 
 InputDecoration _fieldDecoration({String? errorText}) {
@@ -285,6 +454,7 @@ class TeachersScreen extends StatefulWidget {
 class _TeachersScreenState extends State<TeachersScreen> {
   List<Map<String, dynamic>> _teachers = [];
   List<Map<String, dynamic>> _subjects = [];
+  List<String> _departments = [];
 
   final _searchController = TextEditingController();
   String _query = '';
@@ -326,16 +496,18 @@ class _TeachersScreenState extends State<TeachersScreen> {
     try {
       final token = await _token();
 
-      final results = await Future.wait([
+      final (teachers, subjects, departments) = await (
         ApiService.getTeachers(token),
         ApiService.getSubjects(token),
-      ]);
+        ApiService.getTeacherDepartments(token),
+      ).wait;
 
       if (!mounted) return;
 
       setState(() {
-        _teachers = results[0];
-        _subjects = results[1];
+        _teachers = teachers;
+        _subjects = subjects;
+        _departments = departments;
         _loading = false;
         _error = null;
       });
@@ -365,8 +537,13 @@ class _TeachersScreenState extends State<TeachersScreen> {
     if (_query.isEmpty) return true;
 
     return _tName(t).toLowerCase().contains(_query) ||
+        _tFirst(t).toLowerCase().contains(_query) ||
+        _tMiddle(t).toLowerCase().contains(_query) ||
+        _tLast(t).toLowerCase().contains(_query) ||
+        _tTeacherId(t).toLowerCase().contains(_query) ||
         _tEmail(t).toLowerCase().contains(_query) ||
         _tUsername(t).toLowerCase().contains(_query) ||
+        _tDepartment(t).toLowerCase().contains(_query) ||
         _assignmentSearchText(t).contains(_query);
   }
 
@@ -383,23 +560,26 @@ class _TeachersScreenState extends State<TeachersScreen> {
       builder: (_) => _TeacherFormDialog(
         teachers: _teachers,
         subjects: _subjects,
+        departments: _departments,
         onSubmit: (input) async {
           final token = await _token();
 
           final created = await ApiService.createTeacher(
             token: token,
-            name: input.name,
-            email: input.email,
-            username: input.username,
+            teacherIdNo: input.teacherIdNo,
+            firstName: input.firstName,
+            middleName: input.middleName,
+            lastName: input.lastName,
+            department: input.department,
             temporaryPassword: input.password!,
             assignments: _assignmentPayload(input.assignments),
           );
 
+          // The login is the institutional email the server generated.
           creds = _Credentials(
-            name: input.name,
-            username: _tUsername(created).isEmpty
-                ? input.username
-                : _tUsername(created),
+            name: _tName(created),
+            username:
+                _tEmail(created).isEmpty ? input.email : _tEmail(created),
             password: input.password!,
           );
         },
@@ -423,6 +603,8 @@ class _TeachersScreenState extends State<TeachersScreen> {
     if (id == null || _busy.contains(id)) return;
 
     final before = _tAssignments(teacher);
+    final oldEmail = _tEmail(teacher);
+    String? newEmail;
 
     final ok = await showDialog<bool>(
       context: context,
@@ -430,22 +612,31 @@ class _TeachersScreenState extends State<TeachersScreen> {
       builder: (_) => _TeacherFormDialog(
         teachers: _teachers,
         subjects: _subjects,
+        departments: _departments,
         teacher: teacher,
         onSubmit: (input) async {
           final token = await _token();
 
-          // Profile + assignments are saved in ONE server transaction, so a
-          // conflict (section already taken) saves nothing.
-          await ApiService.updateTeacher(
+          // Profile, status and assignments are saved in ONE server
+          // transaction, so a conflict saves nothing. The server regenerates
+          // the institutional email when the ID or a name part changed.
+          final updated = await ApiService.updateTeacher(
             token: token,
             teacherId: id,
-            name: input.name,
-            email: input.email,
-            username: input.username,
+            teacherIdNo: input.teacherIdNo,
+            firstName: input.firstName,
+            middleName: input.middleName,
+            lastName: input.lastName,
+            department: input.department,
+            isActive: input.isActive != _tActive(teacher)
+                ? input.isActive
+                : null,
             assignments: _assignmentsChanged(before, input.assignments)
                 ? _assignmentPayload(input.assignments)
                 : null,
           );
+
+          newEmail = _tEmail(updated);
         },
       ),
     );
@@ -454,7 +645,16 @@ class _TeachersScreenState extends State<TeachersScreen> {
 
     await _load(silent: true);
     if (!mounted) return;
-    _snack('Teacher updated.');
+
+    final changed = newEmail != null &&
+        newEmail!.isNotEmpty &&
+        newEmail!.toLowerCase() != oldEmail.toLowerCase();
+
+    _snack(
+      changed
+          ? 'Teacher updated. Login email is now $newEmail.'
+          : 'Teacher updated.',
+    );
   }
 
   // =========================
@@ -523,7 +723,9 @@ class _TeachersScreenState extends State<TeachersScreen> {
       await _showCredentials(
         _Credentials(
           name: _tName(teacher),
-          username: _tUsername(teacher),
+          username: _tEmail(teacher).isEmpty
+              ? _tUsername(teacher)
+              : _tEmail(teacher),
           password: password,
         ),
         title: 'Password reset',
@@ -586,10 +788,18 @@ class _TeachersScreenState extends State<TeachersScreen> {
     final id = _tId(teacher);
     if (id == null || _busy.contains(id)) return;
 
+    final released = _tAssignments(teacher)
+        .fold<int>(0, (n, a) => n + a.sections.length);
+
     final confirmed = await _confirm(
       title: 'Delete ${_tName(teacher)}?',
-      message: 'This permanently removes the account and its section '
-          'assignments. This cannot be undone.',
+      message: released == 0
+          ? 'This permanently deletes the teacher account. This cannot be '
+              'undone.'
+          : 'This permanently deletes the teacher account. Its $released '
+              'section assignment${released == 1 ? '' : 's'} will be '
+              'released so another teacher can take them. The sections, '
+              'students and exams are kept. This cannot be undone.',
       confirmLabel: 'Delete',
       destructive: true,
     );
@@ -865,10 +1075,16 @@ class _TeachersScreenState extends State<TeachersScreen> {
     final active = _tActive(teacher);
     final name = _tName(teacher);
     final email = _tEmail(teacher);
-    final username = _tUsername(teacher);
     final assignments = _tAssignments(teacher);
 
-    final meta = username.isNotEmpty ? '@$username' : '';
+    final teacherNo = _tTeacherId(teacher);
+    final department = _tDepartment(teacher);
+    final incomplete = teacherNo.isEmpty || department.isEmpty;
+
+    final meta = [
+      if (teacherNo.isNotEmpty) 'ID $teacherNo',
+      if (department.isNotEmpty) department,
+    ].join('  •  ');
 
     return Card(
       elevation: 0,
@@ -921,6 +1137,12 @@ class _TeachersScreenState extends State<TeachersScreen> {
                                     _activeGreen.withValues(alpha: 0.14),
                               )
                             : _chip('Disabled'),
+                        if (incomplete)
+                          _chip(
+                            'Profile incomplete',
+                            color: const Color(0xFFB45309),
+                            background: const Color(0xFFFEF3C7),
+                          ),
                       ],
                     ),
                     if (email.isNotEmpty)
@@ -1041,17 +1263,25 @@ class _TeachersScreenState extends State<TeachersScreen> {
 
 class _TeacherInput {
   _TeacherInput({
-    required this.name,
+    required this.teacherIdNo,
+    required this.firstName,
+    required this.middleName,
+    required this.lastName,
     required this.email,
-    required this.username,
+    required this.department,
     required this.assignments,
+    required this.isActive,
     this.password,
   });
 
-  final String name;
-  final String email;
-  final String username;
+  final String teacherIdNo;
+  final String firstName;
+  final String middleName;
+  final String lastName;
+  final String email; // generated; shown to the admin, regenerated server-side
+  final String department;
   final List<_SubjectAssignment> assignments;
+  final bool isActive;
   final String? password; // only set when creating
 }
 
@@ -1059,12 +1289,14 @@ class _TeacherFormDialog extends StatefulWidget {
   const _TeacherFormDialog({
     required this.teachers,
     required this.subjects,
+    required this.departments,
     required this.onSubmit,
     this.teacher,
   });
 
   final List<Map<String, dynamic>> teachers;
   final List<Map<String, dynamic>> subjects;
+  final List<String> departments;
   final Map<String, dynamic>? teacher;
   final Future<void> Function(_TeacherInput input) onSubmit;
 
@@ -1073,19 +1305,26 @@ class _TeacherFormDialog extends StatefulWidget {
 }
 
 class _TeacherFormDialogState extends State<_TeacherFormDialog> {
-  final _name = TextEditingController();
-  final _email = TextEditingController();
-  final _username = TextEditingController();
+  final _teacherNo = TextEditingController();
+  final _first = TextEditingController();
+  final _middle = TextEditingController();
+  final _last = TextEditingController();
   final _password = TextEditingController();
 
   final _editorKey = GlobalKey<_AssignmentEditorState>();
 
-  bool _usernameTouched = false;
+  String? _department;
+  bool _active = true;
   bool _saving = false;
   String? _error;
 
   bool get _isEdit => widget.teacher != null;
   int? get _editId => widget.teacher == null ? null : _tId(widget.teacher!);
+
+  /// An account created before Teacher IDs / split names existed.
+  bool get _legacy =>
+      _isEdit && (_tTeacherId(widget.teacher!).isEmpty ||
+          _tFirst(widget.teacher!).isEmpty);
 
   @override
   void initState() {
@@ -1093,58 +1332,53 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
 
     final t = widget.teacher;
     if (t != null) {
-      _name.text = _tRawName(t);
-      _email.text = _tEmail(t);
-      _username.text = _tUsername(t);
-      _usernameTouched = true;
+      _teacherNo.text = _tTeacherId(t);
+      _first.text = _tFirst(t);
+      _middle.text = _tMiddle(t);
+      _last.text = _tLast(t);
+      _active = _tActive(t);
+
+      final dept = _tDepartment(t);
+      _department = widget.departments.contains(dept) ? dept : null;
     }
   }
 
   @override
   void dispose() {
-    _name.dispose();
-    _email.dispose();
-    _username.dispose();
+    _teacherNo.dispose();
+    _first.dispose();
+    _middle.dispose();
+    _last.dispose();
     _password.dispose();
     super.dispose();
   }
 
   // ---------- validation ----------
 
-  String? _nameError(String raw) {
-    final v = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
-    if (v.isEmpty) return 'Full name is required.';
-    if (!RegExp(r"^[\p{L}][\p{L} .,'’\-]*$", unicode: true).hasMatch(v)) {
-      return 'Use letters only.';
-    }
-    if (v.replaceAll(RegExp(r"[^\p{L}]", unicode: true), '').length < 2) {
-      return 'Enter a valid full name.';
-    }
-    return null;
-  }
-
-  String? _emailError(String raw) {
-    final base = StudentValidation.email(raw, required: true);
+  String? _teacherNoError(String raw) {
+    final base = _Identity.teacherIdError(raw);
     if (base != null) return base;
 
-    final e = raw.trim().toLowerCase();
+    final v = raw.trim().toLowerCase();
     final taken = widget.teachers.any(
-      (t) => _tId(t) != _editId && _tEmail(t).toLowerCase() == e,
+      (t) => _tId(t) != _editId && _tTeacherId(t).toLowerCase() == v,
     );
-    return taken ? 'This email is already used by another teacher.' : null;
+
+    return taken ? 'This Teacher ID No. already belongs to another teacher.' : null;
   }
 
-  String? _usernameError(String raw) {
-    final v = raw.trim().toLowerCase();
-    if (v.isEmpty) return 'Username is required.';
-    if (!RegExp(r'^[a-z0-9][a-z0-9._\-]{2,31}$').hasMatch(v)) {
-      return 'Use 3–32 letters, numbers, dots, dashes or underscores.';
-    }
-    final taken = widget.teachers.any(
-      (t) => _tId(t) != _editId && _tUsername(t).toLowerCase() == v,
-    );
-    return taken ? 'This username is already taken.' : null;
-  }
+  String? _firstError(String raw) =>
+      _Identity.nameError(raw, label: 'First name', isRequired: true);
+
+  String? _middleError(String raw) => _Identity.nameError(
+        raw,
+        label: 'Middle name',
+        isRequired: false,
+        minLetters: 1,
+      );
+
+  String? _lastError(String raw) =>
+      _Identity.nameError(raw, label: 'Last name', isRequired: true);
 
   String? _passwordError(String raw) {
     if (_isEdit) return null;
@@ -1153,13 +1387,40 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
     return null;
   }
 
-  // ---------- helpers ----------
+  String? _generatedEmail() {
+    if (_teacherNoError(_teacherNo.text) != null ||
+        _firstError(_first.text) != null ||
+        _middleError(_middle.text) != null ||
+        _lastError(_last.text) != null) {
+      return null;
+    }
 
-  String _suggestUsername(String email) {
-    final at = email.indexOf('@');
-    final local = (at == -1 ? email : email.substring(0, at)).trim();
-    return local.toLowerCase().replaceAll(RegExp(r'[^a-z0-9._\-]'), '');
+    final email = _Identity.buildEmail(
+      firstName: _Identity.normalizeName(_first.text),
+      middleName: _Identity.normalizeName(_middle.text),
+      lastName: _Identity.normalizeName(_last.text),
+      teacherIdNo: _teacherNo.text,
+    );
+
+    if (email == null || email.split('@').first.length > 64) return null;
+
+    return email;
   }
+
+  String? _emailError(String? email) {
+    if (email == null) return null;
+
+    final taken = widget.teachers.any(
+      (t) =>
+          _tId(t) != _editId &&
+          (_tEmail(t).toLowerCase() == email ||
+              _tUsername(t).toLowerCase() == email),
+    );
+
+    return taken ? 'The generated email is already used by another account.' : null;
+  }
+
+  // ---------- helpers ----------
 
   static String _generatePassword() {
     const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -1182,6 +1443,32 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
     return chars.join();
   }
 
+  /// Name fields tidy themselves (capitalisation, spaces) when you leave them.
+  Widget _nameField(
+    TextEditingController controller,
+    String? error,
+  ) {
+    return Focus(
+      onFocusChange: (hasFocus) {
+        if (!hasFocus) {
+          setState(() {
+            controller.text = _Identity.normalizeName(controller.text);
+          });
+        }
+      },
+      child: TextField(
+        controller: controller,
+        enabled: !_saving,
+        textCapitalization: TextCapitalization.words,
+        inputFormatters: [LengthLimitingTextInputFormatter(60)],
+        onChanged: (_) => setState(() {}),
+        decoration: _fieldDecoration(
+          errorText: controller.text.trim().isEmpty ? null : error,
+        ),
+      ),
+    );
+  }
+
   Future<void> _submit() async {
     if (_saving) return;
 
@@ -1198,10 +1485,14 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
 
       await widget.onSubmit(
         _TeacherInput(
-          name: _name.text.replaceAll(RegExp(r'\s+'), ' ').trim(),
-          email: _email.text.trim().toLowerCase(),
-          username: _username.text.trim().toLowerCase(),
+          teacherIdNo: _teacherNo.text.trim(),
+          firstName: _Identity.normalizeName(_first.text),
+          middleName: _Identity.normalizeName(_middle.text),
+          lastName: _Identity.normalizeName(_last.text),
+          email: _generatedEmail() ?? '',
+          department: _department!,
           assignments: editor?.assignments ?? const [],
+          isActive: _active,
           password: _isEdit ? null : _password.text,
         ),
       );
@@ -1219,17 +1510,26 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    String? shown(TextEditingController c, String? error) =>
-        c.text.trim().isEmpty ? null : error;
-
-    final nameError = _nameError(_name.text);
-    final emailError = _emailError(_email.text);
-    final usernameError = _usernameError(_username.text);
+    final teacherNoError = _teacherNoError(_teacherNo.text);
+    final firstError = _firstError(_first.text);
+    final middleError = _middleError(_middle.text);
+    final lastError = _lastError(_last.text);
     final passwordError = _passwordError(_password.text);
 
-    final valid = nameError == null &&
+    final email = _generatedEmail();
+    final emailError = _emailError(email);
+
+    final oldEmail = _isEdit ? _tEmail(widget.teacher!).toLowerCase() : '';
+    final emailWillChange =
+        _isEdit && email != null && oldEmail.isNotEmpty && email != oldEmail;
+
+    final valid = teacherNoError == null &&
+        firstError == null &&
+        middleError == null &&
+        lastError == null &&
+        email != null &&
         emailError == null &&
-        usernameError == null &&
+        _department != null &&
         passwordError == null;
 
     return _dialogShell(
@@ -1241,50 +1541,127 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
             _isEdit ? 'Edit Teacher' : 'Add Teacher',
             _saving ? null : () => Navigator.pop(context, false),
           ),
+          if (_legacy) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF3C7),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                'This account (${_tName(widget.teacher!)}) was created before '
+                'Teacher IDs and separate name fields existed. Enter the '
+                'details below to complete the profile. Saving will change '
+                'the login email to the generated institutional address.',
+                style: const TextStyle(fontSize: 12.5, color: Color(0xFF92400E)),
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           _labeled(
-            'Full Name',
+            'Teacher ID No.',
             TextField(
-              controller: _name,
-              enabled: !_saving,
-              textCapitalization: TextCapitalization.words,
-              inputFormatters: [LengthLimitingTextInputFormatter(80)],
-              onChanged: (_) => setState(() {}),
-              decoration: _fieldDecoration(errorText: shown(_name, nameError)),
-            ),
-          ),
-          const SizedBox(height: 14),
-          _labeled(
-            'Email',
-            TextField(
-              controller: _email,
-              enabled: !_saving,
-              keyboardType: TextInputType.emailAddress,
-              onChanged: (v) {
-                setState(() {
-                  if (!_usernameTouched) {
-                    _username.text = _suggestUsername(v);
-                  }
-                });
-              },
-              decoration:
-                  _fieldDecoration(errorText: shown(_email, emailError)),
-            ),
-          ),
-          const SizedBox(height: 14),
-          _labeled(
-            'Username',
-            TextField(
-              controller: _username,
+              controller: _teacherNo,
               enabled: !_saving,
               inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9._\-]')),
-                LengthLimitingTextInputFormatter(32),
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(20),
               ],
-              onChanged: (_) => setState(() => _usernameTouched = true),
-              decoration:
-                  _fieldDecoration(errorText: shown(_username, usernameError)),
+              onChanged: (_) => setState(() {}),
+              decoration: _fieldDecoration(
+                errorText:
+                    _teacherNo.text.trim().isEmpty ? null : teacherNoError,
+              ),
             ),
+          ),
+          const SizedBox(height: 14),
+          _labeled('First Name', _nameField(_first, firstError)),
+          const SizedBox(height: 14),
+          _labeled('Middle Name (optional)', _nameField(_middle, middleError)),
+          const SizedBox(height: 14),
+          _labeled('Last Name', _nameField(_last, lastError)),
+          const SizedBox(height: 14),
+          _labeled(
+            'Institutional Email (generated)',
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: CmColors.bg,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: emailError == null ? CmColors.line : _dangerRed,
+                    ),
+                  ),
+                  child: SelectableText(
+                    email ?? 'Enter the Teacher ID and name to generate it',
+                    style: TextStyle(
+                      color: email == null ? CmColors.slate : CmColors.navy,
+                      fontWeight:
+                          email == null ? FontWeight.w400 : FontWeight.w600,
+                    ),
+                  ),
+                ),
+                if (emailError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6, left: 4),
+                    child: Text(
+                      emailError,
+                      style: const TextStyle(color: _dangerRed, fontSize: 12),
+                    ),
+                  )
+                else if (emailWillChange)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6, left: 4),
+                    child: Text(
+                      'The login email will change from '
+                      '${_tEmail(widget.teacher!)}. Tell the teacher.',
+                      style: const TextStyle(
+                        color: Color(0xFFB45309),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          _labeled(
+            'Department',
+            widget.departments.isEmpty
+                ? const Text(
+                    'No departments available.',
+                    style: TextStyle(color: CmColors.slate),
+                  )
+                : DropdownButtonFormField<String>(
+                    initialValue: _department,
+                    isExpanded: true,
+                    decoration: _fieldDecoration(),
+                    hint: const Text('Choose a department'),
+                    items: [
+                      for (final d in widget.departments)
+                        DropdownMenuItem<String>(
+                          value: d,
+                          child: Text(d, overflow: TextOverflow.ellipsis),
+                        ),
+                    ],
+                    onChanged: _saving
+                        ? null
+                        : (value) => setState(() => _department = value),
+                  ),
+          ),
+          const SizedBox(height: 14),
+          _AssignmentEditor(
+            key: _editorKey,
+            subjects: widget.subjects,
+            initial: _isEdit ? _tAssignments(widget.teacher!) : const [],
+            teacherId: _editId,
+            enabled: !_saving,
           ),
           if (!_isEdit) ...[
             const SizedBox(height: 14),
@@ -1299,7 +1676,9 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
                       enabled: !_saving,
                       onChanged: (_) => setState(() {}),
                       decoration: _fieldDecoration(
-                        errorText: shown(_password, passwordError),
+                        errorText: _password.text.trim().isEmpty
+                            ? null
+                            : passwordError,
                       ),
                     ),
                   ),
@@ -1327,15 +1706,21 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
               ),
             ),
           ],
-          const SizedBox(height: 14),
-          _AssignmentEditor(
-            key: _editorKey,
-            subjects: widget.subjects,
-            initial:
-                _isEdit ? _tAssignments(widget.teacher!) : const [],
-            teacherId: _editId,
-            enabled: !_saving,
-          ),
+          if (_isEdit) ...[
+            const SizedBox(height: 10),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _active,
+              onChanged: _saving ? null : (v) => setState(() => _active = v),
+              title: const Text('Account active'),
+              subtitle: Text(
+                _active
+                    ? 'The teacher can sign in.'
+                    : 'Disabled: the teacher cannot sign in or use the app.',
+                style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
+              ),
+            ),
+          ],
           if (_error != null) ...[
             const SizedBox(height: 12),
             Text(
@@ -1374,11 +1759,10 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
       ),
     );
   }
-
 }
 
 // =============================================================
-// ASSIGN SECTIONS
+// SECTION ASSIGNMENTS (Subject + Section)
 // =============================================================
 
 class _AssignmentEditor extends StatefulWidget {
@@ -1569,7 +1953,7 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Teaching assignments',
+            'Section Assignments',
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w700,
@@ -1666,7 +2050,7 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Sections / classes',
+              'Sections',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
@@ -1972,7 +2356,7 @@ class _CredentialsDialogState extends State<_CredentialsDialog> {
     final c = widget.creds;
     await Clipboard.setData(
       ClipboardData(
-        text: 'Username: ${c.username}\nTemporary password: ${c.password}',
+        text: 'Login: ${c.username}\nTemporary password: ${c.password}',
       ),
     );
     if (!mounted) return;
@@ -2033,7 +2417,7 @@ class _CredentialsDialogState extends State<_CredentialsDialog> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _row('Teacher', c.name),
-                _row('Username', c.username.isEmpty ? '—' : c.username),
+                _row('Login (email)', c.username.isEmpty ? '—' : c.username),
                 _row('Temporary password', c.password, mono: true),
               ],
             ),

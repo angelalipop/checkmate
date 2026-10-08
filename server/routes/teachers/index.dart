@@ -21,10 +21,13 @@ Future<Response> onRequest(RequestContext context) async {
         }
 
         final teacher = await TeacherService.create(
-          name: body['name']?.toString() ?? '',
-          email: body['email']?.toString() ?? '',
-          username: body['username']?.toString() ?? '',
-          temporaryPassword: body['temporary_password']?.toString() ?? '',
+          teacherIdNo: body['teacher_id_no']?.toString() ?? '',
+          firstName: body['first_name']?.toString() ?? '',
+          middleName: body['middle_name']?.toString() ?? '',
+          lastName: body['last_name']?.toString() ?? '',
+          department: body['department']?.toString() ?? '',
+          temporaryPassword:
+              body['temporary_password']?.toString() ?? '',
           assignments:
               TeacherService.parseAssignments(body['assignments']) ?? [],
         );

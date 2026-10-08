@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
+import 'answer_sheet_input_screen.dart';
+import 'exams_screen.dart';
 import 'login_screen.dart' show CmColors, LoginScreen;
 
 // =============================================================
@@ -224,8 +226,37 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     );
   }
 
-  void _select(TeacherPage page, {bool closeDrawer = false}) {
+  /// Teacher-facing module screens (same screens the admin flow used):
+  ///  - Exams: create exam -> ExamBuilderScreen (sections/questions,
+  ///    answer-sheet preview + PDF print/download).
+  ///  - Scans: AnswerSheetInputScreen -> camera/upload -> OMR -> scoring.
+  Widget? _moduleScreenFor(TeacherPage page) {
+    switch (page) {
+      case TeacherPage.exams:
+        return const ExamsScreen();
+      case TeacherPage.scans:
+        return const AnswerSheetInputScreen();
+      default:
+        return null;
+    }
+  }
+
+  Future<void> _select(TeacherPage page, {bool closeDrawer = false}) async {
     if (closeDrawer) Navigator.pop(context);
+
+    // These module screens have their own full-screen Scaffold/AppBar, so
+    // they are opened as routes instead of being embedded in the body.
+    final screen = _moduleScreenFor(page);
+    if (screen != null) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => screen),
+      );
+      // Refresh exams/statuses after creating, building or scanning.
+      if (mounted) _loadData();
+      return;
+    }
+
     setState(() => _page = page);
   }
 
