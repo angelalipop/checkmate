@@ -194,7 +194,7 @@ class _Identity {
   static const _letter = 'A-Za-zÀ-ÖØ-öø-ÿĀ-ſ';
   static final _nameChars = RegExp("^[$_letter][$_letter .'’-]*\$");
   static final _lettersOnly = RegExp('[^$_letter]');
-  static final _teacherId = RegExp(r'^\d{3,20}$');
+  static final _teacherId = RegExp(r'^(?:CM-\d{4}-\d{4}|\d{3,20})$');
 
   static const _fold = <String, String>{
     'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a', 'å': 'a', 'ā': 'a',
@@ -279,7 +279,7 @@ class _Identity {
     if (v.isEmpty) return 'Teacher ID No. is required.';
 
     if (!_teacherId.hasMatch(v)) {
-      return 'Teacher ID No. must contain 3–20 digits only.';
+      return 'Teacher ID must be CM-YYYY-NNNN (legacy numeric IDs are accepted).';
     }
 
     return null;
@@ -312,30 +312,26 @@ class _Identity {
     return out.toString();
   }
 
-  /// surname.f.m.teacherid@sti.checkmate.com  (no middle name: surname.f.id)
-  /// Returns null if a usable email cannot be built.
-  static String? buildEmail({
-    required String firstName,
-    required String middleName,
-    required String lastName,
-    required String teacherIdNo,
-  }) {
-    final surname = slug(lastName);
-    final first = slug(firstName);
-    final middle = slug(middleName);
-    final id = teacherIdNo.trim().toLowerCase();
+/// surname.numericid@sti.checkmate.com
+/// The first and middle names are not included in the email.
+/// Returns null if a usable email cannot be generated.
+static String? buildEmail({
+  required String firstName,
+  required String middleName,
+  required String lastName,
+  required String teacherIdNo,
+}) {
+  final surname = slug(lastName);
+  final rawId = teacherIdNo.trim();
 
-    if (surname.isEmpty || first.isEmpty || id.isEmpty) return null;
+  final numericId = rawId.startsWith('CM-')
+      ? rawId.substring(3).replaceAll('-', '')
+      : rawId;
 
-    final local = [
-      surname,
-      first[0],
-      if (middle.isNotEmpty) middle[0],
-      id,
-    ].join('.');
+  if (surname.isEmpty || numericId.isEmpty) return null;
 
-    return '$local@$emailDomain';
-  }
+  return '$surname.$numericId@$emailDomain';
+}
 }
 
 // ---------- Shared form styling (same look as the Students dialogs) ----------
@@ -566,7 +562,6 @@ class _TeachersScreenState extends State<TeachersScreen> {
 
           final created = await ApiService.createTeacher(
             token: token,
-            teacherIdNo: input.teacherIdNo,
             firstName: input.firstName,
             middleName: input.middleName,
             lastName: input.lastName,
@@ -619,11 +614,10 @@ class _TeachersScreenState extends State<TeachersScreen> {
 
           // Profile, status and assignments are saved in ONE server
           // transaction, so a conflict saves nothing. The server regenerates
-          // the institutional email when the ID or a name part changed.
+          // the institutional email when a name part changed.
           final updated = await ApiService.updateTeacher(
             token: token,
             teacherId: id,
-            teacherIdNo: input.teacherIdNo,
             firstName: input.firstName,
             middleName: input.middleName,
             lastName: input.lastName,
@@ -1263,7 +1257,6 @@ class _TeachersScreenState extends State<TeachersScreen> {
 
 class _TeacherInput {
   _TeacherInput({
-    required this.teacherIdNo,
     required this.firstName,
     required this.middleName,
     required this.lastName,
@@ -1274,7 +1267,6 @@ class _TeacherInput {
     this.password,
   });
 
-  final String teacherIdNo;
   final String firstName;
   final String middleName;
   final String lastName;
@@ -1356,6 +1348,8 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
   // ---------- validation ----------
 
   String? _teacherNoError(String raw) {
+    if (!_isEdit) return null;
+    if (raw.trim().isEmpty) return null; // Legacy profile gets ID on save.
     final base = _Identity.teacherIdError(raw);
     if (base != null) return base;
 
@@ -1388,6 +1382,7 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
   }
 
   String? _generatedEmail() {
+    if (!_isEdit || _teacherNo.text.trim().isEmpty) return null;
     if (_teacherNoError(_teacherNo.text) != null ||
         _firstError(_first.text) != null ||
         _middleError(_middle.text) != null ||
@@ -1485,11 +1480,10 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
 
       await widget.onSubmit(
         _TeacherInput(
-          teacherIdNo: _teacherNo.text.trim(),
           firstName: _Identity.normalizeName(_first.text),
           middleName: _Identity.normalizeName(_middle.text),
           lastName: _Identity.normalizeName(_last.text),
-          email: _generatedEmail() ?? '',
+          email: _isEdit ? (_generatedEmail() ?? '') : '',
           department: _department!,
           assignments: editor?.assignments ?? const [],
           isActive: _active,
@@ -1510,7 +1504,6 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final teacherNoError = _teacherNoError(_teacherNo.text);
     final firstError = _firstError(_first.text);
     final middleError = _middleError(_middle.text);
     final lastError = _lastError(_last.text);
@@ -1523,12 +1516,10 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
     final emailWillChange =
         _isEdit && email != null && oldEmail.isNotEmpty && email != oldEmail;
 
-    final valid = teacherNoError == null &&
-        firstError == null &&
+    final valid = firstError == null &&
         middleError == null &&
         lastError == null &&
-        email != null &&
-        emailError == null &&
+        (_isEdit ? (_teacherNo.text.trim().isEmpty || (email != null && emailError == null)) : true) &&
         _department != null &&
         passwordError == null;
 
@@ -1559,22 +1550,18 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
             ),
           ],
           const SizedBox(height: 12),
-          _labeled(
-            'Teacher ID No.',
-            TextField(
-              controller: _teacherNo,
-              enabled: !_saving,
-              inputFormatters: [
-                FilteringTextInputFormatter.digitsOnly,
-                LengthLimitingTextInputFormatter(20),
-              ],
-              onChanged: (_) => setState(() {}),
-              decoration: _fieldDecoration(
-                errorText:
-                    _teacherNo.text.trim().isEmpty ? null : teacherNoError,
-              ),
-            ),
-          ),
+           _labeled(
+             'Teacher ID No. (automatic)',
+             InputDecorator(
+               decoration: _fieldDecoration(),
+               child: Text(
+                 _isEdit
+                     ? (_teacherNo.text.isEmpty ? 'Assigned when profile is saved' : _teacherNo.text)
+                     : 'Generated when the account is created',
+                 style: const TextStyle(color: CmColors.slate),
+               ),
+             ),
+           ),
           const SizedBox(height: 14),
           _labeled('First Name', _nameField(_first, firstError)),
           const SizedBox(height: 14),
@@ -1599,7 +1586,7 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
                     ),
                   ),
                   child: SelectableText(
-                    email ?? 'Enter the Teacher ID and name to generate it',
+                    email ?? (_isEdit ? 'Complete the teacher profile to generate email' : 'Generated automatically when the account is created'),
                     style: TextStyle(
                       color: email == null ? CmColors.slate : CmColors.navy,
                       fontWeight:

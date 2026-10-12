@@ -792,7 +792,6 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
   /// A Subject + Section already owned by another teacher => HTTP 409.
   static Future<Map<String, dynamic>> createTeacher({
     required String token,
-    required String teacherIdNo,
     required String firstName,
     String middleName = '',
     required String lastName,
@@ -804,7 +803,6 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
       Uri.parse('$baseUrl/teachers'),
      headers: _authHeaders(token),
      body: jsonEncode({
-      'teacher_id_no': teacherIdNo,
       'first_name': firstName,
       'middle_name': middleName,
       'last_name': lastName,
@@ -832,7 +830,6 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
   static Future<Map<String, dynamic>> updateTeacher({
   required String token,
   required int teacherId,
-  required String teacherIdNo,
   required String firstName,
   String middleName = '',
   required String lastName,
@@ -844,13 +841,12 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
     Uri.parse('$baseUrl/teachers/$teacherId'),
     headers: _authHeaders(token),
     body: jsonEncode({
-      'teacher_id_no': teacherIdNo,
       'first_name': firstName,
       'middle_name': middleName,
       'last_name': lastName,
       'department': department,
-      if (isActive != null) 'is_active': isActive,
-      if (assignments != null) 'assignments': assignments,
+      'is_active': ?isActive,
+      'assignments': ?assignments,
     }),
   );
 

@@ -274,6 +274,33 @@ class TeacherService {
     return e;
   }
 
+  // Allocate a unique, non-reusable ID within the current database year.
+  // Requires migration 005. A row-level lock in the upsert serializes callers.
+static Future<String> _allocateTeacherId(Session tx) async {
+  final rows = await tx.execute(Sql.named('''
+    INSERT INTO teacher_id_counters (year, last_number)
+    VALUES (
+      EXTRACT(YEAR FROM CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::INT,
+      1
+    )
+    ON CONFLICT (year) DO UPDATE
+      SET last_number = teacher_id_counters.last_number + 1
+      WHERE teacher_id_counters.last_number < 9999
+    RETURNING year, last_number
+  '''));
+
+  if (rows.isEmpty) {
+    throw TeacherException(
+      'Teacher ID limit reached for the current year.',
+    );
+  }
+
+  final year = (rows.first[0] as num).toInt();
+  final number = (rows.first[1] as num).toInt();
+
+  return 'CM-$year-${number.toString().padLeft(4, '0')}';
+}
+
   // ---------------------------------------------------------------
   // Password generation (server-side, cryptographically secure)
   // ---------------------------------------------------------------
@@ -449,7 +476,6 @@ class TeacherService {
   // ---------------------------------------------------------------
 
   static Future<Map<String, dynamic>> create({
-    required String teacherIdNo,
     required String firstName,
     required String middleName,
     required String lastName,
@@ -457,14 +483,6 @@ class TeacherService {
     required String temporaryPassword,
     List<AssignmentInput> assignments = const [],
   }) async {
-    final who = TeacherIdentity.validate(
-      teacherIdNo: teacherIdNo,
-      firstName: firstName,
-      middleName: middleName,
-      lastName: lastName,
-      department: department,
-    );
-
     if (temporaryPassword.length < 8) {
       throw TeacherException(
         'Temporary password must be at least 8 characters.',
@@ -475,6 +493,14 @@ class TeacherService {
 
     try {
       final id = await Database.pool.runTx((tx) async {
+        final teacherIdNo = await _allocateTeacherId(tx);
+        final who = TeacherIdentity.validate(
+          teacherIdNo: teacherIdNo,
+          firstName: firstName,
+          middleName: middleName,
+          lastName: lastName,
+          department: department,
+        );
         await _assertUnique(
           tx,
           teacherIdNo: who.teacherIdNo,
@@ -524,13 +550,12 @@ class TeacherService {
   }
 
   // ---------------------------------------------------------------
-  // Update profile (never touches the password). Changing the Teacher ID
-  // or any name part regenerates the institutional email/username.
+  // Update profile (never touches the password or an assigned Teacher ID).
+  // Editing a legacy profile with a NULL ID allocates one.
   // ---------------------------------------------------------------
 
   static Future<Map<String, dynamic>> update({
     required int id,
-    required String teacherIdNo,
     required String firstName,
     required String middleName,
     required String lastName,
@@ -538,18 +563,24 @@ class TeacherService {
     bool? isActive,
     List<AssignmentInput>? assignments,
   }) async {
-    final who = TeacherIdentity.validate(
-      teacherIdNo: teacherIdNo,
-      firstName: firstName,
-      middleName: middleName,
-      lastName: lastName,
-      department: department,
-    );
-
     try {
       await Database.pool.runTx((tx) async {
         await _requireTeacher(tx, id);
-
+        final existing = await tx.execute(
+          Sql.named('SELECT teacher_id_no FROM users WHERE id = @id'),
+          parameters: {'id': id},
+        );
+        final oldId = existing.first[0] as String?;
+        final teacherIdNo = oldId == null || oldId.isEmpty
+            ? await _allocateTeacherId(tx)
+            : oldId;
+        final who = TeacherIdentity.validate(
+          teacherIdNo: teacherIdNo,
+          firstName: firstName,
+          middleName: middleName,
+          lastName: lastName,
+          department: department,
+        );
         await _assertUnique(
           tx,
           teacherIdNo: who.teacherIdNo,

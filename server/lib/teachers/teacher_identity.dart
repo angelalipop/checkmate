@@ -35,16 +35,64 @@ class TeacherIdentity {
   static const _letter = 'A-Za-zÀ-ÖØ-öø-ÿĀ-ſ';
   static final _nameChars = RegExp("^[$_letter][$_letter .'’-]*\$");
   static final _lettersOnly = RegExp('[^$_letter]');
-  static final _teacherId = RegExp(r'^\d{3,20}$');
+  static final _teacherId = RegExp(r'^(?:CM-\d{4}-\d{4}|\d{3,20})$');
   static const _fold = <String, String>{
-    'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a', 'å': 'a', 'ā': 'a',
-    'ă': 'a', 'ą': 'a', 'æ': 'ae', 'ç': 'c', 'ć': 'c', 'č': 'c', 'ď': 'd',
-    'đ': 'd', 'è': 'e', 'é': 'e', 'ê': 'e', 'ë': 'e', 'ē': 'e', 'ę': 'e',
-    'ě': 'e', 'ì': 'i', 'í': 'i', 'î': 'i', 'ï': 'i', 'ī': 'i', 'ł': 'l',
-    'ñ': 'n', 'ń': 'n', 'ň': 'n', 'ò': 'o', 'ó': 'o', 'ô': 'o', 'õ': 'o',
-    'ö': 'o', 'ø': 'o', 'ō': 'o', 'œ': 'oe', 'ř': 'r', 'ś': 's', 'š': 's',
-    'ş': 's', 'ß': 'ss', 'ť': 't', 'ù': 'u', 'ú': 'u', 'û': 'u', 'ü': 'u',
-    'ū': 'u', 'ů': 'u', 'ý': 'y', 'ÿ': 'y', 'ź': 'z', 'ż': 'z', 'ž': 'z',
+    'à': 'a',
+    'á': 'a',
+    'â': 'a',
+    'ã': 'a',
+    'ä': 'a',
+    'å': 'a',
+    'ā': 'a',
+    'ă': 'a',
+    'ą': 'a',
+    'æ': 'ae',
+    'ç': 'c',
+    'ć': 'c',
+    'č': 'c',
+    'ď': 'd',
+    'đ': 'd',
+    'è': 'e',
+    'é': 'e',
+    'ê': 'e',
+    'ë': 'e',
+    'ē': 'e',
+    'ę': 'e',
+    'ě': 'e',
+    'ì': 'i',
+    'í': 'i',
+    'î': 'i',
+    'ï': 'i',
+    'ī': 'i',
+    'ł': 'l',
+    'ñ': 'n',
+    'ń': 'n',
+    'ň': 'n',
+    'ò': 'o',
+    'ó': 'o',
+    'ô': 'o',
+    'õ': 'o',
+    'ö': 'o',
+    'ø': 'o',
+    'ō': 'o',
+    'œ': 'oe',
+    'ř': 'r',
+    'ś': 's',
+    'š': 's',
+    'ş': 's',
+    'ß': 'ss',
+    'ť': 't',
+    'ù': 'u',
+    'ú': 'u',
+    'û': 'u',
+    'ü': 'u',
+    'ū': 'u',
+    'ů': 'u',
+    'ý': 'y',
+    'ÿ': 'y',
+    'ź': 'z',
+    'ż': 'z',
+    'ž': 'z',
   };
 
   static String collapse(String raw) =>
@@ -111,7 +159,7 @@ class TeacherIdentity {
     if (v.isEmpty) return 'Teacher ID No. is required.';
 
     if (!_teacherId.hasMatch(v)) {
-      return 'Teacher ID No. must contain 3–20 digits only.';
+      return 'Teacher ID must be CM-YYYY-NNNN (legacy numeric IDs are accepted).';
     }
 
     return null;
@@ -138,26 +186,23 @@ class TeacherIdentity {
     return out.toString();
   }
 
-static String? buildEmail({
-  required String firstName,
-  required String middleName,
-  required String lastName,
-  required String teacherIdNo,
-}) {
-  final surname = slug(lastName);
-  final first = slug(firstName);
-  final id = teacherIdNo.trim().toLowerCase();
+  static String? buildEmail({
+    required String firstName,
+    required String middleName,
+    required String lastName,
+    required String teacherIdNo,
+  }) {
+    final surname = slug(lastName);
+    final rawId = teacherIdNo.trim();
 
-  if (surname.isEmpty || first.isEmpty || id.isEmpty) return null;
+    final numericId = rawId.startsWith('CM-')
+        ? rawId.substring(3).replaceAll('-', '')
+        : rawId;
 
-  final local = [
-    surname,
-    first[0],
-    id,
-  ].join('.');
+    if (surname.isEmpty || numericId.isEmpty) return null;
 
-  return '$local@$emailDomain';
-}
+    return '$surname.$numericId@$emailDomain';
+  }
 
   static String? matchDepartment(String raw) {
     final v = collapse(raw).toLowerCase();
@@ -179,8 +224,11 @@ static String? buildEmail({
     final idError = teacherIdError(teacherIdNo);
     if (idError != null) throw TeacherException(idError);
 
-    final firstError =
-        nameError(firstName, label: 'First name', isRequired: true);
+    final firstError = nameError(
+      firstName,
+      label: 'First name',
+      isRequired: true,
+    );
     if (firstError != null) throw TeacherException(firstError);
 
     final middleError = nameError(
@@ -191,8 +239,7 @@ static String? buildEmail({
     );
     if (middleError != null) throw TeacherException(middleError);
 
-    final lastError =
-        nameError(lastName, label: 'Last name', isRequired: true);
+    final lastError = nameError(lastName, label: 'Last name', isRequired: true);
     if (lastError != null) throw TeacherException(lastError);
 
     final dept = matchDepartment(department);

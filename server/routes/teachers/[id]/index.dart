@@ -21,7 +21,6 @@ Future<Response> onRequest(RequestContext context, String id) async {
 
         final teacher = await TeacherService.update(
           id: teacherId,
-          teacherIdNo: body['teacher_id_no']?.toString() ?? '',
           firstName: body['first_name']?.toString() ?? '',
           middleName: body['middle_name']?.toString() ?? '',
           lastName: body['last_name']?.toString() ?? '',
