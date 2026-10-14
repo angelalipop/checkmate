@@ -310,7 +310,7 @@ class ServerOpenCVOMRProcessor {
               debug,
               centerPoint,
               2,
-              cv.Scalar(255, 0, 0),
+              cv.Scalar(255),
               thickness: -1,
             );
           }
@@ -624,7 +624,7 @@ class ServerOpenCVOMRProcessor {
         if ((nx * nx) + (ny * ny) > 1.0) continue;
 
         final value = gray.at<int>(y, x);
-        graySum += value.toInt();
+        graySum += value;
         total++;
       }
     }

@@ -6,12 +6,11 @@ import 'package:flutter/services.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
-import 'answer_sheet_input_screen.dart';
+import 'academic_management_screen.dart';
 import 'classes_screen.dart';
 import 'exams_screen.dart';
 import 'login_screen.dart' show CmColors, LoginScreen;
 import 'students_screen.dart';
-import 'subjects_screen.dart';
 import 'teachers_admin_screen.dart';
 
 // =============================================================
@@ -25,7 +24,7 @@ import 'teachers_admin_screen.dart';
 //                       full-height overlay drawer. Closes via the close
 //                       button, backdrop tap, Escape, or after navigating.
 //
-// Module screens (Subjects, Classes, ...) are NOT modified. They are
+// Module screens (Teachers, Classes, ...) are NOT modified. They are
 // simply wrapped by AdminShell when pushed.
 // =============================================================
 
@@ -63,12 +62,17 @@ class _AdminIdentity {
       final parts = token.split('.');
       if (parts.length != 3) return;
 
-      final payload =
-          utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
+      final payload = utf8.decode(
+        base64Url.decode(base64Url.normalize(parts[1])),
+      );
+
       final decoded = jsonDecode(payload);
 
       if (decoded is Map) {
-        final source = decoded['user'] is Map ? decoded['user'] as Map : decoded;
+        final source = decoded['user'] is Map
+            ? decoded['user'] as Map
+            : decoded;
+
         final n = (source['name'] ?? source['full_name'] ?? source['username'])
             ?.toString();
         final e = source['email']?.toString();
@@ -88,8 +92,12 @@ class _AdminIdentity {
   }
 
   static String initials(String n) {
-    final parts =
-        n.trim().split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
+    final parts = n
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((s) => s.isNotEmpty)
+        .toList();
+
     if (parts.isEmpty) return 'AD';
     if (parts.length == 1) {
       return parts[0].substring(0, math.min(2, parts[0].length)).toUpperCase();
@@ -119,8 +127,7 @@ class _Tk {
   Color get navy => dark ? const Color(0xFF111C33) : const Color(0xFF1B2A4A);
 
   /// Muted (non-neon) green used for accents.
-  Color get emerald =>
-      dark ? const Color(0xFF3FA886) : const Color(0xFF2F8F72);
+  Color get emerald => dark ? const Color(0xFF3FA886) : const Color(0xFF2F8F72);
   Color get amber => CmColors.amber;
   Color get shadow => Colors.black.withValues(alpha: dark ? 0.30 : 0.05);
 }
@@ -132,13 +139,10 @@ class _Tk {
 enum AdminPage {
   dashboard('Dashboard', Icons.space_dashboard_outlined),
   teachers('Teachers', Icons.people_outline),
-  subjects('Subjects', Icons.library_books_outlined),
   classes('Classes', Icons.menu_book_outlined),
   students('Students', Icons.school_outlined),
   exams('Exams', Icons.assignment_outlined),
-  scans('Scan Answer Sheet', Icons.document_scanner_outlined),
-  attempts('Attempts', Icons.fact_check_outlined),
-  results('Results', Icons.assessment_outlined);
+  academic('Academic Management', Icons.account_balance_outlined);
 
   const AdminPage(this.label, this.icon);
   final String label;
@@ -149,16 +153,14 @@ enum AdminPage {
 const List<AdminPage> _navPages = [
   AdminPage.dashboard,
   AdminPage.teachers,
-  AdminPage.subjects,
   AdminPage.classes,
   AdminPage.students,
   AdminPage.exams,
+  AdminPage.academic,
 ];
 
 Widget? _screenFor(AdminPage page) {
   switch (page) {
-    case AdminPage.subjects:
-      return const SubjectsScreen();
     case AdminPage.classes:
       return const ClassesScreen();
     case AdminPage.students:
@@ -167,10 +169,10 @@ Widget? _screenFor(AdminPage page) {
       return const ExamsScreen();
     case AdminPage.teachers:
       return const TeachersScreen();
-    case AdminPage.scans:
-      return const AnswerSheetInputScreen();
+    case AdminPage.academic:
+      return const AcademicManagementScreen();
     default:
-      return null; // dashboard / attempts / results
+      return null; // dashboard
   }
 }
 
@@ -192,9 +194,8 @@ Future<void> _performLogout(BuildContext context) async {
 }
 
 void _soon(BuildContext context, String what) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text('$what is coming soon.')),
-  );
+  ScaffoldMessenger.of(context)
+      .showSnackBar(SnackBar(content: Text('$what is coming soon.')));
 }
 
 /// Wraps an existing, unmodified module screen with the shared shell.
@@ -295,68 +296,70 @@ class _AdminShellState extends State<AdminShell> {
   Widget build(BuildContext context) {
     final tk = _Tk.of(context);
 
-    return LayoutBuilder(builder: (context, constraints) {
-      final w = constraints.maxWidth;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth;
 
-      // ---------- Desktop ----------
-      if (w >= _kDesktop) {
+        // ---------- Desktop ----------
+        if (w >= _kDesktop) {
+          return Scaffold(
+            backgroundColor: tk.bg,
+            body: Row(
+              children: [
+                ValueListenableBuilder<bool>(
+                  valueListenable: _sidebarCollapsed,
+                  builder: (context, collapsed, _) {
+                    return AnimatedContainer(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      width: collapsed ? _kSidebarRail : _kSidebarWide,
+                      child: _Sidebar(
+                        current: widget.current,
+                        onSelect: _select,
+                        onLogout: widget.onLogout,
+                        userName: _AdminIdentity.name ?? 'Administrator',
+                        userEmail: _AdminIdentity.email,
+                        // When the page has its own header, the toggle lives there.
+                        collapsible: widget.desktopHeader == null,
+                        collapsed: collapsed,
+                        onToggle: () => _sidebarCollapsed.value = !collapsed,
+                      ),
+                    );
+                  },
+                ),
+                Expanded(
+                  child: Column(
+                    children: [
+                      if (widget.desktopHeader != null) widget.desktopHeader!,
+                      Expanded(child: widget.child),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        // ---------- Tablet / phone ----------
         return Scaffold(
           backgroundColor: tk.bg,
-          body: Row(
+          body: Stack(
             children: [
-              ValueListenableBuilder<bool>(
-                valueListenable: _sidebarCollapsed,
-                builder: (context, collapsed, _) {
-                  return AnimatedContainer(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
-                    width: collapsed ? _kSidebarRail : _kSidebarWide,
-                    child: _Sidebar(
-                      current: widget.current,
-                      onSelect: _select,
-                      onLogout: widget.onLogout,
-                      userName: _AdminIdentity.name ?? 'Administrator',
-                      userEmail: _AdminIdentity.email,
-                      // When the page has its own header, the toggle lives there.
-                      collapsible: widget.desktopHeader == null,
-                      collapsed: collapsed,
-                      onToggle: () => _sidebarCollapsed.value = !collapsed,
-                    ),
-                  );
-                },
+              Column(
+                children: [
+                  _MobileTopBar(
+                    onMenu: _openDrawer,
+                    actions: widget.mobileActions,
+                  ),
+                  Expanded(child: widget.child),
+                ],
               ),
-              Expanded(
-                child: Column(
-                  children: [
-                    if (widget.desktopHeader != null) widget.desktopHeader!,
-                    Expanded(child: widget.child),
-                  ],
-                ),
-              ),
+              if (_drawerOpen) _buildDrawer(w),
             ],
           ),
         );
-      }
-
-      // ---------- Tablet / phone ----------
-      return Scaffold(
-        backgroundColor: tk.bg,
-        body: Stack(
-          children: [
-            Column(
-              children: [
-                _MobileTopBar(
-                  onMenu: _openDrawer,
-                  actions: widget.mobileActions,
-                ),
-                Expanded(child: widget.child),
-              ],
-            ),
-            if (_drawerOpen) _buildDrawer(w),
-          ],
-        ),
-      );
-    });
+      },
+    );
   }
 
   Widget _buildDrawer(double screenWidth) {
@@ -520,46 +523,58 @@ class _Sidebar extends StatelessWidget {
 
     return Container(
       color: tk.navy,
-      child: LayoutBuilder(builder: (context, constraints) {
-        // Hide labels while the width animation is still narrow.
-        final showLabels = constraints.maxWidth > 180;
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Hide labels while the width animation is still narrow.
+          final showLabels = constraints.maxWidth > 180;
 
-        return Padding(
-          padding: EdgeInsets.fromLTRB(
-              showLabels ? 12 : 12, 16, showLabels ? 12 : 12, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _header(tk, showLabels),
-              Divider(color: Colors.white.withValues(alpha: 0.12), height: 24),
-              Expanded(
-                child: ListView(
-                  children: [
-                    for (final p in _navPages)
-                      _SidebarItem(
-                        icon: p.icon,
-                        label: p.label,
-                        active: p == current,
-                        showLabel: showLabels,
-                        onTap: () => onSelect(p),
-                      ),
-                  ],
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+              showLabels ? 12 : 12,
+              16,
+              showLabels ? 12 : 12,
+              12,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _header(tk, showLabels),
+                Divider(
+                  color: Colors.white.withValues(alpha: 0.12),
+                  height: 24,
                 ),
-              ),
-              Divider(color: Colors.white.withValues(alpha: 0.12), height: 20),
-              _userCard(context, tk, showLabels),
-              const SizedBox(height: 4),
-              _SidebarItem(
-                icon: Icons.logout,
-                label: 'Log out',
-                active: false,
-                showLabel: showLabels,
-                onTap: onLogout,
-              ),
-            ],
-          ),
-        );
-      }),
+                Expanded(
+                  child: ListView(
+                    children: [
+                      for (final p in _navPages)
+                        _SidebarItem(
+                          icon: p.icon,
+                          label: p.label,
+                          active: p == current,
+                          showLabel: showLabels,
+                          onTap: () => onSelect(p),
+                        ),
+                    ],
+                  ),
+                ),
+                Divider(
+                  color: Colors.white.withValues(alpha: 0.12),
+                  height: 20,
+                ),
+                _userCard(context, tk, showLabels),
+                const SizedBox(height: 4),
+                _SidebarItem(
+                  icon: Icons.logout,
+                  label: 'Log out',
+                  active: false,
+                  showLabel: showLabels,
+                  onTap: onLogout,
+                ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -585,8 +600,9 @@ class _Sidebar extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
         child: Row(
-          mainAxisAlignment:
-              showLabels ? MainAxisAlignment.start : MainAxisAlignment.center,
+          mainAxisAlignment: showLabels
+              ? MainAxisAlignment.start
+              : MainAxisAlignment.center,
           children: [
             avatar,
             if (showLabels) ...[
@@ -702,8 +718,8 @@ class _Sidebar extends StatelessWidget {
                 ),
               ),
             ),
-            if (toggle != null) toggle,
-            if (close != null) close,
+            ?toggle,
+            ?close,
           ],
         ),
         const SizedBox(height: 8),
@@ -756,8 +772,9 @@ class _SidebarItem extends StatelessWidget {
         child: SizedBox(
           height: 44,
           child: Row(
-            mainAxisAlignment:
-                showLabel ? MainAxisAlignment.start : MainAxisAlignment.center,
+            mainAxisAlignment: showLabel
+                ? MainAxisAlignment.start
+                : MainAxisAlignment.center,
             children: [
               if (showLabel) const SizedBox(width: 12),
               Icon(icon, color: fg, size: 21),
@@ -800,11 +817,7 @@ class _SidebarItem extends StatelessWidget {
 // =============================================================
 
 class AdminDashboard extends StatefulWidget {
-  const AdminDashboard({
-    super.key,
-    this.adminName = 'Admin',
-    this.adminEmail,
-  });
+  const AdminDashboard({super.key, this.adminName = 'Admin', this.adminEmail});
 
   final String adminName;
 
@@ -819,7 +832,7 @@ class AdminDashboard extends StatefulWidget {
 class _AdminDashboardState extends State<AdminDashboard> {
   bool _loading = true;
   String? _error;
-  int _subjects = 0, _classes = 0, _students = 0, _exams = 0;
+  int _classes = 0, _students = 0, _exams = 0;
   Route<dynamic>? _route;
 
   @override
@@ -860,7 +873,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
       }
 
       final results = await Future.wait([
-        ApiService.getSubjects(token),
         ApiService.getClasses(token),
         ApiService.getStudents(token),
         ApiService.getExams(token),
@@ -868,10 +880,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
       if (!mounted) return;
       setState(() {
-        _subjects = results[0].length;
-        _classes = results[1].length;
-        _students = results[2].length;
-        _exams = results[3].length;
+        _classes = results[0].length;
+        _students = results[1].length;
+        _exams = results[2].length;
         _loading = false;
       });
     } catch (e) {
@@ -887,10 +898,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   Future<void> _open(AdminPage page) async {
     if (page == AdminPage.dashboard) return;
-
     final screen = _screenFor(page);
     if (screen == null) {
-      // Attempts / Results have no screen yet.
       _soon(context, page.label);
       return;
     }
@@ -915,7 +924,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
         error: _error,
         onRetry: _loadData,
         onOpen: _open,
-        subjects: _subjects,
         classes: _classes,
         students: _students,
         exams: _exams,
@@ -966,7 +974,7 @@ class _DesktopTopBar extends StatelessWidget {
                 child: TextField(
                   style: TextStyle(color: tk.text),
                   decoration: InputDecoration(
-                    hintText: 'Search subjects, classes, exams, students',
+                    hintText: 'Search teachers, classes, exams, students',
                     hintStyle: TextStyle(color: tk.muted, fontSize: 14),
                     prefixIcon: Icon(Icons.search, color: tk.muted),
                     isDense: true,
@@ -1011,8 +1019,10 @@ class _NotificationBell extends StatelessWidget {
       icon: Stack(
         clipBehavior: Clip.none,
         children: [
-          Icon(Icons.notifications_none,
-              color: onDark ? Colors.white : tk.text),
+          Icon(
+            Icons.notifications_none,
+            color: onDark ? Colors.white : tk.text,
+          ),
           Positioned(
             right: -1,
             top: -1,
@@ -1023,7 +1033,9 @@ class _NotificationBell extends StatelessWidget {
                 color: tk.amber,
                 shape: BoxShape.circle,
                 border: Border.all(
-                    color: onDark ? tk.navy : tk.surface, width: 1.5),
+                  color: onDark ? tk.navy : tk.surface,
+                  width: 1.5,
+                ),
               ),
             ),
           ),
@@ -1044,7 +1056,6 @@ class _DashboardContent extends StatelessWidget {
     required this.error,
     required this.onRetry,
     required this.onOpen,
-    required this.subjects,
     required this.classes,
     required this.students,
     required this.exams,
@@ -1055,15 +1066,30 @@ class _DashboardContent extends StatelessWidget {
   final String? error;
   final VoidCallback onRetry;
   final ValueChanged<AdminPage> onOpen;
-  final int subjects, classes, students, exams;
+  final int classes, students, exams;
 
   static const _months = [
-    'January', 'February', 'March', 'April', 'May', 'June', 'July',
-    'August', 'September', 'October', 'November', 'December'
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
   ];
   static const _days = [
-    'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
-    'Sunday'
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
   ];
 
   String _today() {
@@ -1075,79 +1101,77 @@ class _DashboardContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final tk = _Tk.of(context);
 
-    return LayoutBuilder(builder: (context, constraints) {
-      final pad = constraints.maxWidth >= _kTablet ? 36.0 : 16.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final pad = constraints.maxWidth >= _kTablet ? 36.0 : 16.0;
 
-      return SingleChildScrollView(
-        padding: EdgeInsets.all(pad),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1200),
-            child: LayoutBuilder(builder: (context, inner) {
-              final w = inner.maxWidth;
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Welcome Back, $adminName',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700,
-                      color: tk.text,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(_today(), style: TextStyle(color: tk.muted)),
-                  const SizedBox(height: 24),
-                  if (loading)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 48),
-                      child: Center(
-                        child: CircularProgressIndicator(color: tk.text),
+        return SingleChildScrollView(
+          padding: EdgeInsets.all(pad),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1200),
+              child: LayoutBuilder(
+                builder: (context, inner) {
+                  final w = inner.maxWidth;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Welcome Back, $adminName',
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w700,
+                          color: tk.text,
+                        ),
                       ),
-                    )
-                  else if (error != null)
-                    _ErrorPanel(message: error!, onRetry: onRetry)
-                  else ...[
-                    _stats(w),
-                    const SizedBox(height: 32),
-                    Text(
-                      'Manage',
-                      style: TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.w700,
-                        color: tk.text,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Quick access to school records',
-                      style: TextStyle(fontSize: 13, color: tk.muted),
-                    ),
-                    const SizedBox(height: 14),
-                    _modules(w),
-                    const SizedBox(height: 16),
-                  ],
-                ],
-              );
-            }),
+                      const SizedBox(height: 4),
+                      Text(_today(), style: TextStyle(color: tk.muted)),
+                      const SizedBox(height: 24),
+                      if (loading)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 48),
+                          child: Center(
+                            child: CircularProgressIndicator(color: tk.text),
+                          ),
+                        )
+                      else if (error != null)
+                        _ErrorPanel(message: error!, onRetry: onRetry)
+                      else ...[
+                        _stats(w),
+                        const SizedBox(height: 32),
+                        Text(
+                          'Manage',
+                          style: TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w700,
+                            color: tk.text,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Quick access to school records',
+                          style: TextStyle(fontSize: 13, color: tk.muted),
+                        ),
+                        const SizedBox(height: 14),
+                        _modules(w),
+                        const SizedBox(height: 16),
+                      ],
+                    ],
+                  );
+                },
+              ),
+            ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
   }
 
-  // ---------- Stats: 4 across on desktop, 2 across otherwise ----------
+  // ---------- Stats: 3 across on desktop, 2 across otherwise ----------
 
   Widget _stats(double w) {
-    final cols = w >= _kDesktop - 250 ? 4 : 2;
+    final cols = w >= _kDesktop - 250 ? 3 : 2;
     return _grid(w, cols, [
-      _StatCard(
-        icon: Icons.library_books_outlined,
-        value: '$subjects',
-        label: 'Subjects',
-        note: 'Total subjects',
-      ),
       _StatCard(
         icon: Icons.menu_book_outlined,
         value: '$classes',
@@ -1175,27 +1199,29 @@ class _DashboardContent extends StatelessWidget {
 
   Widget _modules(double w) {
     const modules = [
-      AdminPage.subjects,
+      AdminPage.teachers,
       AdminPage.classes,
       AdminPage.students,
-      AdminPage.teachers,
+
       AdminPage.exams,
+      AdminPage.academic,
     ];
-    final cols = w >= 1000 ? 3 : (w >= _kTablet ? 2 : 1);
-    return _grid(w, cols, [
-      for (final m in modules) _ModuleCard(page: m, onTap: () => onOpen(m)),
-    ]);
+    final gridWidth = w;
+    final cols = gridWidth >= 800 ? 3 : (gridWidth >= _kTablet ? 2 : 1);
+    return SizedBox(
+      width: gridWidth,
+      child: _grid(gridWidth, cols, [
+        for (final m in modules) _ModuleCard(page: m, onTap: () => onOpen(m)),
+      ], gap: 18),
+    );
   }
 
-  Widget _grid(double w, int cols, List<Widget> children) {
-    const gap = 16.0;
+  Widget _grid(double w, int cols, List<Widget> children, {double gap = 16}) {
     final itemW = (w - gap * (cols - 1)) / cols;
     return Wrap(
       spacing: gap,
       runSpacing: gap,
-      children: [
-        for (final c in children) SizedBox(width: itemW, child: c),
-      ],
+      children: [for (final c in children) SizedBox(width: itemW, child: c)],
     );
   }
 }
@@ -1277,21 +1303,26 @@ class _StatCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(value,
-                        style: TextStyle(
-                            fontSize: 30,
-                            fontWeight: FontWeight.w700,
-                            color: tk.text,
-                            height: 1.1)),
+                    Text(
+                      value,
+                      style: TextStyle(
+                        fontSize: 30,
+                        fontWeight: FontWeight.w700,
+                        color: tk.text,
+                        height: 1.1,
+                      ),
+                    ),
                     const SizedBox(height: 6),
-                    Text(label,
-                        style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: tk.text)),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: tk.text,
+                      ),
+                    ),
                     const SizedBox(height: 2),
-                    Text(note,
-                        style: TextStyle(fontSize: 12, color: tk.muted)),
+                    Text(note, style: TextStyle(fontSize: 12, color: tk.muted)),
                   ],
                 ),
               ),
@@ -1331,45 +1362,54 @@ class _ModuleCard extends StatelessWidget {
       label: 'Open ${page.label}',
       excludeSemantics: true,
       child: Material(
-        color: tk.surface,
-        borderRadius: BorderRadius.circular(14),
+        color: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        elevation: 2,
+        shadowColor: Colors.black.withValues(alpha: 0.12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: const BorderSide(color: Color(0xFFDFE6F0)),
+        ),
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
-          borderRadius: BorderRadius.circular(14),
           onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 22),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: tk.border),
-              boxShadow: [
-                BoxShadow(
-                  color: tk.shadow,
-                  blurRadius: 12,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: tk.muted.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(12),
+          child: SizedBox(
+            height: 80,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEDF4FC),
+                      borderRadius: BorderRadius.circular(11),
+                    ),
+                    child: Icon(
+                      page.icon,
+                      color: const Color(0xFF1B2A4A),
+                      size: 22,
+                    ),
                   ),
-                  child: Icon(page.icon, color: tk.text, size: 22),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Text(page.label,
-                      style: TextStyle(
-                          fontSize: 15.5,
-                          fontWeight: FontWeight.w600,
-                          color: tk.text)),
-                ),
-                Icon(Icons.chevron_right, color: tk.muted),
-              ],
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      page.label,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        height: 1.2,
+                        fontWeight: FontWeight.w400,
+                        color: Color(0xFF1B2A4A),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(Icons.chevron_right, color: tk.muted, size: 22),
+                ],
+              ),
             ),
           ),
         ),
@@ -1394,9 +1434,11 @@ class _ErrorPanel extends StatelessWidget {
           children: [
             Icon(Icons.error_outline, size: 40, color: tk.amber),
             const SizedBox(height: 12),
-            Text(message,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: tk.text)),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: tk.text),
+            ),
             const SizedBox(height: 12),
             FilledButton(
               onPressed: onRetry,

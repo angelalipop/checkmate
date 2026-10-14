@@ -5,7 +5,7 @@ import 'package:server/database.dart';
 class ClassService {
   /// "BSIT 1-A" -> 1, "BSIT-3A" -> 3. Null when no year digit (1-6) is found.
   static int? inferYearLevel(String section) {
-    final match = RegExp(r'[1-6]').firstMatch(section);
+    final match = RegExp('[1-6]').firstMatch(section);
     return match == null ? null : int.parse(match.group(0)!);
   }
 

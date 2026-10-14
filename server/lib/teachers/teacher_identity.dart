@@ -105,7 +105,7 @@ class TeacherIdentity {
     for (final rune in input.runes) {
       final ch = String.fromCharCode(rune);
 
-      if (' -\'’.'.contains(ch)) {
+      if (" -'’.".contains(ch)) {
         out.write(ch);
         startOfWord = true;
       } else {
@@ -131,7 +131,7 @@ class TeacherIdentity {
 
     if (v.length > 50) return '$label must be 50 characters or fewer.';
 
-    if (RegExp(r'[0-9]').hasMatch(v)) {
+    if (RegExp('[0-9]').hasMatch(v)) {
       return '$label cannot contain numbers.';
     }
 
@@ -140,7 +140,7 @@ class TeacherIdentity {
           "apostrophes (') and periods (.).";
     }
 
-    if (RegExp("[.'’-]{2,}|(^|\\s)[-'’]|[-'’](\\s|\$)").hasMatch(v)) {
+    if (RegExp(r"[.'’-]{2,}|(^|\s)[-'’]|[-'’](\s|$)").hasMatch(v)) {
       return '$label has misplaced punctuation.';
     }
 

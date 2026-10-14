@@ -295,8 +295,8 @@ static Future<String> _allocateTeacherId(Session tx) async {
     );
   }
 
-  final year = (rows.first[0] as num).toInt();
-  final number = (rows.first[1] as num).toInt();
+  final year = (rows.first[0]! as num).toInt();
+  final number = (rows.first[1]! as num).toInt();
 
   return 'CM-$year-${number.toString().padLeft(4, '0')}';
 }
@@ -696,7 +696,7 @@ static Future<String> _allocateTeacherId(Session tx) async {
       );
     });
 
-    return await getById(id);
+    return getById(id);
   }
 
   // ---------------------------------------------------------------

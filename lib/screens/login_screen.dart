@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
-import 'admin_dashboard.dart';
 import 'admin_login_screen.dart';
 import 'change_password_screen.dart';
 import 'teacher_dashboard.dart';
@@ -139,8 +138,6 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
 
-      // Save JWT securely.
-      await AuthStorage.saveToken(token);
 
       // Get user information.
       final user = result['user'];
@@ -156,17 +153,18 @@ class _LoginScreenState extends State<LoginScreen> {
       debugPrint('LOGIN USER: $user');
       debugPrint('LOGIN ROLE: $role');
 
-      // ADMIN
-      if (role == 'admin') {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const AdminDashboard(),
-          ),
+      // Only teachers can use this login screen.
+      if (role != 'teacher') {
+        throw Exception(
+          role == 'admin'
+            ? 'Please use “Sign in as Admin” to access your account.'
+            : 'This account cannot use the teacher sign-in screen.',
         );
+    }
 
-        return;
-      }
+      await AuthStorage.saveToken(token);
+      
+      if (!mounted) return;
 
       // TEACHER
       if (role == 'teacher') {
