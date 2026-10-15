@@ -401,11 +401,9 @@ enum _Source { copy, upload }
 
 class _CurriculumDialogState extends State<_CurriculumDialog> {
   final _code = TextEditingController();
-  late _Source _source = widget.curricula.isNotEmpty
-      ? _Source.copy
-      : _Source.upload;
-  late int? _copyId =
-      widget.initialCopyId ??
+  late _Source _source =
+      widget.curricula.isNotEmpty ? _Source.copy : _Source.upload;
+  late int? _copyId = widget.initialCopyId ??
       (widget.curricula.isEmpty ? null : _idOf(widget.curricula.first));
   String? _codeError;
   String? _fileError;
@@ -421,6 +419,7 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
   }
 
   String get _programCode => _s(widget.program['code']);
+  bool get _shs => widget.program['level'] == 'shs';
 
   String? _mismatch(ParsedCurriculumFile parsed) {
     final found = parsed.programCode?.toUpperCase();
@@ -438,12 +437,25 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
     });
     try {
       final file = await openFile(
-        acceptedTypeGroups: const [
-          XTypeGroup(label: 'Curriculum', extensions: ['xlsx', 'pdf', 'csv']),
+        acceptedTypeGroups: [
+          XTypeGroup(
+            label: 'Curriculum',
+            extensions: _shs ? ['xlsx'] : ['xlsx', 'pdf', 'csv'],
+          ),
         ],
       );
       if (file == null) {
         if (mounted) setState(() => _reading = false);
+        return;
+      }
+      if (_shs && !file.name.toLowerCase().endsWith('.xlsx')) {
+        if (mounted) {
+          setState(() {
+            _reading = false;
+            _fileError =
+                'Senior High School uploads must be Excel (.xlsx) files. Use the Excel sample guide.';
+          });
+        }
         return;
       }
       final bytes = await file.readAsBytes();
@@ -475,17 +487,18 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
       _info = null;
     });
     try {
-      final bytes = CurriculumTemplate.buildXlsx();
+      final sampleName = CurriculumTemplate.fileNameFor(shs: _shs);
+      final bytes = CurriculumTemplate.buildXlsx(shs: _shs);
       final file = XFile.fromData(
         bytes,
-        name: CurriculumTemplate.fileName,
+        name: sampleName,
         mimeType: CurriculumTemplate.mimeType,
       );
       if (kIsWeb) {
-        await file.saveTo(CurriculumTemplate.fileName);
+        await file.saveTo(sampleName);
       } else {
         final location = await getSaveLocation(
-          suggestedName: CurriculumTemplate.fileName,
+          suggestedName: sampleName,
           acceptedTypeGroups: const [
             XTypeGroup(label: 'Excel', extensions: ['xlsx']),
           ],
@@ -494,16 +507,11 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
         await file.saveTo(location.path);
       }
       if (mounted) {
-        setState(
-          () => _info = 'Sample guide saved (${CurriculumTemplate.fileName}).',
-        );
+        setState(() => _info = 'Sample guide saved ($sampleName).');
       }
     } catch (e) {
       if (mounted) {
-        setState(
-          () =>
-              _fileError = 'Could not save the sample guide: ${_cleanError(e)}',
-        );
+        setState(() => _fileError = 'Could not save the sample guide: ${_cleanError(e)}');
       }
     }
   }
@@ -534,9 +542,7 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
         return;
       }
       if (parsed.problems.isNotEmpty) {
-        setState(
-          () => _fileError = 'Fix the file problems below and upload again.',
-        );
+        setState(() => _fileError = 'Fix the file problems below and upload again.');
         return;
       }
       if (parsed.rows.isEmpty && parsed.electives.isEmpty) {
@@ -643,27 +649,33 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
           ],
           if (_source == _Source.upload) ...[
             const SizedBox(height: 12),
-            const Text(
-              'Upload one of these:',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            Text(
+              _shs ? 'Upload the Excel Sample Guide:' : 'Upload one of these:',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 4),
-            const Text(
-              '·  The Excel Sample Guide, filled in and named Program_Curriculum '
-              '(for example BSIT_2601.xlsx).\n'
-              '·  The STI Program Guide PDF from the STI website '
-              '(for example STI_College_BSAIS_Program.pdf). The program and '
-              'curriculum (BSAIS-24-01 = 2401) are read from the file.',
-              style: TextStyle(
+            Text(
+              _shs
+                  ? '·  Fill it in and name it Strand_Curriculum (for example STEM_2601.xlsx).\n'
+                      '·  Grade 11 / Grade 12  >  1st Sem / 2nd Sem  >  Course Name, '
+                      'Core / Applied / Specialized, and Hours.'
+                  : '·  The Excel Sample Guide, filled in and named Program_Curriculum '
+                      '(for example BSIT_2601.xlsx).\n'
+                      '·  The STI Program Guide PDF from the STI website '
+                      '(for example STI_College_BSAIS_Program.pdf). The program and '
+                      'curriculum (BSAIS-24-01 = 2401) are read from the file.',
+              style: const TextStyle(
                 fontSize: 12,
                 color: CmColors.slate,
                 height: 1.4,
               ),
             ),
             const SizedBox(height: 4),
-            const Text(
-              'OJT and practicum subjects are skipped.',
-              style: TextStyle(fontSize: 12, color: CmColors.slate),
+            Text(
+              _shs
+                  ? 'A file that is exactly the same as an existing curriculum is not accepted.'
+                  : 'OJT and practicum subjects are skipped. A file that is exactly the same as an existing curriculum is not accepted.',
+              style: const TextStyle(fontSize: 12, color: CmColors.slate),
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -679,9 +691,7 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
                 FilledButton.icon(
                   style: _primaryButtonStyle,
                   onPressed: _reading ? null : _pickFile,
-                  icon: _reading
-                      ? _spinner()
-                      : const Icon(Icons.upload_file_outlined),
+                  icon: _reading ? _spinner() : const Icon(Icons.upload_file_outlined),
                   label: Text(_fileName ?? 'Choose File'),
                 ),
               ],
@@ -867,9 +877,8 @@ class _SubjectDialogState extends State<_SubjectDialog> {
   late final _hours = TextEditingController(
     text: widget.initial?['hours'] == null ? '' : '${widget.initial?['hours']}',
   );
-  late final _group = TextEditingController(
-    text: _s(widget.initial?['group_name']),
-  );
+  late final _group =
+      TextEditingController(text: _s(widget.initial?['group_name']));
   late final _units = TextEditingController(
     text: widget.initial != null
         ? _unitsText(widget.initial?['units'])
@@ -977,10 +986,14 @@ class _SubjectDialogState extends State<_SubjectDialog> {
       if (widget.shs && !widget.electiveMode && _category == null) {
         _categoryError = 'Choose Core, Applied or Specialized.';
       }
-      if (widget.shs &&
-          _hours.text.trim().isNotEmpty &&
-          int.tryParse(_hours.text.trim()) == null) {
-        _hoursError = 'Hours must be a whole number.';
+      if (widget.shs && !widget.electiveMode) {
+        if (_hours.text.trim().isEmpty) {
+          _hoursError = 'Required hours is needed.';
+        } else if (int.tryParse(_hours.text.trim()) == null ||
+            int.parse(_hours.text.trim()) < 0 ||
+            int.parse(_hours.text.trim()) > 1000) {
+          _hoursError = 'Hours must be a whole number from 0 to 1000.';
+        }
       }
       if (!_locked && !widget.shs) {
         final u = double.tryParse(_units.text.trim());
@@ -1012,10 +1025,11 @@ class _SubjectDialogState extends State<_SubjectDialog> {
     }
 
     if (widget.electiveMode) {
-      body['group_name'] = _group.text.trim().isEmpty
-          ? null
-          : _group.text.trim();
+      body['group_name'] = _group.text.trim().isEmpty ? null : _group.text.trim();
     } else {
+      if (widget.shs && _hours.text.trim().isNotEmpty) {
+        body['hours'] = _hours.text.trim();
+      }
       body['year_level'] = _year;
       body['term'] = _term;
       body['category'] = widget.shs ? _category : null;
@@ -1041,22 +1055,21 @@ class _SubjectDialogState extends State<_SubjectDialog> {
               TextField(
                 controller: _find,
                 onChanged: _onFind,
-                decoration: _fieldDecoration(hint: 'Type a course code or name')
-                    .copyWith(
-                      prefixIcon: const Icon(Icons.search, size: 20),
-                      suffixIcon: _searching
-                          ? const Padding(
-                              padding: EdgeInsets.all(12),
-                              child: SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              ),
-                            )
-                          : null,
-                    ),
+                decoration: _fieldDecoration(
+                  hint: 'Type a course code or name',
+                ).copyWith(
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  suffixIcon: _searching
+                      ? const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : null,
+                ),
               ),
             ),
             if (_results.isNotEmpty)
@@ -1098,10 +1111,8 @@ class _SubjectDialogState extends State<_SubjectDialog> {
               controller: _code,
               enabled: !_locked,
               textCapitalization: TextCapitalization.characters,
-              decoration: _fieldDecoration(
-                hint: 'e.g. GEDC1002',
-                errorText: _codeError,
-              ),
+              decoration:
+                  _fieldDecoration(hint: 'e.g. GEDC1002', errorText: _codeError),
             ),
           ),
           const SizedBox(height: 14),
@@ -1243,7 +1254,6 @@ class _SubjectDialogState extends State<_SubjectDialog> {
                       'Required hours',
                       TextField(
                         controller: _hours,
-                        enabled: !_locked,
                         keyboardType: TextInputType.number,
                         decoration: _fieldDecoration(
                           hint: 'e.g. 80',
@@ -2549,46 +2559,319 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
   }
 
   Widget _programPicker() {
-    final id = _idOf(_program ?? {});
+    final selectedId = _idOf(_program ?? {});
+
+    final shsPrograms =
+        _programs.where((p) => _isShs(p)).toList()
+          ..sort((a, b) => _s(a['code']).compareTo(_s(b['code'])));
+
+    final collegePrograms =
+        _programs.where((p) => !_isShs(p)).toList()
+          ..sort((a, b) => _s(a['code']).compareTo(_s(b['code'])));
+
+    const hoverColor = Color(0xFFF0EFF5);
+    const selectedColor = Color(0xFFDDDBE1);
+    const borderColor = Color(0xFFDFE3EA);
+
+    Widget groupHeading(
+      String title,
+      String subtitle,
+      IconData icon,
+    ) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(14, 16, 14, 10),
+        child: Row(
+          children: [
+            Icon(icon, size: 19, color: CmColors.slate),
+            const SizedBox(width: 10),
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: CmColors.navy,
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Text(
+              '·',
+              style: TextStyle(color: CmColors.slate),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                subtitle,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: CmColors.slate,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    Widget programOption(_M program) {
+      final selected = _idOf(program) == selectedId;
+
+      return Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 6,
+          vertical: 2,
+        ),
+        child: MenuItemButton(
+          onPressed: () => _selectProgram(program),
+          leadingIcon: const Icon(_programIcon, size: 19),
+          trailingIcon: selected
+              ? const Icon(Icons.check, size: 19)
+              : null,
+          style: ButtonStyle(
+            minimumSize: const WidgetStatePropertyAll(
+              Size(0, 46),
+            ),
+            padding: const WidgetStatePropertyAll(
+              EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            ),
+            shape: WidgetStatePropertyAll(
+              RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(6),
+              ),
+            ),
+            foregroundColor: const WidgetStatePropertyAll(
+              CmColors.navy,
+            ),
+            iconColor: const WidgetStatePropertyAll(
+              CmColors.navy,
+            ),
+            overlayColor: const WidgetStatePropertyAll(
+              Colors.transparent,
+            ),
+            backgroundColor: WidgetStateProperty.resolveWith<Color>(
+              (states) {
+                if (selected) return selectedColor;
+
+                if (states.contains(WidgetState.hovered) ||
+                    states.contains(WidgetState.focused) ||
+                    states.contains(WidgetState.pressed)) {
+                  return hoverColor;
+                }
+
+                return Colors.transparent;
+              },
+            ),
+          ),
+          child: Text(
+            _s(program['code']),
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight:
+                  selected ? FontWeight.w600 : FontWeight.w400,
+            ),
+          ),
+        ),
+      );
+    }
+
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: _programs.isEmpty
-                ? const Text(
-                    'No programs yet.',
-                    style: TextStyle(color: CmColors.slate),
-                  )
-                : DropdownButtonFormField<int>(
-                    key: ValueKey('program-$id'),
-                    initialValue: id,
-                    isExpanded: true,
-                    decoration: _fieldDecoration(),
-                    items: [
-                      for (final p in _programs)
-                        DropdownMenuItem(
-                          value: _idOf(p),
-                          child: Text(
-                            '${p['code']}  ·  ${p['level'] == 'shs' ? 'Senior High' : _s(p['department'])}',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
-                    onChanged: (v) {
-                      for (final p in _programs) {
-                        if (_idOf(p) == v) _selectProgram(p);
-                      }
-                    },
-                  ),
+          const Text(
+            'Strand or degree program',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: CmColors.navy,
+            ),
           ),
-          const SizedBox(width: 10),
-          FilledButton.icon(
-            style: _primaryButtonStyle,
-            onPressed: _busy ? null : _addProgram,
-            icon: const Icon(Icons.add, size: 20),
-            label: const Text('Add'),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _programs.isEmpty
+                    ? const Text(
+                        'No programs yet.',
+                        style: TextStyle(color: CmColors.slate),
+                      )
+                    : LayoutBuilder(
+                        builder: (context, constraints) {
+                          final menuWidth = constraints.maxWidth;
+
+                          return MenuAnchor(
+                            style: MenuStyle(
+                              backgroundColor:
+                                  const WidgetStatePropertyAll(
+                                Colors.white,
+                              ),
+                              surfaceTintColor:
+                                  const WidgetStatePropertyAll(
+                                Colors.transparent,
+                              ),
+                              elevation:
+                                  const WidgetStatePropertyAll(3),
+                              padding:
+                                  const WidgetStatePropertyAll(
+                                EdgeInsets.symmetric(vertical: 6),
+                              ),
+                              minimumSize: WidgetStatePropertyAll(
+                                Size(menuWidth, 0),
+                              ),
+                              maximumSize: WidgetStatePropertyAll(
+                                Size(
+                                  menuWidth,
+                                  MediaQuery.sizeOf(context).height *
+                                      0.55,
+                                ),
+                              ),
+                              side: const WidgetStatePropertyAll(
+                                BorderSide(color: borderColor),
+                              ),
+                              shape: WidgetStatePropertyAll(
+                                RoundedRectangleBorder(
+                                  borderRadius:
+                                      BorderRadius.circular(10),
+                                ),
+                              ),
+                            ),
+                            menuChildren: [
+                              if (shsPrograms.isNotEmpty) ...[
+                                groupHeading(
+                                  'SHS',
+                                  'Senior High School',
+                                  _shsIcon,
+                                ),
+                                for (final p in shsPrograms)
+                                  programOption(p),
+                              ],
+                              if (shsPrograms.isNotEmpty &&
+                                  collegePrograms.isNotEmpty)
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 10,
+                                  ),
+                                  child: Divider(
+                                    height: 1,
+                                    color: borderColor,
+                                  ),
+                                ),
+                              if (collegePrograms.isNotEmpty) ...[
+                                groupHeading(
+                                  'College',
+                                  'Undergraduate programs',
+                                  _collegeIcon,
+                                ),
+                                for (final p in collegePrograms)
+                                  programOption(p),
+                              ],
+                            ],
+                            builder: (
+                              context,
+                              controller,
+                              child,
+                            ) {
+                              return OutlinedButton(
+                                onPressed: () {
+                                  if (controller.isOpen) {
+                                    controller.close();
+                                  } else {
+                                    controller.open();
+                                  }
+                                },
+                                style: ButtonStyle(
+                                  minimumSize:
+                                      const WidgetStatePropertyAll(
+                                    Size.fromHeight(56),
+                                  ),
+                                  padding:
+                                      const WidgetStatePropertyAll(
+                                    EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 16,
+                                    ),
+                                  ),
+                                  alignment: Alignment.centerLeft,
+                                  backgroundColor:
+                                      const WidgetStatePropertyAll(
+                                    Colors.white,
+                                  ),
+                                  foregroundColor:
+                                      const WidgetStatePropertyAll(
+                                    CmColors.navy,
+                                  ),
+                                  overlayColor:
+                                      WidgetStateProperty.resolveWith<
+                                          Color>((states) {
+                                    if (states.contains(
+                                          WidgetState.hovered,
+                                        ) ||
+                                        states.contains(
+                                          WidgetState.focused,
+                                        )) {
+                                      return hoverColor;
+                                    }
+                                    return Colors.transparent;
+                                  }),
+                                  side: const WidgetStatePropertyAll(
+                                    BorderSide(color: borderColor),
+                                  ),
+                                  shape: WidgetStatePropertyAll(
+                                    RoundedRectangleBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(10),
+                                    ),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      _programIcon,
+                                      size: 21,
+                                      color: CmColors.navy,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        _program == null
+                                            ? 'Select program'
+                                            : _s(_program!['code']),
+                                        overflow:
+                                            TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 15,
+                                          fontWeight:
+                                              FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                    Icon(
+                                      controller.isOpen
+                                          ? Icons.keyboard_arrow_up
+                                          : Icons.keyboard_arrow_down,
+                                      size: 21,
+                                      color: CmColors.slate,
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          );
+                        },
+                      ),
+              ),
+              const SizedBox(width: 10),
+
+              // Existing Add button remains on the right.
+              FilledButton.icon(
+                style: _primaryButtonStyle,
+                onPressed: _busy ? null : _addProgram,
+                icon: const Icon(Icons.add, size: 20),
+                label: const Text('Add'),
+              ),
+            ],
           ),
         ],
       ),
@@ -2780,7 +3063,6 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
               ],
               onChanged: (v) => setState(() => _statusFilter = v ?? 'All'),
             ),
-            if (!_shs)
               FilledButton.icon(
                 style: _primaryButtonStyle,
                 onPressed: _busy ? null : () => _newCurriculum(),
@@ -2791,10 +3073,9 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
         ),
         const SizedBox(height: 6),
         Text(
-          _shs
-              ? 'A strand has one fixed curriculum. View its subjects in the Subjects tab.'
-              : 'Published curricula are read-only: view them in the Subjects tab. '
-                    'To change one, copy it to a new draft.',
+          'Published curricula are read-only: view them in the Subjects tab. '
+          'For a new curriculum, copy one to a draft and edit it, or upload a file. '
+          'It must differ from the existing ones by at least one subject, group, or required hours.',
           style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
         ),
         const SizedBox(height: 12),
@@ -2802,10 +3083,8 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
           _emptyCard(
             icon: Icons.library_books_outlined,
             title: 'No curriculum yet',
-            message: _shs
-                ? 'This strand has no curriculum.'
-                : 'Create a curriculum version for ${_program?['code']} by '
-                      'copying an older one or uploading a file.',
+            message: 'Create a curriculum version for ${_program?['code']} by '
+                'copying an older one or uploading a file.',
           )
         else if (filtered.isEmpty)
           _emptyCard(
@@ -2855,7 +3134,6 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                               Icons.edit_note,
                               () => _openCurriculum(c),
                             ),
-                          if (!_shs)
                             _rowAction(
                               'Copy',
                               Icons.copy_outlined,
@@ -2962,13 +3240,585 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
       );
     }
 
+    if (_shs) return _shsSubjectsTab();
+    return _collegeSubjectsTab();
+  }
+
+  /// College Subjects layout; reuses the existing subject data and actions.
+  Widget _collegeSubjectsTab() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _contextBar(schoolYear: _electives.isNotEmpty),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final controls = _collegeContextCard();
+            final heading = _subjectsBlock(editor: false, headerOnly: true);
+            final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+            if (constraints.maxWidth >= 691 && textScale <= 1.3) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  SizedBox(width: 391, child: controls),
+                  const SizedBox(width: 20),
+                  Expanded(child: heading),
+                ],
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                controls,
+                const SizedBox(height: 20),
+                heading,
+              ],
+            );
+          },
+        ),
         const SizedBox(height: 16),
-        _subjectsBlock(editor: false),
+        _subjectsBlock(editor: false, showHeader: false),
       ],
+    );
+  }
+
+  Widget _collegeContextCard() {
+    Widget chips(
+      int count,
+      int current,
+      String Function(int) label,
+      void Function(int) onPick,
+    ) {
+      return Wrap(
+        spacing: 6.9,
+        runSpacing: 6.9,
+        children: [
+          for (var value = 1; value <= count; value++)
+            ChoiceChip(
+              label: Text(label(value)),
+              selected: current == value,
+              showCheckmark: false,
+              selectedColor: CmColors.navy,
+              backgroundColor: CmColors.bg,
+              side: const BorderSide(color: CmColors.line),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(6.9),
+              ),
+              labelPadding: const EdgeInsets.symmetric(horizontal: 4.6),
+              padding: const EdgeInsets.symmetric(horizontal: 3.45, vertical: 2.4),
+              labelStyle: TextStyle(
+                fontSize: 12.65,
+                fontWeight: FontWeight.w600,
+                color: current == value ? Colors.white : CmColors.navy,
+              ),
+              onSelected: (_) => onPick(value),
+            ),
+        ],
+      );
+    }
+
+    Widget field(String label, Widget child) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(fontSize: 12.65, color: CmColors.slate),
+          ),
+          const SizedBox(height: 6.9),
+          child,
+        ],
+      );
+    }
+
+    final curriculum = field(
+      'Curriculum',
+      DropdownButtonFormField<int>(
+        key: ValueKey('college-cur-$_curriculumId-${_curricula.length}'),
+        initialValue: _curricula.any((c) => _idOf(c) == _curriculumId)
+            ? _curriculumId
+            : null,
+        isExpanded: true,
+        iconSize: 27.6,
+              decoration: _fieldDecoration().copyWith(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16.1,
+                  vertical: 16.1,
+                ),
+              ),
+        style: const TextStyle(fontSize: 13.8, color: CmColors.navy),
+        items: [
+          for (final c in _curricula)
+            DropdownMenuItem(
+              value: _idOf(c),
+              child: Text(
+                '${_label(c)} · '
+                '${c['status'] == 'published' ? 'Published' : 'Draft'}',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+        ],
+        onChanged: (value) {
+          for (final c in _curricula) {
+            if (_idOf(c) == value) _openCurriculum(c, stay: true);
+          }
+        },
+      ),
+    );
+    final schoolYear = field(
+      'School year',
+      DropdownButtonFormField<String>(
+        key: ValueKey('college-sy-$_schoolYear'),
+        initialValue: _schoolYear,
+        isExpanded: true,
+        iconSize: 27.6,
+              decoration: _fieldDecoration().copyWith(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16.1,
+                  vertical: 16.1,
+                ),
+              ),
+        style: const TextStyle(fontSize: 13.8, color: CmColors.navy),
+        items: [
+          for (final year in _schoolYearOptions())
+            DropdownMenuItem(value: year, child: Text(year)),
+        ],
+        onChanged: (value) {
+          if (value == null) return;
+          setState(() => _schoolYear = value);
+          _loadContext();
+        },
+      ),
+    );
+
+    return Container(
+      padding: const EdgeInsets.all(13.8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(13.8),
+        border: Border.all(color: CmColors.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (_electives.isEmpty) return curriculum;
+              final textScale = MediaQuery.textScalerOf(context).scale(12) / 12;
+              if (constraints.maxWidth >= 345 && textScale <= 1.3) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(flex: 3, child: curriculum),
+                    const SizedBox(width: 11.5),
+                    Expanded(flex: 2, child: schoolYear),
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  curriculum,
+                  const SizedBox(height: 13.8),
+                  schoolYear,
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 13.8),
+          field(
+            'Year level',
+            chips(4, _year, (value) => _yearLabel(false, value), (value) {
+              setState(() => _year = value);
+              _loadContext();
+            }),
+          ),
+          const SizedBox(height: 11.5),
+          field(
+            'Semester',
+            chips(2, _term, (value) => _termLabel(false, value), (value) {
+              setState(() => _term = value);
+              _loadContext();
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// SHS subjects: compact controls beside the heading on wide screens.
+  Widget _shsSubjectsTab() {
+    final query = _subjectQuery;
+    final visible = _subjects.where((subject) {
+      return query.isEmpty ||
+          _s(subject['code']).toLowerCase().contains(query) ||
+          _s(subject['name']).toLowerCase().contains(query);
+    }).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final controls = _shsContextCard(fillWidth: constraints.maxWidth < 648);
+            final heading = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${_yearLabel(true, _year)} Subjects · ${_termLabel(true, _term)}',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: CmColors.navy,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '${_program?['code']} · Curriculum ${_curriculum!['code']} · '
+                  '${_yearLabel(true, _year)} · ${_termLabel(true, _term)}',
+                  style: const TextStyle(fontSize: 12, color: CmColors.slate),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _subjectSearch,
+                  onChanged: (value) => setState(
+                    () => _subjectQuery = value.trim().toLowerCase(),
+                  ),
+                  decoration: _fieldDecoration(hint: 'Search course name')
+                      .copyWith(
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    suffixIcon: _subjectQuery.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: 'Clear',
+                            icon: const Icon(Icons.close, size: 18),
+                            onPressed: () {
+                              _subjectSearch.clear();
+                              setState(() => _subjectQuery = '');
+                            },
+                          ),
+                  ),
+                ),
+              ],
+            );
+
+            // Use the available content width, including text scaling, rather
+            // than assuming a particular device or orientation.
+            final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+            if (constraints.maxWidth >= 648 && textScale <= 1.3) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  SizedBox(width: 368, child: controls),
+                  const SizedBox(width: 28),
+                  Expanded(child: heading),
+                ],
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                controls,
+                const SizedBox(height: 20),
+                heading,
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 20),
+        if (_loadingSubjects)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 32),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (_subjectsError != null)
+          _errorBox(_subjectsError!, _loadContext)
+        else if (_subjects.isEmpty)
+          _emptyCard(
+            icon: Icons.inbox_outlined,
+            title: 'No subjects in this term',
+            message: 'This term has no subjects.',
+          )
+        else if (visible.isEmpty)
+          _emptyCard(
+            icon: Icons.search_off,
+            title: 'No subjects match your search',
+          )
+        else
+          _shsSubjectList(visible),
+      ],
+    );
+  }
+
+  Widget _shsContextCard({bool fillWidth = false}) {
+    Widget curriculumField(String label, Widget child) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6.9),
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 14.95,
+                color: CmColors.slate,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          child,
+        ],
+      );
+    }
+
+    Widget chipGroup(String label, bool grade) {
+      final current = grade ? _year : _term;
+      Widget choice(int value) {
+        final text = grade ? _yearLabel(true, value) : _termLabel(true, value);
+        return ChoiceChip(
+          label: fillWidth
+              ? SizedBox(
+                  width: double.infinity,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(text),
+                  ),
+                )
+              : Text(text),
+          selected: current == value,
+          showCheckmark: false,
+          selectedColor: CmColors.navy,
+          backgroundColor: CmColors.bg,
+          side: const BorderSide(color: CmColors.line),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(6.9),
+          ),
+          labelPadding: const EdgeInsets.symmetric(horizontal: 4.6),
+          padding: EdgeInsets.symmetric(
+            horizontal: 3.45,
+            vertical: fillWidth ? 5 : 2.4,
+          ),
+          labelStyle: TextStyle(
+            fontSize: fillWidth ? 14.5 : 12.65,
+            fontWeight: FontWeight.w600,
+            color: current == value ? Colors.white : CmColors.navy,
+          ),
+          onSelected: (_) {
+            if (current == value) return;
+            setState(() {
+              if (grade) {
+                _year = value;
+              } else {
+                _term = value;
+              }
+            });
+            _loadContext();
+          },
+        );
+      }
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: fillWidth ? 14.5 : 12.65,
+              color: CmColors.slate,
+            ),
+          ),
+          const SizedBox(height: 6.9),
+          if (fillWidth)
+            Row(
+              children: [
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.center,
+                    child: FractionallySizedBox(
+                      widthFactor: 0.9,
+                      child: choice(1),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 2),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.center,
+                    child: FractionallySizedBox(
+                      widthFactor: 0.9,
+                      child: choice(2),
+                    ),
+                  ),
+                ),
+              ],
+            )
+          else
+            Wrap(
+              spacing: 6.9,
+              runSpacing: 6.9,
+              children: [choice(1), choice(2)],
+            ),
+        ],
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(18.4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16.1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          curriculumField(
+            'Curriculum',
+            DropdownButtonFormField<int>(
+              key: ValueKey('shs-cur-$_curriculumId-${_curricula.length}'),
+              initialValue: _curricula.any((c) => _idOf(c) == _curriculumId)
+                  ? _curriculumId
+                  : null,
+              isExpanded: true,
+              iconSize: 27.6,
+              decoration: _fieldDecoration().copyWith(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16.1,
+                  vertical: 16.1,
+                ),
+              ),
+              style: TextStyle(
+                fontSize: fillWidth ? 15.5 : 13.8,
+                color: CmColors.navy,
+              ),
+              items: [
+                for (final curriculum in _curricula)
+                  DropdownMenuItem(
+                    value: _idOf(curriculum),
+                    child: Text(
+                      '${_label(curriculum)} · '
+                      '${curriculum['status'] == 'published' ? 'Published' : 'Draft'}',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: (value) {
+                if (value == null || value == _curriculumId) return;
+                for (final curriculum in _curricula) {
+                  if (_idOf(curriculum) == value) {
+                    _openCurriculum(curriculum, stay: true);
+                    break;
+                  }
+                }
+              },
+            ),
+          ),
+          const SizedBox(height: 16.1),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final split = constraints.maxWidth >= (fillWidth ? 260 : 322);
+              final groupWidth = split
+                  ? (constraints.maxWidth - 13.8) / 2
+                  : constraints.maxWidth;
+              if (split && fillWidth) {
+                return IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(child: chipGroup('Grade', true)),
+                      const VerticalDivider(
+                        width: 13.8,
+                        thickness: 1,
+                        indent: 6.9,
+                        endIndent: 6.9,
+                        color: CmColors.line,
+                      ),
+                      Expanded(child: chipGroup('Term', false)),
+                    ],
+                  ),
+                );
+              }
+              return Wrap(
+                spacing: 13.8,
+                runSpacing: 13.8,
+                children: [
+                  SizedBox(width: groupWidth, child: chipGroup('Grade', true)),
+                  SizedBox(width: groupWidth, child: chipGroup('Term', false)),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// A single fluid column lets long SHS names wrap without sideways scrolling.
+  Widget _shsSubjectList(List<_M> subjects) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: CmColors.line),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const ColoredBox(
+            color: Color(0xFFF1F5F9),
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Text(
+                'Course Name',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: CmColors.slate,
+                ),
+              ),
+            ),
+          ),
+          for (final subject in subjects)
+            Container(
+              constraints: const BoxConstraints(minHeight: 64),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: const BoxDecoration(
+                border: Border(top: BorderSide(color: CmColors.line)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    _s(subject['name']),
+                    style: const TextStyle(fontSize: 13, color: CmColors.navy),
+                  ),
+                  if (_s(subject['category']).isNotEmpty ||
+                      subject['hours'] != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      [
+                        if (_s(subject['category']).isNotEmpty)
+                          '${_s(subject['category'])[0].toUpperCase()}'
+                              '${_s(subject['category']).substring(1)}',
+                        if (subject['hours'] != null) '${subject['hours']} hrs',
+                      ].join(' · '),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: CmColors.slate,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -3100,7 +3950,11 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
 
   /// The subjects of the exact selected curriculum + year level + semester.
   /// [editor] = the draft editor in the Curricula tab; otherwise read-only.
-  Widget _subjectsBlock({required bool editor}) {
+  Widget _subjectsBlock({
+    required bool editor,
+    bool showHeader = true,
+    bool headerOnly = false,
+  }) {
     final editable = editor && _isDraft;
     final q = _subjectQuery;
     final visible = _subjects.where((s) {
@@ -3112,6 +3966,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (showHeader) ...[
         Wrap(
           spacing: 12,
           runSpacing: 10,
@@ -3184,6 +4039,8 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
           ),
         ),
         const SizedBox(height: 12),
+        ],
+        if (!headerOnly) ...[
         if (_loadingSubjects)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 32),
@@ -3218,6 +4075,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
             ],
             rows: [for (final s in visible) _subjectRow(s, editor, editable)],
           ),
+        ],
       ],
     );
   }

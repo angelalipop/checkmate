@@ -100,6 +100,7 @@ class _Builder {
   int? term;
   bool skip = false; // summer / OJT term
   bool inElectives = false;
+  bool gradeMode = false; // Senior High School layout (Grade 11 / Grade 12)
   String? group;
 
   final rows = <Map<String, dynamic>>[];
@@ -180,7 +181,11 @@ class _Builder {
         final tm = _termAfterYear.firstMatch(rest);
         if (tm != null) _setTerm(tm.group(1)!);
       } else {
+        gradeMode = true;
         year = g!.group(1) == '11' ? 1 : 2;
+        final rest = t.substring(g.end);
+        final tm = _termAfterYear.firstMatch(rest);
+        if (tm != null) _setTerm(tm.group(1)!);
       }
       return true;
     }
@@ -200,6 +205,8 @@ class _Builder {
     String? code,
     required String name,
     String? units,
+    String? category,
+    String? hours,
     required String where,
   }) {
     final n = name.trim();
@@ -237,12 +244,26 @@ class _Builder {
       return;
     }
 
+    final h = (hours ?? '').trim();
+    if (gradeMode) {
+      if (category == null) {
+        problems.add('$where: "$n" needs Core, Applied or Specialized.');
+        return;
+      }
+      if (h.isEmpty) {
+        problems.add('$where: "$n" needs its required hours.');
+        return;
+      }
+    }
+
     rows.add({
       'year_level': year,
       'term': term,
       'name': n,
       if (c.isNotEmpty) 'code': c,
       if (u.isNotEmpty) 'units': u,
+      if (category != null) 'category': category,
+      if (h.isNotEmpty) 'hours': h,
       if (RegExp(r'\belective\b', caseSensitive: false).hasMatch(n))
         'is_elective_slot': true,
     });
@@ -302,7 +323,10 @@ ParsedCurriculumFile _parseOutline(List<List<String>> grid) {
     if (firstNorm == 'total' ||
         firstNorm == 'course code' ||
         firstNorm == 'code' ||
-        firstNorm == 'subject code') {
+        firstNorm == 'subject code' ||
+        firstNorm == 'course name' ||
+        firstNorm == 'subject name' ||
+        firstNorm == 'subject') {
       continue;
     }
 
@@ -333,6 +357,39 @@ ParsedCurriculumFile _parseOutline(List<List<String>> grid) {
     // year / semester / list of electives headings
     final joined = cells.where((c) => c.isNotEmpty).join(' ');
     if (joined.length <= 45 && b.heading(joined, maxLength: 45)) continue;
+
+    // Senior High School: Course Name | Core/Applied/Specialized | Hours
+    // (or one cell such as "Oral Communication (Core - 80 hrs)")
+    if (b.gradeMode && b.year != null && b.term != null && !b.inElectives) {
+      var name = first;
+      String? category;
+      String? hours;
+      final inline = RegExp(
+        r'^(.*?)\s*\(\s*(core|applied|specialized)\s*[-\u2013\u2014]\s*(\d+)\s*(?:hrs?|hours)?\s*\)\s*$',
+        caseSensitive: false,
+      ).firstMatch(first);
+      if (inline != null) {
+        name = inline.group(1)!.trim();
+        category = inline.group(2)!.toLowerCase();
+        hours = inline.group(3);
+      }
+      for (var i = firstIdx + 1; i < cells.length; i++) {
+        final c = cells[i];
+        if (c.isEmpty) continue;
+        final lc = c.toLowerCase();
+        if (lc.startsWith('core')) {
+          category = 'core';
+        } else if (lc.startsWith('applied')) {
+          category = 'applied';
+        } else if (lc.startsWith('special')) {
+          category = 'specialized';
+        } else if (_numberCell.hasMatch(c)) {
+          hours = c;
+        }
+      }
+      b.addSubject(name: name, category: category, hours: hours, where: where);
+      continue;
+    }
 
     if (b.inElectives) {
       // a single entry in the first column is a classification name

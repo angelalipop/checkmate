@@ -8,18 +8,12 @@ export 'package:server/academic/academic_exception.dart';
 /// Academic Management: programs, curricula, curriculum subjects, the list
 /// of electives and the elective finalized per school year.
 ///
-/// Delete behaviour is controlled by the ACADEMIC_DELETE_MODE setting:
-///   hard (default, development): rows are removed from PostgreSQL.
-///   soft (final testing):        rows are flagged is_deleted / deleted_at /
-///                                deleted_by and stay in PostgreSQL.
-/// Every normal query filters on is_deleted = FALSE in both modes.
+/// Deleted records remain in PostgreSQL with is_deleted / deleted_at /
+/// deleted_by set. Every normal query filters on is_deleted = FALSE.
 class AcademicService {
   // ------------------------------------------------------------------
   // helpers
   // ------------------------------------------------------------------
-
-  static bool get softDelete =>
-      (env['ACADEMIC_DELETE_MODE'] ?? 'hard').trim().toLowerCase() == 'soft';
 
   static final RegExp _programCode = RegExp(r'^[A-Za-z0-9][A-Za-z0-9 _-]{1,19}$');
   static final RegExp _curriculumCode = RegExp(r'^[0-9A-Za-z-]{2,20}$');
@@ -79,6 +73,16 @@ class AcademicService {
     }
   }
 
+  static int? _hoursInput(Object? raw) {
+    final text = raw?.toString().trim() ?? '';
+    if (text.isEmpty) return null;
+    final v = int.tryParse(text);
+    if (v == null || v < 0 || v > 1000) {
+      throw AcademicException('Required hours must be a whole number.');
+    }
+    return v;
+  }
+
   static int _year(Object? raw) {
     final v = int.tryParse(raw?.toString() ?? '');
     if (v == null || v < 1 || v > 4) {
@@ -108,7 +112,7 @@ class AcademicService {
     return v;
   }
 
-  /// Marks a row deleted (soft mode) or removes it (hard mode).
+  /// Archives a row while preserving it in PostgreSQL.
   static Future<void> _remove(
     Session s,
     String table,
@@ -116,22 +120,15 @@ class AcademicService {
     Map<String, Object?> params,
     int? actor,
   ) async {
-    if (softDelete) {
-      await s.execute(
-        Sql.named('''
-          UPDATE $table
-          SET is_deleted = TRUE, deleted_at = NOW(),
-              deleted_by = @actor, updated_at = NOW()
-          WHERE $where AND is_deleted = FALSE
-        '''),
-        parameters: {...params, 'actor': actor},
-      );
-    } else {
-      await s.execute(
-        Sql.named('DELETE FROM $table WHERE $where'),
-        parameters: params,
-      );
-    }
+    await s.execute(
+      Sql.named('''
+        UPDATE $table
+        SET is_deleted = TRUE, deleted_at = NOW(),
+            deleted_by = @actor, updated_at = NOW()
+        WHERE $where AND is_deleted = FALSE
+      '''),
+      parameters: {...params, 'actor': actor},
+    );
   }
 
   // ------------------------------------------------------------------
@@ -608,9 +605,9 @@ class AcademicService {
           Sql.named('''
             INSERT INTO curriculum_subjects
               (curriculum_id, subject_id, year_level, term, category,
-               is_elective_slot, sort_order)
+               is_elective_slot, hours, sort_order)
             SELECT @new, subject_id, year_level, term, category,
-                   is_elective_slot, sort_order
+                   is_elective_slot, hours, sort_order
             FROM curriculum_subjects
             WHERE curriculum_id = @src AND is_deleted = FALSE
           '''),
@@ -653,8 +650,8 @@ class AcademicService {
               Sql.named('''
                 INSERT INTO curriculum_subjects
                   (curriculum_id, subject_id, year_level, term, category,
-                   is_elective_slot, sort_order)
-                VALUES (@cid, @sid, @year, @term, @cat, @slot, @ord)
+                   is_elective_slot, hours, sort_order)
+                VALUES (@cid, @sid, @year, @term, @cat, @slot, @hours, @ord)
                 ON CONFLICT DO NOTHING
               '''),
               parameters: {
@@ -664,6 +661,7 @@ class AcademicService {
                 'term': term,
                 'cat': _category(row['category']),
                 'slot': row['is_elective_slot'] == true,
+                'hours': _hoursInput(row['hours']),
                 'ord': order,
               },
             );
@@ -707,6 +705,19 @@ class AcademicService {
               statusCode: e.statusCode,
             );
           }
+        }
+      }
+
+      if (hasFile) {
+        final same = await _identicalTo(tx, newId, programId);
+        if (same != null) {
+          throw AcademicException(
+            'This file is exactly the same as ${program['code']} $same. '
+            'A new curriculum needs at least one change: a replaced, added or '
+            'removed subject${program['level'] == 'shs' ? ', or a different group or required hours' : ' or elective'}. '
+            'To start from the old one, use Copy existing and edit the draft.',
+            statusCode: 409,
+          );
         }
       }
 
@@ -765,8 +776,7 @@ class AcademicService {
       await _requireDraft(tx, id);
       final p = {'id': id};
 
-      // Children first (hard mode needs this for the foreign keys; soft mode
-      // keeps them flagged so nothing is left half-visible).
+      // Archive children first so no child remains visible after deletion.
       await _remove(
         tx,
         'elective_selections',
@@ -777,12 +787,6 @@ class AcademicService {
       await _remove(tx, 'curriculum_electives', 'curriculum_id = @id', p, actor);
       await _remove(tx, 'curriculum_subjects', 'curriculum_id = @id', p, actor);
 
-      if (!softDelete) {
-        await tx.execute(
-          Sql.named('UPDATE curricula SET copied_from_id = NULL WHERE copied_from_id = @id'),
-          parameters: p,
-        );
-      }
       await _remove(tx, 'curricula', 'id = @id', p, actor);
     });
   }
@@ -790,6 +794,67 @@ class AcademicService {
   // ------------------------------------------------------------------
   // validation + publish
   // ------------------------------------------------------------------
+
+  /// A canonical text of everything that makes a curriculum what it is:
+  /// every subject per year level + semester (with group and hours for
+  /// Senior High School) and the list of electives.
+  static Future<String> _signature(Session s, int id) async {
+    final subjects = await s.execute(
+      Sql.named('''
+        SELECT cs.year_level::int, cs.term::int,
+               LOWER(COALESCE(a.code, a.name)),
+               COALESCE(cs.category, ''),
+               COALESCE(cs.hours, a.hours, -1)::int,
+               cs.is_elective_slot
+        FROM curriculum_subjects cs
+        JOIN academic_subjects a ON a.id = cs.subject_id
+        WHERE cs.curriculum_id = @id AND cs.is_deleted = FALSE
+        ORDER BY 1, 2, 3, 4, 5, 6
+      '''),
+      parameters: {'id': id},
+    );
+    final electives = await s.execute(
+      Sql.named('''
+        SELECT LOWER(COALESCE(a.code, a.name))
+        FROM curriculum_electives ce
+        JOIN academic_subjects a ON a.id = ce.subject_id
+        WHERE ce.curriculum_id = @id AND ce.is_deleted = FALSE
+        ORDER BY 1
+      '''),
+      parameters: {'id': id},
+    );
+
+    final out = StringBuffer();
+    for (final r in subjects) {
+      out.write('S|${r[0]}|${r[1]}|${r[2]}|${r[3]}|${r[4]}|${r[5]};');
+    }
+    for (final r in electives) {
+      out.write('E|${r[0]};');
+    }
+    return out.toString();
+  }
+
+  /// The code of another curriculum of the same program that has exactly
+  /// the same content, or null when this one differs from all of them.
+  static Future<String?> _identicalTo(
+    Session s,
+    int id,
+    int programId,
+  ) async {
+    final mine = await _signature(s, id);
+    final others = await s.execute(
+      Sql.named('''
+        SELECT id, code FROM curricula
+        WHERE program_id = @pid AND id <> @id AND is_deleted = FALSE
+        ORDER BY code
+      '''),
+      parameters: {'pid': programId, 'id': id},
+    );
+    for (final o in others) {
+      if (await _signature(s, _int(o[0])) == mine) return o[1] as String;
+    }
+    return null;
+  }
 
   static Future<List<String>> _issues(Session s, int id) async {
     final issues = <String>[];
@@ -800,9 +865,11 @@ class AcademicService {
       return issues;
     }
 
-    final bad = await s.execute(
+    final shs = c['level'] == 'shs';
+    final rows = await s.execute(
       Sql.named('''
-        SELECT cs.year_level, cs.term, a.code, a.name
+        SELECT cs.year_level, cs.term, a.code, a.name, cs.category,
+               COALESCE(cs.hours, a.hours)
         FROM curriculum_subjects cs
         JOIN academic_subjects a ON a.id = cs.subject_id
         WHERE cs.curriculum_id = @id AND cs.is_deleted = FALSE
@@ -811,9 +878,9 @@ class AcademicService {
       parameters: {'id': id},
     );
 
-    final maxYear = c['level'] == 'shs' ? 2 : 4;
+    final maxYear = shs ? 2 : 4;
     final seen = <String, String>{};
-    for (final r in bad) {
+    for (final r in rows) {
       final year = _int(r[0]);
       final term = _int(r[1]);
       final code = r[2] as String?;
@@ -826,6 +893,12 @@ class AcademicService {
       if (_ojtLike.hasMatch('${code ?? ''} $name')) {
         issues.add('$name is an OJT/practicum subject and must be removed ($where).');
       }
+      if (shs && r[4] == null) {
+        issues.add('$name needs a group: Core, Applied or Specialized ($where).');
+      }
+      if (shs && r[5] == null) {
+        issues.add('$name needs its required hours ($where).');
+      }
       if (code != null) {
         final key = code.toLowerCase();
         if (seen.containsKey(key)) {
@@ -836,6 +909,16 @@ class AcademicService {
           seen[key] = where;
         }
       }
+    }
+
+    final same = await _identicalTo(s, id, c['program_id'] as int);
+    if (same != null) {
+      issues.add(
+        'It is exactly the same as curriculum $same. Change at least one '
+        'subject (replace, add or remove one'
+        '${shs ? ', or change its group or required hours' : ' or an elective'}'
+        ') before publishing.',
+      );
     }
     return issues;
   }
@@ -922,7 +1005,7 @@ class AcademicService {
 
     final result = await Database.pool.execute(
       Sql.named('''
-        SELECT cs.id, cs.subject_id, a.code, a.name, a.units::float8, a.hours,
+        SELECT cs.id, cs.subject_id, a.code, a.name, a.units::float8, COALESCE(cs.hours, a.hours),
                cs.year_level::int, cs.term::int, cs.category,
                cs.is_elective_slot,
                ce.id, ea.code, ea.name, es.school_year
@@ -957,7 +1040,7 @@ class AcademicService {
   static Future<Map<String, dynamic>> _csById(Session s, int id) async {
     final result = await s.execute(
       Sql.named('''
-        SELECT cs.id, cs.subject_id, a.code, a.name, a.units::float8, a.hours,
+        SELECT cs.id, cs.subject_id, a.code, a.name, a.units::float8, COALESCE(cs.hours, a.hours),
                cs.year_level::int, cs.term::int, cs.category,
                cs.is_elective_slot,
                NULL::bigint, NULL::text, NULL::text, NULL::text
@@ -1006,6 +1089,7 @@ class AcademicService {
     final term = _term(body['term']);
     final category = _category(body['category']);
     final slot = body['is_elective_slot'] == true;
+    final hours = _hoursInput(body['hours']);
 
     return _tx((tx) async {
       final c = await _requireDraft(tx, curriculumId);
@@ -1036,8 +1120,8 @@ class AcademicService {
         Sql.named('''
           INSERT INTO curriculum_subjects
             (curriculum_id, subject_id, year_level, term, category,
-             is_elective_slot, sort_order)
-          VALUES (@cid, @sid, @year, @term, @cat, @slot,
+             is_elective_slot, hours, sort_order)
+          VALUES (@cid, @sid, @year, @term, @cat, @slot, @hours,
             COALESCE((SELECT MAX(sort_order) FROM curriculum_subjects
                       WHERE curriculum_id = @cid), 0) + 1)
           RETURNING id
@@ -1049,6 +1133,7 @@ class AcademicService {
           'term': term,
           'cat': category,
           'slot': slot,
+          'hours': hours,
         },
       );
       return _csById(tx, _int(created.first[0]));
@@ -1080,6 +1165,10 @@ class AcademicService {
       final slot = body.containsKey('is_elective_slot')
           ? body['is_elective_slot'] == true
           : current['is_elective_slot'] as bool;
+
+      final hours = body.containsKey('hours')
+          ? _hoursInput(body['hours'])
+          : current['hours'] as int?;
 
       var subjectId = current['subject_id'] as int;
       if (body.containsKey('subject_id') ||
@@ -1124,7 +1213,8 @@ class AcademicService {
         Sql.named('''
           UPDATE curriculum_subjects
           SET subject_id = @sid, year_level = @year, term = @term,
-              category = @cat, is_elective_slot = @slot, updated_at = NOW()
+              category = @cat, is_elective_slot = @slot, hours = @hours,
+              updated_at = NOW()
           WHERE id = @id AND is_deleted = FALSE
         '''),
         parameters: {
@@ -1134,6 +1224,7 @@ class AcademicService {
           'term': term,
           'cat': category,
           'slot': slot,
+          'hours': hours,
         },
       );
       return _csById(tx, csId);

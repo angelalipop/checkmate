@@ -1,6 +1,5 @@
 import 'package:dart_frog/dart_frog.dart';
 
-import 'package:server/academic/academic_exception.dart';
 import 'package:server/academic/academic_service.dart';
 
 /// Runs a route body and turns any thrown error into a JSON response.

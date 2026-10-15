@@ -1,6 +1,5 @@
 import 'package:dart_frog/dart_frog.dart';
 
-import 'package:server/academic/academic_exception.dart';
 import 'package:server/academic/academic_http.dart';
 import 'package:server/academic/academic_service.dart';
 

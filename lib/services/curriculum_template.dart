@@ -16,13 +16,15 @@ import 'package:archive/archive.dart';
 ///       Course Code | Course Name | Units
 ///       ...
 class CurriculumTemplate {
-  static const String fileName = 'BSIT_2601.xlsx';
+  /// Sample file name: Program_Curriculum (Strand_Curriculum for SHS).
+  static String fileNameFor({required bool shs}) =>
+      shs ? 'STEM_2601.xlsx' : 'BSIT_2601.xlsx';
 
   static const String mimeType =
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
   // style 0 = normal, 1 = bold
-  static final List<_Row> _rows = [
+  static final List<_Row> _collegeRows = [
     _Row(['Program', 'BSIT'], bold: true),
     _Row(['Curriculum', '2601'], bold: true),
     _Row(['Name this file Program_Curriculum (for example BSIT_2601.xlsx).']),
@@ -65,6 +67,36 @@ class CurriculumTemplate {
     _Row(['INTE1048', 'Introduction to Computer Animation', '3']),
   ];
 
+
+  static final List<_Row> _shsRows = [
+    _Row(['Program', 'STEM'], bold: true),
+    _Row(['Curriculum', '2601'], bold: true),
+    _Row(['Name this file Strand_Curriculum (for example STEM_2601.xlsx).']),
+    _Row(['Repeat the Grade and Sem blocks for both grade levels.']),
+    _Row(['Each subject needs its group (Core, Applied or Specialized) and its hours.']),
+    _Row([]),
+    _Row(['Grade 11'], bold: true),
+    _Row(['1st Sem'], bold: true),
+    _Row(['Course Name', 'Core / Applied / Specialized', 'Hours'], bold: true),
+    _Row(['Oral Communication', 'Core', '80']),
+    _Row(['General Mathematics', 'Core', '80']),
+    _Row(['Physical Education and Health 1', 'Core', '20']),
+    _Row(['Pre-Calculus', 'Specialized', '80']),
+    _Row([]),
+    _Row(['2nd Sem'], bold: true),
+    _Row(['Course Name', 'Core / Applied / Specialized', 'Hours'], bold: true),
+    _Row(['Reading and Writing', 'Core', '80']),
+    _Row(['Practical Research 1', 'Applied', '80']),
+    _Row(['Basic Calculus', 'Specialized', '80']),
+    _Row([]),
+    _Row(['Grade 12'], bold: true),
+    _Row(['1st Sem'], bold: true),
+    _Row(['Course Name', 'Core / Applied / Specialized', 'Hours'], bold: true),
+    _Row(['Personal Development', 'Core', '80']),
+    _Row(['Practical Research 2', 'Applied', '80']),
+    _Row(['General Physics 1', 'Specialized', '80']),
+  ];
+
   static String _esc(String s) => s
       .replaceAll('&', '&amp;')
       .replaceAll('<', '&lt;')
@@ -73,18 +105,18 @@ class CurriculumTemplate {
 
   static String _col(int i) => String.fromCharCode(65 + i);
 
-  static String _sheetXml() {
+  static String _sheetXml(List<_Row> rows, List<int> widths) {
     final b = StringBuffer()
       ..write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
       ..write('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">')
       ..write('<cols>')
-      ..write('<col min="1" max="1" width="18" customWidth="1"/>')
-      ..write('<col min="2" max="2" width="62" customWidth="1"/>')
-      ..write('<col min="3" max="3" width="9" customWidth="1"/>')
+      ..write('<col min="1" max="1" width="${widths[0]}" customWidth="1"/>')
+      ..write('<col min="2" max="2" width="${widths[1]}" customWidth="1"/>')
+      ..write('<col min="3" max="3" width="${widths[2]}" customWidth="1"/>')
       ..write('</cols><sheetData>');
 
-    for (var r = 0; r < _rows.length; r++) {
-      final row = _rows[r];
+    for (var r = 0; r < rows.length; r++) {
+      final row = rows[r];
       if (row.cells.isEmpty) continue;
       b.write('<row r="${r + 1}">');
       for (var c = 0; c < row.cells.length; c++) {
@@ -155,14 +187,20 @@ class CurriculumTemplate {
   }
 
   /// The .xlsx file as bytes.
-  static Uint8List buildXlsx() {
+  static Uint8List buildXlsx({bool shs = false}) {
     final archive = Archive();
     _add(archive, '[Content_Types].xml', _contentTypes);
     _add(archive, '_rels/.rels', _rootRels);
     _add(archive, 'xl/workbook.xml', _workbook);
     _add(archive, 'xl/_rels/workbook.xml.rels', _workbookRels);
     _add(archive, 'xl/styles.xml', _styles);
-    _add(archive, 'xl/worksheets/sheet1.xml', _sheetXml());
+    _add(
+      archive,
+      'xl/worksheets/sheet1.xml',
+      shs
+          ? _sheetXml(_shsRows, const [62, 30, 9])
+          : _sheetXml(_collegeRows, const [18, 62, 9]),
+    );
 
     final List<int>? encoded = ZipEncoder().encode(archive);
     return Uint8List.fromList(encoded ?? const <int>[]);

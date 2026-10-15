@@ -1,5 +1,5 @@
 -- CheckMate: Academic Management database integrity test
--- Run AFTER 006 and 007:
+-- Run AFTER migrations 006, 007, 008, and 009 (expects the original seed data):
 --   docker exec -i <postgres-container> psql -U checkmate -d checkmate -v ON_ERROR_STOP=1 < db/tests/academic_integrity_test.sql
 -- Everything runs inside a transaction that is rolled back, so no data changes.
 -- Any failed check stops the script with a message starting with "FAIL".
@@ -59,6 +59,15 @@ SELECT pg_temp.check_eq('BMMA subjects', (SELECT COUNT(*) FROM curriculum_subjec
 SELECT pg_temp.check_eq('BSA subjects', (SELECT COUNT(*) FROM curriculum_subjects WHERE curriculum_id = pg_temp.cid('BSA') AND is_deleted = FALSE), 61);
 SELECT pg_temp.check_eq('STEM subjects', (SELECT COUNT(*) FROM curriculum_subjects WHERE curriculum_id = pg_temp.cid('STEM') AND is_deleted = FALSE), 33);
 SELECT pg_temp.check_eq('ABM subjects', (SELECT COUNT(*) FROM curriculum_subjects WHERE curriculum_id = pg_temp.cid('ABM') AND is_deleted = FALSE), 33);
+
+SELECT pg_temp.check_eq('every SHS subject has its required hours (needs migration 009)',
+    (SELECT COUNT(*) FROM curriculum_subjects cs JOIN curricula c ON c.id = cs.curriculum_id
+       JOIN academic_programs p ON p.id = c.program_id
+      WHERE p.level = 'shs' AND cs.is_deleted = FALSE AND cs.hours IS NULL), 0);
+SELECT pg_temp.check_eq('every SHS subject has its group',
+    (SELECT COUNT(*) FROM curriculum_subjects cs JOIN curricula c ON c.id = cs.curriculum_id
+       JOIN academic_programs p ON p.id = c.program_id
+      WHERE p.level = 'shs' AND cs.is_deleted = FALSE AND cs.category IS NULL), 0);
 
 -- ---------- exact filtering by program + curriculum + year + term ----------
 SELECT pg_temp.check_eq('BSIT year 1 term 1 has 9 subjects',
@@ -173,8 +182,8 @@ BEGIN
 
     -- allowed on a published curriculum
     INSERT INTO elective_selections (curriculum_subject_id, elective_id, school_year) VALUES (slot, el, '2026-2027');
-    PERFORM pg_temp.check_eq('elective finalized on a published curriculum',
-        (SELECT COUNT(*)
+        PERFORM pg_temp.check_eq('elective finalized on a published curriculum',
+            (SELECT COUNT(*)
             FROM elective_selections
             WHERE curriculum_subject_id = slot
             AND school_year = '2026-2027'
@@ -185,12 +194,12 @@ BEGIN
         format('INSERT INTO elective_selections (curriculum_subject_id, elective_id, school_year) VALUES (%s, %s, ''2026'')', slot, el));
     -- a different school year is a separate choice
     INSERT INTO elective_selections (curriculum_subject_id, elective_id, school_year) VALUES (slot, el, '2027-2028');
-    PERFORM pg_temp.check_eq('same slot can differ per school year',
-        (SELECT COUNT(*)
+        PERFORM pg_temp.check_eq('same slot can differ per school year',
+            (SELECT COUNT(*)
             FROM elective_selections
             WHERE curriculum_subject_id = slot
             AND school_year IN ('2026-2027', '2027-2028')
-            AND is_deleted = FALSE), 2);
+            AND is_deleted = FALSE), 2); 
 END;
 $$;
 

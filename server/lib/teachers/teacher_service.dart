@@ -1,12 +1,11 @@
 import 'dart:math';
 
 import 'package:postgres/postgres.dart';
-
 import 'package:server/auth/password.dart';
 import 'package:server/classes/class_service.dart';
+import 'package:server/database.dart';
 import 'package:server/teachers/teacher_exception.dart';
 import 'package:server/teachers/teacher_identity.dart';
-import 'package:server/database.dart';
 
 export 'package:server/teachers/teacher_exception.dart';
 
