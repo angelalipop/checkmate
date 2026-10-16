@@ -12,6 +12,7 @@ Future<Response> academicGuard(Future<Response> Function() body) async {
   }
 }
 
+/// Converts an exception into an appropriate JSON error response.
 Response academicErrorResponse(Object error) {
   final mapped = AcademicService.mapError(error);
 
@@ -35,6 +36,7 @@ Response academicErrorResponse(Object error) {
   );
 }
 
+/// Returns an HTTP 405 response for unsupported request methods.
 Response academicMethodNotAllowed() {
   return Response.json(
     statusCode: 405,
@@ -42,6 +44,7 @@ Response academicMethodNotAllowed() {
   );
 }
 
+/// Returns a successful JSON response with the given status code.
 Response academicOk(Map<String, dynamic> body, {int statusCode = 200}) {
   return Response.json(
     statusCode: statusCode,
@@ -55,14 +58,16 @@ int? academicActorId(RequestContext context) {
   return int.tryParse(user['userId']?.toString() ?? '');
 }
 
+/// Parses and validates a positive integer identifier.
 int academicParseId(String raw, String label) {
   final id = int.tryParse(raw);
   if (id == null || id <= 0) {
-    throw AcademicException('Invalid $label.'); 
+    throw AcademicException('Invalid $label.');
   }
   return id;
 }
 
+/// Reads and validates the request body as a JSON object.
 Future<Map<String, dynamic>> academicBody(RequestContext context) async {
   final Object? body;
   try {

@@ -174,7 +174,7 @@ class AcademicApi {
         await _send('POST', '/curricula', token, body: {
           'program_id': programId,
           'code': code,
-          if (copyFromId != null) 'copy_from_id': copyFromId,
+          'copy_from_id': ?copyFromId,
           if (rows != null && rows.isNotEmpty) 'rows': rows,
           if (electives != null && electives.isNotEmpty) 'electives': electives,
         }),

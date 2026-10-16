@@ -55,6 +55,7 @@ Future<Response> onRequest(RequestContext context) async {
           },
         );
 
+      // ignore: no_default_cases
       default:
         return Response.json(
           statusCode: 405,

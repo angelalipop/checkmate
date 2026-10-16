@@ -172,12 +172,6 @@ Widget _dialogHeader(String title, VoidCallback? onClose) {
   );
 }
 
-Widget _spinner() => const SizedBox(
-  width: 20,
-  height: 20,
-  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-);
-
 Widget _badge(String text, Color color) {
   return Container(
     padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
@@ -401,9 +395,11 @@ enum _Source { copy, upload }
 
 class _CurriculumDialogState extends State<_CurriculumDialog> {
   final _code = TextEditingController();
-  late _Source _source =
-      widget.curricula.isNotEmpty ? _Source.copy : _Source.upload;
-  late int? _copyId = widget.initialCopyId ??
+  late _Source _source = widget.curricula.isNotEmpty
+      ? _Source.copy
+      : _Source.upload;
+  late int? _copyId =
+      widget.initialCopyId ??
       (widget.curricula.isEmpty ? null : _idOf(widget.curricula.first));
   String? _codeError;
   String? _fileError;
@@ -440,7 +436,7 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
         acceptedTypeGroups: [
           XTypeGroup(
             label: 'Curriculum',
-            extensions: _shs ? ['xlsx'] : ['xlsx', 'pdf', 'csv'],
+            extensions: _shs ? ['xlsx', 'pdf'] : ['xlsx', 'pdf', 'csv'],
           ),
         ],
       );
@@ -448,25 +444,30 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
         if (mounted) setState(() => _reading = false);
         return;
       }
-      if (_shs && !file.name.toLowerCase().endsWith('.xlsx')) {
+      if (_shs &&
+          !file.name.toLowerCase().endsWith('.xlsx') &&
+          !file.name.toLowerCase().endsWith('.pdf')) {
         if (mounted) {
           setState(() {
             _reading = false;
             _fileError =
-                'Senior High School uploads must be Excel (.xlsx) files. Use the Excel sample guide.';
+                'Senior High School uploads must be Excel (.xlsx) '
+                'or PDF (.pdf) files.';
           });
         }
         return;
       }
       final bytes = await file.readAsBytes();
-      final parsed = CurriculumFileParser.parse(bytes, file.name);
+      final parsed = CurriculumFileParser.parse(bytes, file.name, shs: _shs);
       if (!mounted) return;
       setState(() {
         _fileName = file.name;
         _parsed = parsed;
         _reading = false;
         _fileError = _mismatch(parsed);
-        if (_code.text.trim().isEmpty && parsed.curriculumCode != null) {
+        if (!_shs &&
+            _code.text.trim().isEmpty &&
+            parsed.curriculumCode != null) {
           _code.text = parsed.curriculumCode!;
         }
       });
@@ -511,19 +512,24 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _fileError = 'Could not save the sample guide: ${_cleanError(e)}');
+        setState(
+          () =>
+              _fileError = 'Could not save the sample guide: ${_cleanError(e)}',
+        );
       }
     }
   }
 
   void _submit() {
-    final code = _code.text.trim().toUpperCase();
+    final code = _shs ? 'SHS' : _code.text.trim().toUpperCase();
+
     setState(() {
-      _codeError = RegExp(r'^[0-9A-Za-z-]{2,20}$').hasMatch(code)
+      _codeError = _shs || RegExp(r'^[0-9A-Za-z-]{2,20}$').hasMatch(code)
           ? null
           : 'Use 2 to 20 letters, numbers or dashes (e.g. 2601).';
       _fileError = null;
     });
+
     if (_codeError != null) return;
 
     if (_source == _Source.copy && _copyId == null) {
@@ -542,7 +548,9 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
         return;
       }
       if (parsed.problems.isNotEmpty) {
-        setState(() => _fileError = 'Fix the file problems below and upload again.');
+        setState(
+          () => _fileError = 'Fix the file problems below and upload again.',
+        );
         return;
       }
       if (parsed.rows.isEmpty && parsed.electives.isEmpty) {
@@ -559,8 +567,14 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
     });
   }
 
-  Widget _sourceChip(String label, _Source value, {bool enabled = true}) {
+  Widget _sourceChip(
+    String label,
+    _Source value, {
+    bool enabled = true,
+    bool pickOnTap = false,
+  }) {
     final selected = _source == value;
+
     return ChoiceChip(
       label: Text(label),
       selected: selected,
@@ -570,7 +584,17 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
         color: selected ? Colors.white : CmColors.navy,
         fontWeight: FontWeight.w600,
       ),
-      onSelected: enabled ? (_) => setState(() => _source = value) : null,
+      onSelected: enabled
+          ? (_) {
+              if (_reading) return;
+
+              setState(() => _source = value);
+
+              if (pickOnTap) {
+                _pickFile();
+              }
+            }
+          : null,
     );
   }
 
@@ -590,17 +614,25 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
             style: const TextStyle(color: CmColors.slate, fontSize: 13),
           ),
           const SizedBox(height: 14),
-          _labeled(
-            'Curriculum code',
-            TextField(
-              controller: _code,
-              textCapitalization: TextCapitalization.characters,
-              decoration: _fieldDecoration(
-                hint: 'e.g. 2601',
-                errorText: _codeError,
+          if (!_shs) ...[
+            const SizedBox(height: 14),
+            _labeled(
+              'Curriculum code',
+              TextField(
+                controller: _code,
+                textCapitalization: TextCapitalization.characters,
+                onChanged: (_) {
+                  if (_codeError != null) {
+                    setState(() => _codeError = null);
+                  }
+                },
+                decoration: _fieldDecoration(
+                  hint: 'e.g. 2601',
+                  errorText: _codeError,
+                ),
               ),
             ),
-          ),
+          ],
           const SizedBox(height: 14),
           _labeled(
             'Start from',
@@ -609,7 +641,7 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
               runSpacing: 6,
               children: [
                 _sourceChip('Copy existing', _Source.copy, enabled: hasOlder),
-                _sourceChip('Upload file', _Source.upload),
+                _sourceChip('Upload file', _Source.upload, pickOnTap: true),
               ],
             ),
           ),
@@ -650,20 +682,23 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
           if (_source == _Source.upload) ...[
             const SizedBox(height: 12),
             Text(
-              _shs ? 'Upload the Excel Sample Guide:' : 'Upload one of these:',
+              _shs
+                  ? 'Upload the Excel Sample Guide or STI SHS Program Guide PDF:'
+                  : 'Upload one of these:',
               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 4),
             Text(
               _shs
-                  ? '·  Fill it in and name it Strand_Curriculum (for example STEM_2601.xlsx).\n'
-                      '·  Grade 11 / Grade 12  >  1st Sem / 2nd Sem  >  Course Name, '
-                      'Core / Applied / Specialized, and Hours.'
+                  ? '·  Fill in the Excel Sample Guide and use your strand name '
+                        '(for example STEM_SHS.xlsx).\n'
+                        '·  Grade 11 / Grade 12  >  1st Term / 2nd Term  >  Course Name, '
+                        'Core / Applied / Specialized, and Hours.'
                   : '·  The Excel Sample Guide, filled in and named Program_Curriculum '
-                      '(for example BSIT_2601.xlsx).\n'
-                      '·  The STI Program Guide PDF from the STI website '
-                      '(for example STI_College_BSAIS_Program.pdf). The program and '
-                      'curriculum (BSAIS-24-01 = 2401) are read from the file.',
+                        '(for example BSIT_2601.xlsx).\n'
+                        '·  The STI Program Guide PDF from the STI website '
+                        '(for example STI_College_BSAIS_Program.pdf). The program and '
+                        'curriculum (BSAIS-24-01 = 2401) are read from the file.',
               style: const TextStyle(
                 fontSize: 12,
                 color: CmColors.slate,
@@ -678,24 +713,28 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
               style: const TextStyle(fontSize: 12, color: CmColors.slate),
             ),
             const SizedBox(height: 12),
-            Wrap(
-              spacing: 10,
-              runSpacing: 8,
-              children: [
-                OutlinedButton.icon(
+            Center(
+              child: FractionallySizedBox(
+                widthFactor: 0.92,
+                child: OutlinedButton.icon(
                   style: _secondaryButtonStyle,
                   onPressed: _reading ? null : _downloadSample,
                   icon: const Icon(Icons.download_outlined),
                   label: const Text('Download Sample Guide (.xlsx)'),
                 ),
-                FilledButton.icon(
-                  style: _primaryButtonStyle,
-                  onPressed: _reading ? null : _pickFile,
-                  icon: _reading ? _spinner() : const Icon(Icons.upload_file_outlined),
-                  label: Text(_fileName ?? 'Choose File'),
-                ),
-              ],
+              ),
             ),
+
+            if (_reading || _fileName != null) ...[
+              const SizedBox(height: 10),
+              Center(
+                child: Text(
+                  _reading ? 'Reading file...' : 'Selected file: $_fileName',
+                  style: const TextStyle(fontSize: 12, color: CmColors.slate),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ],
             if (parsed != null) ...[
               const SizedBox(height: 12),
               Text(
@@ -877,8 +916,9 @@ class _SubjectDialogState extends State<_SubjectDialog> {
   late final _hours = TextEditingController(
     text: widget.initial?['hours'] == null ? '' : '${widget.initial?['hours']}',
   );
-  late final _group =
-      TextEditingController(text: _s(widget.initial?['group_name']));
+  late final _group = TextEditingController(
+    text: _s(widget.initial?['group_name']),
+  );
   late final _units = TextEditingController(
     text: widget.initial != null
         ? _unitsText(widget.initial?['units'])
@@ -1025,7 +1065,9 @@ class _SubjectDialogState extends State<_SubjectDialog> {
     }
 
     if (widget.electiveMode) {
-      body['group_name'] = _group.text.trim().isEmpty ? null : _group.text.trim();
+      body['group_name'] = _group.text.trim().isEmpty
+          ? null
+          : _group.text.trim();
     } else {
       if (widget.shs && _hours.text.trim().isNotEmpty) {
         body['hours'] = _hours.text.trim();
@@ -1055,21 +1097,22 @@ class _SubjectDialogState extends State<_SubjectDialog> {
               TextField(
                 controller: _find,
                 onChanged: _onFind,
-                decoration: _fieldDecoration(
-                  hint: 'Type a course code or name',
-                ).copyWith(
-                  prefixIcon: const Icon(Icons.search, size: 20),
-                  suffixIcon: _searching
-                      ? const Padding(
-                          padding: EdgeInsets.all(12),
-                          child: SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        )
-                      : null,
-                ),
+                decoration: _fieldDecoration(hint: 'Type a course code or name')
+                    .copyWith(
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      suffixIcon: _searching
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                            )
+                          : null,
+                    ),
               ),
             ),
             if (_results.isNotEmpty)
@@ -1111,8 +1154,10 @@ class _SubjectDialogState extends State<_SubjectDialog> {
               controller: _code,
               enabled: !_locked,
               textCapitalization: TextCapitalization.characters,
-              decoration:
-                  _fieldDecoration(hint: 'e.g. GEDC1002', errorText: _codeError),
+              decoration: _fieldDecoration(
+                hint: 'e.g. GEDC1002',
+                errorText: _codeError,
+              ),
             ),
           ),
           const SizedBox(height: 14),
@@ -2561,23 +2606,17 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
   Widget _programPicker() {
     final selectedId = _idOf(_program ?? {});
 
-    final shsPrograms =
-        _programs.where((p) => _isShs(p)).toList()
-          ..sort((a, b) => _s(a['code']).compareTo(_s(b['code'])));
+    final shsPrograms = _programs.where((p) => _isShs(p)).toList()
+      ..sort((a, b) => _s(a['code']).compareTo(_s(b['code'])));
 
-    final collegePrograms =
-        _programs.where((p) => !_isShs(p)).toList()
-          ..sort((a, b) => _s(a['code']).compareTo(_s(b['code'])));
+    final collegePrograms = _programs.where((p) => !_isShs(p)).toList()
+      ..sort((a, b) => _s(a['code']).compareTo(_s(b['code'])));
 
     const hoverColor = Color(0xFFF0EFF5);
     const selectedColor = Color(0xFFDDDBE1);
     const borderColor = Color(0xFFDFE3EA);
 
-    Widget groupHeading(
-      String title,
-      String subtitle,
-      IconData icon,
-    ) {
+    Widget groupHeading(String title, String subtitle, IconData icon) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(14, 16, 14, 10),
         child: Row(
@@ -2593,18 +2632,12 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            const Text(
-              '·',
-              style: TextStyle(color: CmColors.slate),
-            ),
+            const Text('·', style: TextStyle(color: CmColors.slate)),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 subtitle,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: CmColors.slate,
-                ),
+                style: const TextStyle(fontSize: 12, color: CmColors.slate),
               ),
             ),
           ],
@@ -2616,57 +2649,39 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
       final selected = _idOf(program) == selectedId;
 
       return Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 6,
-          vertical: 2,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         child: MenuItemButton(
           onPressed: () => _selectProgram(program),
           leadingIcon: const Icon(_programIcon, size: 19),
-          trailingIcon: selected
-              ? const Icon(Icons.check, size: 19)
-              : null,
+          trailingIcon: selected ? const Icon(Icons.check, size: 19) : null,
           style: ButtonStyle(
-            minimumSize: const WidgetStatePropertyAll(
-              Size(0, 46),
-            ),
+            minimumSize: const WidgetStatePropertyAll(Size(0, 46)),
             padding: const WidgetStatePropertyAll(
               EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             ),
             shape: WidgetStatePropertyAll(
-              RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(6),
-              ),
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
             ),
-            foregroundColor: const WidgetStatePropertyAll(
-              CmColors.navy,
-            ),
-            iconColor: const WidgetStatePropertyAll(
-              CmColors.navy,
-            ),
-            overlayColor: const WidgetStatePropertyAll(
-              Colors.transparent,
-            ),
-            backgroundColor: WidgetStateProperty.resolveWith<Color>(
-              (states) {
-                if (selected) return selectedColor;
+            foregroundColor: const WidgetStatePropertyAll(CmColors.navy),
+            iconColor: const WidgetStatePropertyAll(CmColors.navy),
+            overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+            backgroundColor: WidgetStateProperty.resolveWith<Color>((states) {
+              if (selected) return selectedColor;
 
-                if (states.contains(WidgetState.hovered) ||
-                    states.contains(WidgetState.focused) ||
-                    states.contains(WidgetState.pressed)) {
-                  return hoverColor;
-                }
+              if (states.contains(WidgetState.hovered) ||
+                  states.contains(WidgetState.focused) ||
+                  states.contains(WidgetState.pressed)) {
+                return hoverColor;
+              }
 
-                return Colors.transparent;
-              },
-            ),
+              return Colors.transparent;
+            }),
           ),
           child: Text(
             _s(program['code']),
             style: TextStyle(
               fontSize: 14,
-              fontWeight:
-                  selected ? FontWeight.w600 : FontWeight.w400,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
             ),
           ),
         ),
@@ -2702,18 +2717,14 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
 
                           return MenuAnchor(
                             style: MenuStyle(
-                              backgroundColor:
-                                  const WidgetStatePropertyAll(
+                              backgroundColor: const WidgetStatePropertyAll(
                                 Colors.white,
                               ),
-                              surfaceTintColor:
-                                  const WidgetStatePropertyAll(
+                              surfaceTintColor: const WidgetStatePropertyAll(
                                 Colors.transparent,
                               ),
-                              elevation:
-                                  const WidgetStatePropertyAll(3),
-                              padding:
-                                  const WidgetStatePropertyAll(
+                              elevation: const WidgetStatePropertyAll(3),
+                              padding: const WidgetStatePropertyAll(
                                 EdgeInsets.symmetric(vertical: 6),
                               ),
                               minimumSize: WidgetStatePropertyAll(
@@ -2722,8 +2733,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                               maximumSize: WidgetStatePropertyAll(
                                 Size(
                                   menuWidth,
-                                  MediaQuery.sizeOf(context).height *
-                                      0.55,
+                                  MediaQuery.sizeOf(context).height * 0.55,
                                 ),
                               ),
                               side: const WidgetStatePropertyAll(
@@ -2731,8 +2741,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                               ),
                               shape: WidgetStatePropertyAll(
                                 RoundedRectangleBorder(
-                                  borderRadius:
-                                      BorderRadius.circular(10),
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
                               ),
                             ),
@@ -2743,8 +2752,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                                   'Senior High School',
                                   _shsIcon,
                                 ),
-                                for (final p in shsPrograms)
-                                  programOption(p),
+                                for (final p in shsPrograms) programOption(p),
                               ],
                               if (shsPrograms.isNotEmpty &&
                                   collegePrograms.isNotEmpty)
@@ -2753,10 +2761,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                                     horizontal: 14,
                                     vertical: 10,
                                   ),
-                                  child: Divider(
-                                    height: 1,
-                                    color: borderColor,
-                                  ),
+                                  child: Divider(height: 1, color: borderColor),
                                 ),
                               if (collegePrograms.isNotEmpty) ...[
                                 groupHeading(
@@ -2768,11 +2773,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                                   programOption(p),
                               ],
                             ],
-                            builder: (
-                              context,
-                              controller,
-                              child,
-                            ) {
+                            builder: (context, controller, child) {
                               return OutlinedButton(
                                 onPressed: () {
                                   if (controller.isOpen) {
@@ -2782,46 +2783,42 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                                   }
                                 },
                                 style: ButtonStyle(
-                                  minimumSize:
-                                      const WidgetStatePropertyAll(
+                                  minimumSize: const WidgetStatePropertyAll(
                                     Size.fromHeight(56),
                                   ),
-                                  padding:
-                                      const WidgetStatePropertyAll(
+                                  padding: const WidgetStatePropertyAll(
                                     EdgeInsets.symmetric(
                                       horizontal: 14,
                                       vertical: 16,
                                     ),
                                   ),
                                   alignment: Alignment.centerLeft,
-                                  backgroundColor:
-                                      const WidgetStatePropertyAll(
+                                  backgroundColor: const WidgetStatePropertyAll(
                                     Colors.white,
                                   ),
-                                  foregroundColor:
-                                      const WidgetStatePropertyAll(
+                                  foregroundColor: const WidgetStatePropertyAll(
                                     CmColors.navy,
                                   ),
                                   overlayColor:
-                                      WidgetStateProperty.resolveWith<
-                                          Color>((states) {
-                                    if (states.contains(
-                                          WidgetState.hovered,
-                                        ) ||
-                                        states.contains(
-                                          WidgetState.focused,
-                                        )) {
-                                      return hoverColor;
-                                    }
-                                    return Colors.transparent;
-                                  }),
+                                      WidgetStateProperty.resolveWith<Color>((
+                                        states,
+                                      ) {
+                                        if (states.contains(
+                                              WidgetState.hovered,
+                                            ) ||
+                                            states.contains(
+                                              WidgetState.focused,
+                                            )) {
+                                          return hoverColor;
+                                        }
+                                        return Colors.transparent;
+                                      }),
                                   side: const WidgetStatePropertyAll(
                                     BorderSide(color: borderColor),
                                   ),
                                   shape: WidgetStatePropertyAll(
                                     RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(10),
+                                      borderRadius: BorderRadius.circular(10),
                                     ),
                                   ),
                                 ),
@@ -2838,12 +2835,10 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                                         _program == null
                                             ? 'Select program'
                                             : _s(_program!['code']),
-                                        overflow:
-                                            TextOverflow.ellipsis,
+                                        overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(
                                           fontSize: 15,
-                                          fontWeight:
-                                              FontWeight.w500,
+                                          fontWeight: FontWeight.w500,
                                         ),
                                       ),
                                     ),
@@ -3063,12 +3058,12 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
               ],
               onChanged: (v) => setState(() => _statusFilter = v ?? 'All'),
             ),
-              FilledButton.icon(
-                style: _primaryButtonStyle,
-                onPressed: _busy ? null : () => _newCurriculum(),
-                icon: const Icon(Icons.add, size: 20),
-                label: const Text('New Curriculum'),
-              ),
+            FilledButton.icon(
+              style: _primaryButtonStyle,
+              onPressed: _busy ? null : () => _newCurriculum(),
+              icon: const Icon(Icons.add, size: 20),
+              label: const Text('New Curriculum'),
+            ),
           ],
         ),
         const SizedBox(height: 6),
@@ -3083,7 +3078,8 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
           _emptyCard(
             icon: Icons.library_books_outlined,
             title: 'No curriculum yet',
-            message: 'Create a curriculum version for ${_program?['code']} by '
+            message:
+                'Create a curriculum version for ${_program?['code']} by '
                 'copying an older one or uploading a file.',
           )
         else if (filtered.isEmpty)
@@ -3134,17 +3130,18 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                               Icons.edit_note,
                               () => _openCurriculum(c),
                             ),
-                            _rowAction(
-                              'Copy',
-                              Icons.copy_outlined,
-                              () => _newCurriculum(copyId: _idOf(c)),
-                            ),
+                          _rowAction(
+                            'Copy',
+                            Icons.copy_outlined,
+                            () => _newCurriculum(copyId: _idOf(c)),
+                          ),
                           if (c['status'] == 'draft') ...[
-                            _rowAction(
-                              'Rename',
-                              Icons.edit_outlined,
-                              () => _editCurriculum(c),
-                            ),
+                            if (!_shs)
+                              _rowAction(
+                                'Rename',
+                                Icons.edit_outlined,
+                                () => _editCurriculum(c),
+                              ),
                             _rowAction(
                               'Publish',
                               Icons.check_circle_outline,
@@ -3266,11 +3263,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
             }
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                controls,
-                const SizedBox(height: 20),
-                heading,
-              ],
+              children: [controls, const SizedBox(height: 20), heading],
             );
           },
         ),
@@ -3303,7 +3296,10 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                 borderRadius: BorderRadius.circular(6.9),
               ),
               labelPadding: const EdgeInsets.symmetric(horizontal: 4.6),
-              padding: const EdgeInsets.symmetric(horizontal: 3.45, vertical: 2.4),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 3.45,
+                vertical: 2.4,
+              ),
               labelStyle: TextStyle(
                 fontSize: 12.65,
                 fontWeight: FontWeight.w600,
@@ -3339,12 +3335,12 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
             : null,
         isExpanded: true,
         iconSize: 27.6,
-              decoration: _fieldDecoration().copyWith(
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16.1,
-                  vertical: 16.1,
-                ),
-              ),
+        decoration: _fieldDecoration().copyWith(
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16.1,
+            vertical: 16.1,
+          ),
+        ),
         style: const TextStyle(fontSize: 13.8, color: CmColors.navy),
         items: [
           for (final c in _curricula)
@@ -3371,12 +3367,12 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
         initialValue: _schoolYear,
         isExpanded: true,
         iconSize: 27.6,
-              decoration: _fieldDecoration().copyWith(
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16.1,
-                  vertical: 16.1,
-                ),
-              ),
+        decoration: _fieldDecoration().copyWith(
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16.1,
+            vertical: 16.1,
+          ),
+        ),
         style: const TextStyle(fontSize: 13.8, color: CmColors.navy),
         items: [
           for (final year in _schoolYearOptions())
@@ -3460,7 +3456,9 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
       children: [
         LayoutBuilder(
           builder: (context, constraints) {
-            final controls = _shsContextCard(fillWidth: constraints.maxWidth < 648);
+            final controls = _shsContextCard(
+              fillWidth: constraints.maxWidth < 648,
+            );
             final heading = Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -3487,18 +3485,18 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                   ),
                   decoration: _fieldDecoration(hint: 'Search course name')
                       .copyWith(
-                    prefixIcon: const Icon(Icons.search, size: 20),
-                    suffixIcon: _subjectQuery.isEmpty
-                        ? null
-                        : IconButton(
-                            tooltip: 'Clear',
-                            icon: const Icon(Icons.close, size: 18),
-                            onPressed: () {
-                              _subjectSearch.clear();
-                              setState(() => _subjectQuery = '');
-                            },
-                          ),
-                  ),
+                        prefixIcon: const Icon(Icons.search, size: 20),
+                        suffixIcon: _subjectQuery.isEmpty
+                            ? null
+                            : IconButton(
+                                tooltip: 'Clear',
+                                icon: const Icon(Icons.close, size: 18),
+                                onPressed: () {
+                                  _subjectSearch.clear();
+                                  setState(() => _subjectQuery = '');
+                                },
+                              ),
+                      ),
                 ),
               ],
             );
@@ -3518,11 +3516,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
             }
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                controls,
-                const SizedBox(height: 20),
-                heading,
-              ],
+              children: [controls, const SizedBox(height: 20), heading],
             );
           },
         ),
@@ -3581,10 +3575,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
           label: fillWidth
               ? SizedBox(
                   width: double.infinity,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(text),
-                  ),
+                  child: FittedBox(fit: BoxFit.scaleDown, child: Text(text)),
                 )
               : Text(text),
           selected: current == value,
@@ -3959,122 +3950,128 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
     final q = _subjectQuery;
     final visible = _subjects.where((s) {
       if (q.isEmpty) return true;
+      final sel = !editor && s['selection'] is Map
+          ? s['selection'] as Map
+          : null;
       return _s(s['code']).toLowerCase().contains(q) ||
-          _s(s['name']).toLowerCase().contains(q);
+          _s(s['name']).toLowerCase().contains(q) ||
+          (sel != null &&
+              (_s(sel['code']).toLowerCase().contains(q) ||
+                  _s(sel['name']).toLowerCase().contains(q)));
     }).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (showHeader) ...[
-        Wrap(
-          spacing: 12,
-          runSpacing: 10,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Text(
-              '${_yearLabel(_shs, _year)} Subjects  ·  ${_termLabel(_shs, _term)}',
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: CmColors.navy,
-              ),
-            ),
-            if (editable) ...[
-              FilledButton.icon(
-                style: _primaryButtonStyle,
-                onPressed: _busy ? null : _addSubject,
-                icon: const Icon(Icons.add, size: 20),
-                label: const Text('Add Subject'),
-              ),
-              OutlinedButton.icon(
-                style: _dangerOutlineStyle,
-                onPressed: _busy || _subjects.isEmpty ? null : _deleteTerm,
-                icon: const Icon(Icons.delete_sweep_outlined, size: 20),
-                label: const Text('Delete Term Subjects'),
-              ),
-            ],
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '${_program?['code']} · '
-          '${_curriculum == null ? '' : 'Curriculum ${_curriculum!['code']} · '}'
-          '${_yearLabel(_shs, _year)} · ${_termLabel(_shs, _term)}',
-          style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
-        ),
-        if (!editor && _electives.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              'Tap an elective subject to finalize which elective is taken for $_schoolYear.',
-              style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
-            ),
-          ),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: 360,
-          child: TextField(
-            controller: _subjectSearch,
-            onChanged: (v) =>
-                setState(() => _subjectQuery = v.trim().toLowerCase()),
-            decoration:
-                _fieldDecoration(
-                  hint: _shs
-                      ? 'Search course name'
-                      : 'Search course code or name',
-                ).copyWith(
-                  prefixIcon: const Icon(Icons.search, size: 20),
-                  suffixIcon: _subjectQuery.isEmpty
-                      ? null
-                      : IconButton(
-                          tooltip: 'Clear',
-                          icon: const Icon(Icons.close, size: 18),
-                          onPressed: () {
-                            _subjectSearch.clear();
-                            setState(() => _subjectQuery = '');
-                          },
-                        ),
+          Wrap(
+            spacing: 12,
+            runSpacing: 10,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                '${_yearLabel(_shs, _year)} Subjects  ·  ${_termLabel(_shs, _term)}',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: CmColors.navy,
                 ),
+              ),
+              if (editable) ...[
+                FilledButton.icon(
+                  style: _primaryButtonStyle,
+                  onPressed: _busy ? null : _addSubject,
+                  icon: const Icon(Icons.add, size: 20),
+                  label: const Text('Add Subject'),
+                ),
+                OutlinedButton.icon(
+                  style: _dangerOutlineStyle,
+                  onPressed: _busy || _subjects.isEmpty ? null : _deleteTerm,
+                  icon: const Icon(Icons.delete_sweep_outlined, size: 20),
+                  label: const Text('Delete Term Subjects'),
+                ),
+              ],
+            ],
           ),
-        ),
-        const SizedBox(height: 12),
+          const SizedBox(height: 4),
+          Text(
+            '${_program?['code']} · '
+            '${_curriculum == null ? '' : 'Curriculum ${_curriculum!['code']} · '}'
+            '${_yearLabel(_shs, _year)} · ${_termLabel(_shs, _term)}',
+            style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
+          ),
+          if (!editor && _electives.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Tap an elective subject to finalize which elective is taken for $_schoolYear.',
+                style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
+              ),
+            ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: 360,
+            child: TextField(
+              controller: _subjectSearch,
+              onChanged: (v) =>
+                  setState(() => _subjectQuery = v.trim().toLowerCase()),
+              decoration:
+                  _fieldDecoration(
+                    hint: _shs
+                        ? 'Search course name'
+                        : 'Search course code or name',
+                  ).copyWith(
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    suffixIcon: _subjectQuery.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: 'Clear',
+                            icon: const Icon(Icons.close, size: 18),
+                            onPressed: () {
+                              _subjectSearch.clear();
+                              setState(() => _subjectQuery = '');
+                            },
+                          ),
+                  ),
+            ),
+          ),
+          const SizedBox(height: 12),
         ],
         if (!headerOnly) ...[
-        if (_loadingSubjects)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 32),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_subjectsError != null)
-          _errorBox(_subjectsError!, _loadContext)
-        else if (_curriculum == null)
-          _emptyCard(
-            icon: Icons.library_books_outlined,
-            title: 'No curriculum selected',
-          )
-        else if (_subjects.isEmpty)
-          _emptyCard(
-            icon: Icons.inbox_outlined,
-            title: 'No subjects in this term',
-            message: editable
-                ? 'Use Add Subject to place a subject here.'
-                : 'This term has no subjects.',
-          )
-        else if (visible.isEmpty)
-          _emptyCard(
-            icon: Icons.search_off,
-            title: 'No subjects match your search',
-          )
-        else
-          _table(
-            headers: [
-              if (!_shs) 'Course Code',
-              'Course Name',
-              if (editable) 'Actions',
-            ],
-            rows: [for (final s in visible) _subjectRow(s, editor, editable)],
-          ),
+          if (_loadingSubjects)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 32),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_subjectsError != null)
+            _errorBox(_subjectsError!, _loadContext)
+          else if (_curriculum == null)
+            _emptyCard(
+              icon: Icons.library_books_outlined,
+              title: 'No curriculum selected',
+            )
+          else if (_subjects.isEmpty)
+            _emptyCard(
+              icon: Icons.inbox_outlined,
+              title: 'No subjects in this term',
+              message: editable
+                  ? 'Use Add Subject to place a subject here.'
+                  : 'This term has no subjects.',
+            )
+          else if (visible.isEmpty)
+            _emptyCard(
+              icon: Icons.search_off,
+              title: 'No subjects match your search',
+            )
+          else
+            _table(
+              headers: [
+                if (!_shs) 'Course Code',
+                'Course Name',
+                if (editable) 'Actions',
+              ],
+              rows: [for (final s in visible) _subjectRow(s, editor, editable)],
+            ),
         ],
       ],
     );
@@ -4083,17 +4080,28 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
   DataRow _subjectRow(_M s, bool editor, bool editable) {
     final slot = s['is_elective_slot'] == true;
     final selection = s['selection'] is Map ? s['selection'] as Map : null;
+
+    // Once an elective is finalized, the row looks like any other subject:
+    // the elective's code and name, with the slot it fills (for example
+    // "IT Elective 2") as small text underneath.
+    final finalized = !editor && slot && selection != null;
     final canChoose = !editor && slot && _electives.isNotEmpty;
-    final code = _s(s['code']);
     final tap = canChoose ? () => _chooseElective(s) : null;
 
-    final detail = <String>[];
-    if (_shs) {
+    final code = finalized ? _s(selection['code']) : _s(s['code']);
+    final name = finalized ? _s(selection['name']) : _s(s['name']);
+
+    String? subtext;
+    if (finalized) {
+      subtext = _s(s['name']);
+    } else if (_shs) {
+      final parts = <String>[];
       final cat = _s(s['category']);
       if (cat.isNotEmpty) {
-        detail.add('${cat[0].toUpperCase()}${cat.substring(1)}');
+        parts.add('${cat[0].toUpperCase()}${cat.substring(1)}');
       }
-      if (s['hours'] != null) detail.add('${s['hours']} hrs');
+      if (s['hours'] != null) parts.add('${s['hours']} hrs');
+      if (parts.isNotEmpty) subtext = parts.join(' · ');
     }
 
     return DataRow(
@@ -4118,16 +4126,16 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                   children: [
                     Flexible(
                       child: Text(
-                        _s(s['name']),
+                        name,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    if (slot) ...[
+                    if (slot && !finalized) ...[
                       const SizedBox(width: 8),
                       _badge('Elective', _draftBlue),
                     ],
-                    if (canChoose) ...[
+                    if (canChoose && !finalized) ...[
                       const SizedBox(width: 4),
                       const Icon(
                         Icons.arrow_drop_down,
@@ -4137,23 +4145,11 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                     ],
                   ],
                 ),
-                if (selection != null)
+                if (subtext != null && subtext.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(
-                      'Finalized for $_schoolYear: ${selection['code']}  ${selection['name']}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: _activeGreen,
-                      ),
-                    ),
-                  )
-                else if (detail.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      detail.join(' · '),
+                      subtext,
                       style: const TextStyle(
                         fontSize: 12,
                         color: CmColors.slate,

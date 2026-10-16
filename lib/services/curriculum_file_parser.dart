@@ -54,13 +54,17 @@ class CurriculumFileParser {
   static const String fileNameHelp =
       'Name the file Program_Curriculum, for example BSIT_2601.xlsx';
 
-  static ParsedCurriculumFile parse(Uint8List bytes, String fileName) {
+  static ParsedCurriculumFile parse(
+    Uint8List bytes,
+    String fileName, {
+    bool shs = false,
+  }) {
     final lower = fileName.toLowerCase();
     final named = _fromFileName(fileName);
 
     final ParsedCurriculumFile result;
     if (lower.endsWith('.pdf')) {
-      result = _parsePdf(bytes);
+      result = shs ? _parseShsPdf(bytes) : _parsePdf(bytes);
     } else if (lower.endsWith('.xlsx')) {
       result = _parseGrid(_readXlsx(bytes));
     } else if (lower.endsWith('.csv')) {
@@ -92,7 +96,6 @@ class CurriculumFileParser {
 
     return (program: null, curriculum: null);
   }
-
 }
 
 class _Builder {
@@ -112,16 +115,22 @@ class _Builder {
     r'\b(first|second|third|fourth|1st|2nd|3rd|4th)\s+year\b',
     caseSensitive: false,
   );
-  static final RegExp _gradeRe =
-      RegExp(r'\bgrade\s*(11|12)\b', caseSensitive: false);
-  static final RegExp _termAfterYear =
-      RegExp(r'\b(first|second|1st|2nd|summer)\b', caseSensitive: false);
+  static final RegExp _gradeRe = RegExp(
+    r'\bgrade\s*(11|12)\b',
+    caseSensitive: false,
+  );
+  static final RegExp _termAfterYear = RegExp(
+    r'\b(first|second|1st|2nd|summer)\b',
+    caseSensitive: false,
+  );
   static final RegExp _termRe = RegExp(
     r'\b(first|second|1st|2nd)\s+(semester|sem|term)\b|\bsummer\b',
     caseSensitive: false,
   );
-  static final RegExp _electivesRe =
-      RegExp(r'list\s+of\s+electives', caseSensitive: false);
+  static final RegExp _electivesRe = RegExp(
+    r'list\s+of\s+electives',
+    caseSensitive: false,
+  );
   static final RegExp _ojtLike = RegExp(
     r'^OJTC|practicum|internship|on[- ]the[- ]job|\bOJT\b|work immersion',
     caseSensitive: false,
@@ -262,7 +271,7 @@ class _Builder {
       'name': n,
       if (c.isNotEmpty) 'code': c,
       if (u.isNotEmpty) 'units': u,
-      if (category != null) 'category': category,
+      'category': ?category,
       if (h.isNotEmpty) 'hours': h,
       if (RegExp(r'\belective\b', caseSensitive: false).hasMatch(n))
         'is_elective_slot': true,
@@ -280,7 +289,8 @@ ParsedCurriculumFile _parseGrid(List<List<String>> grid) {
   return _parseOutline(grid);
 }
 
-String _n(String s) => s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
+String _n(String s) =>
+    s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
 
 final RegExp _codeCell = RegExp(r'^[A-Za-z]{2,6}\s?-?\d{3,5}[A-Za-z]?$');
 final RegExp _numberCell = RegExp(r'^\d+(\.\d+)?$');
@@ -345,12 +355,7 @@ ParsedCurriculumFile _parseOutline(List<List<String>> grid) {
           break;
         }
       }
-      b.addSubject(
-        code: first,
-        name: name ?? '',
-        units: units,
-        where: where,
-      );
+      b.addSubject(code: first, name: name ?? '', units: units, where: where);
       continue;
     }
 
@@ -399,14 +404,22 @@ ParsedCurriculumFile _parseOutline(List<List<String>> grid) {
       }
       // blank course code: the name sits in a later column
       if (firstIdx >= 1) {
-        b.addSubject(name: first, units: _firstNumber(cells, firstIdx), where: where);
+        b.addSubject(
+          name: first,
+          units: _firstNumber(cells, firstIdx),
+          where: where,
+        );
       }
       continue;
     }
 
     // blank course code (for example an elective slot that has no code yet)
     if (firstIdx >= 1 && b.year != null) {
-      b.addSubject(name: first, units: _firstNumber(cells, firstIdx), where: where);
+      b.addSubject(
+        name: first,
+        units: _firstNumber(cells, firstIdx),
+        where: where,
+      );
     }
   }
 
@@ -435,7 +448,10 @@ String? _firstNumber(List<String> cells, int from) {
     for (var c = 0; c < grid[r].length; c++) {
       final h = _n(grid[r][c]);
       if (h.isEmpty) continue;
-      if (h == 'year level' || h == 'year' || h == 'grade' || h == 'grade level') {
+      if (h == 'year level' ||
+          h == 'year' ||
+          h == 'grade' ||
+          h == 'grade level') {
         found['year'] = c;
       } else if (h == 'semester' || h == 'term' || h == 'sem') {
         found['term'] = c;
@@ -496,8 +512,10 @@ ParsedCurriculumFile _parseFlat(
 
     final yearRaw = cell(row, 'year');
     final termRaw = cell(row, 'term');
-    final grade = RegExp(r'grade\s*(11|12)', caseSensitive: false)
-        .firstMatch(yearRaw);
+    final grade = RegExp(
+      r'grade\s*(11|12)',
+      caseSensitive: false,
+    ).firstMatch(yearRaw);
     final year = grade != null
         ? (grade.group(1) == '11' ? 1 : 2)
         : ordinal(yearRaw, 4);
@@ -757,7 +775,8 @@ double _median(List<double> v) {
 }
 
 List<_Line> _clusterLines(List<_Word> words) {
-  final sorted = [...words]..sort((a, b) {
+  final sorted = [...words]
+    ..sort((a, b) {
       final c = a.y.compareTo(b.y);
       return c != 0 ? c : a.x0.compareTo(b.x0);
     });
@@ -870,11 +889,11 @@ ParsedCurriculumFile _parsePdf(Uint8List bytes) {
   }
 
   _Block snapshot() => _Block(
-        year: b.year,
-        term: b.term,
-        skip: b.skip,
-        electives: b.inElectives,
-      );
+    year: b.year,
+    term: b.term,
+    skip: b.skip,
+    electives: b.inElectives,
+  );
 
   final pageNumbers = pages.keys.toList()..sort();
   for (final pageIndex in pageNumbers) {
@@ -909,7 +928,8 @@ ParsedCurriculumFile _parsePdf(Uint8List bytes) {
       final text = ws.map((w) => w.text).join(' ');
 
       if (curriculumCode == null) {
-        final mv = RegExp(r'\b([A-Za-z]{2,8})-(\d\d)-(\d\d)\b').firstMatch(text);
+        final mv = RegExp(r'\b([A-Za-z]{2,8})-(\d\d)-(\d\d)\b')
+            .firstMatch(text);
         if (mv != null) {
           programCode ??= mv.group(1)!.toUpperCase();
           curriculumCode = '${mv.group(2)}${mv.group(3)}';
@@ -917,8 +937,10 @@ ParsedCurriculumFile _parsePdf(Uint8List bytes) {
       }
 
       // year + term heading, or LIST OF ELECTIVES
-      final isElectivesHeading =
-          RegExp(r'list\s+of\s+electives', caseSensitive: false).hasMatch(text);
+      final isElectivesHeading = RegExp(
+        r'list\s+of\s+electives',
+        caseSensitive: false,
+      ).hasMatch(text);
       final isTermHeading = RegExp(
         r'(FIRST|SECOND|THIRD|FOURTH)\s+YEAR\s*-?\s*(FIRST|SECOND|SUMMER)',
         caseSensitive: false,
@@ -955,7 +977,8 @@ ParsedCurriculumFile _parsePdf(Uint8List bytes) {
           if (w.x0 >= bound && w.x0 < preBound && _digits12.hasMatch(w.text)) w,
       ];
 
-      final looksLikeRow = codeW != null ||
+      final looksLikeRow =
+          codeW != null ||
           (unitWs.isNotEmpty &&
               nameWs.isNotEmpty &&
               nameX != null &&
@@ -1000,5 +1023,182 @@ ParsedCurriculumFile _parsePdf(Uint8List bytes) {
     skippedOjt: b.skippedOjt,
     programCode: programCode,
     curriculumCode: curriculumCode,
+  );
+}
+
+// SHS PDF parser — separate from College
+ParsedCurriculumFile _parseShsPdf(Uint8List bytes) {
+  final sf.PdfDocument document;
+  try {
+    document = sf.PdfDocument(inputBytes: bytes);
+  } catch (_) {
+    throw const FormatException('Could not open the SHS PDF file.');
+  }
+
+  final lines = <String>[];
+  try {
+    final extractor = sf.PdfTextExtractor(document);
+    for (final line in extractor.extractTextLines()) {
+      final words = [...line.wordCollection]
+        ..sort((a, b) => a.bounds.left.compareTo(b.bounds.left));
+      final value = words
+          .map((w) => w.text.trim())
+          .where((w) => w.isNotEmpty)
+          .join(' ')
+          .trim();
+      if (value.isNotEmpty) lines.add(value);
+    }
+  } finally {
+    document.dispose();
+  }
+
+  if (lines.isEmpty) {
+    throw const FormatException(
+      'No readable text in the SHS PDF. Scanned PDFs require OCR.',
+    );
+  }
+
+  final rows = <Map<String, dynamic>>[];
+  final problems = <String>[];
+
+  final heading = RegExp(
+    r'GRADE\s*(11|12)\s*[-–—]?\s*(FIRST|SECOND|1ST|2ND)\s*TERM',
+    caseSensitive: false,
+  );
+  final categoryHeading = RegExp(
+    r'^(CORE|APPLIED|SPECIALIZED)\s*SUBJECTS\s*:?$',
+    caseSensitive: false,
+  );
+  final subjectHours = RegExp(r'^(.+?)\s+(\d{1,3})$');
+  final total = RegExp(r'^TOTAL\s*(\d{1,4})?$', caseSensitive: false);
+
+  int? year;
+  int? term;
+  String? category;
+  String? pending;
+  int? expectedTotal;
+  int actualTotal = 0;
+  int termRows = 0;
+  final found = <String>{};
+
+  void finishTerm() {
+    if (year == null || term == null) return;
+
+    if (termRows == 0) {
+      problems.add('Grade ${year + 10}, Term $term: no subjects found.');
+    }
+
+    if (expectedTotal != null && actualTotal != expectedTotal) {
+      problems.add(
+        'Grade ${year + 10}, Term $term: '
+        'expected $expectedTotal hours, extracted $actualTotal.',
+      );
+    }
+
+    if (pending != null) {
+      problems.add(
+        'Grade ${year + 10}, Term $term: '
+        'incomplete subject "$pending".',
+      );
+      pending = null;
+    }
+  }
+
+  for (final raw in lines) {
+    final text = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final h = heading.firstMatch(text);
+
+    if (h != null) {
+      finishTerm();
+
+      year = h.group(1) == '11' ? 1 : 2;
+      term = {
+        'FIRST': 1,
+        '1ST': 1,
+        'SECOND': 2,
+        '2ND': 2,
+      }[h.group(2)!.toUpperCase()];
+
+      category = null;
+      expectedTotal = null;
+      actualTotal = 0;
+      termRows = 0;
+      found.add('$year-$term');
+      continue;
+    }
+
+    if (year == null || term == null) continue;
+
+    final cat = categoryHeading.firstMatch(text);
+    if (cat != null) {
+      category = cat.group(1)!.toLowerCase();
+      continue;
+    }
+
+    final t = total.firstMatch(text);
+    if (t != null) {
+      expectedTotal = int.tryParse(t.group(1) ?? '');
+      continue;
+    }
+
+    if (RegExp(
+      r'^REQUIRED DURATION|^GRADE\s*\d+|^STI\b',
+      caseSensitive: false,
+    ).hasMatch(text)) {
+      continue;
+    }
+
+    if (category == null) continue;
+
+    final match = subjectHours.firstMatch(text);
+
+    if (match != null) {
+      final name = [
+        if (pending != null) pending!,
+        match.group(1)!,
+      ].join(' ').trim();
+
+      pending = null;
+      final hours = int.parse(match.group(2)!);
+
+      if (hours <= 0) {
+        problems.add('Invalid duration for "$name".');
+        continue;
+      }
+
+      rows.add({
+        'year_level': year,
+        'term': term,
+        'name': name,
+        'category': category,
+        'hours': hours.toString(),
+      });
+
+      actualTotal += hours;
+      termRows++;
+    } else if (!RegExp(
+      r'^TOTAL\b|^SUBJECTS\b',
+      caseSensitive: false,
+    ).hasMatch(text)) {
+      pending = [if (pending != null) pending!, text].join(' ');
+    }
+  }
+
+  finishTerm();
+
+  for (final key in ['1-1', '1-2', '2-1', '2-2']) {
+    if (!found.contains(key)) {
+      problems.add(
+        'Missing Grade ${key.startsWith('1') ? 11 : 12}, '
+        'Term ${key.endsWith('1') ? 1 : 2}.',
+      );
+    }
+  }
+
+  return ParsedCurriculumFile(
+    rows: rows,
+    electives: [],
+    problems: problems,
+    skippedOjt: 0,
   );
 }

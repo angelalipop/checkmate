@@ -7,14 +7,15 @@ import 'package:archive/archive.dart';
 ///
 /// Layout (one sheet):
 ///   Program / Curriculum
-///   <Year Level>
-///     <Semester>
+///   `Year Level`
+///     `Semester`
 ///       Course Code | Course Name | Units
 ///       ...
 ///   LIST OF ELECTIVES
-///     <classification name>
+///     `classification name`
 ///       Course Code | Course Name | Units
 ///       ...
+
 class CurriculumTemplate {
   /// Sample file name: Program_Curriculum (Strand_Curriculum for SHS).
   static String fileNameFor({required bool shs}) =>
@@ -28,9 +29,13 @@ class CurriculumTemplate {
     _Row(['Program', 'BSIT'], bold: true),
     _Row(['Curriculum', '2601'], bold: true),
     _Row(['Name this file Program_Curriculum (for example BSIT_2601.xlsx).']),
-    _Row(['Repeat the year and semester blocks for every year level of the program.']),
+    _Row([
+      'Repeat the year and semester blocks for every year level of the program.',
+    ]),
     _Row(['Course Code and Course Name are required. Units is optional.']),
-    _Row(['Leave Course Code blank only for an elective slot that has no code yet.']),
+    _Row([
+      'Leave Course Code blank only for an elective slot that has no code yet.',
+    ]),
     _Row(['Do not add OJT or practicum subjects.']),
     _Row([]),
     _Row(['1st Year'], bold: true),
@@ -67,13 +72,14 @@ class CurriculumTemplate {
     _Row(['INTE1048', 'Introduction to Computer Animation', '3']),
   ];
 
-
   static final List<_Row> _shsRows = [
     _Row(['Program', 'STEM'], bold: true),
     _Row(['Curriculum', '2601'], bold: true),
     _Row(['Name this file Strand_Curriculum (for example STEM_2601.xlsx).']),
     _Row(['Repeat the Grade and Sem blocks for both grade levels.']),
-    _Row(['Each subject needs its group (Core, Applied or Specialized) and its hours.']),
+    _Row([
+      'Each subject needs its group (Core, Applied or Specialized) and its hours.',
+    ]),
     _Row([]),
     _Row(['Grade 11'], bold: true),
     _Row(['1st Sem'], bold: true),
@@ -108,7 +114,9 @@ class CurriculumTemplate {
   static String _sheetXml(List<_Row> rows, List<int> widths) {
     final b = StringBuffer()
       ..write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
-      ..write('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">')
+      ..write(
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+      )
       ..write('<cols>')
       ..write('<col min="1" max="1" width="${widths[0]}" customWidth="1"/>')
       ..write('<col min="2" max="2" width="${widths[1]}" customWidth="1"/>')
@@ -124,7 +132,8 @@ class CurriculumTemplate {
         if (v.isEmpty) continue;
         final ref = '${_col(c)}${r + 1}';
         final style = row.bold ? ' s="1"' : '';
-        final isNumber = c == 2 && RegExp(r'^\d+(\.\d+)?$').hasMatch(v) && !row.bold;
+        final isNumber =
+            c == 2 && RegExp(r'^\d+(\.\d+)?$').hasMatch(v) && !row.bold;
         if (isNumber) {
           b.write('<c r="$ref"$style><v>$v</v></c>');
         } else {
@@ -202,8 +211,8 @@ class CurriculumTemplate {
           : _sheetXml(_collegeRows, const [18, 62, 9]),
     );
 
-    final List<int>? encoded = ZipEncoder().encode(archive);
-    return Uint8List.fromList(encoded ?? const <int>[]);
+    final List<int> encoded = ZipEncoder().encode(archive);
+    return Uint8List.fromList(encoded);
   }
 }
 

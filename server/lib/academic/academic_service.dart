@@ -15,9 +15,13 @@ class AcademicService {
   // helpers
   // ------------------------------------------------------------------
 
-  static final RegExp _programCode = RegExp(r'^[A-Za-z0-9][A-Za-z0-9 _-]{1,19}$');
+  static final RegExp _programCode = RegExp(
+    r'^[A-Za-z0-9][A-Za-z0-9 _-]{1,19}$',
+  );
   static final RegExp _curriculumCode = RegExp(r'^[0-9A-Za-z-]{2,20}$');
-  static final RegExp _courseCode = RegExp(r'^[A-Za-z0-9][A-Za-z0-9 ._/-]{1,29}$');
+  static final RegExp _courseCode = RegExp(
+    r'^[A-Za-z0-9][A-Za-z0-9 ._/-]{1,29}$',
+  );
   static final RegExp _schoolYear = RegExp(r'^[0-9]{4}-[0-9]{4}$');
 
   /// OJT / practicum / internship / work immersion are not added.
@@ -26,7 +30,7 @@ class AcademicService {
     caseSensitive: false,
   );
 
-  static int _int(Object? v) => (v as num).toInt();
+  static int _int(Object? v) => (v! as num).toInt();
 
   static String _text(Object? v) => v?.toString().trim() ?? '';
 
@@ -136,14 +140,14 @@ class AcademicService {
   // ------------------------------------------------------------------
 
   static Map<String, dynamic> _programJson(ResultRow r) => {
-        'id': _int(r[0]),
-        'code': r[1],
-        'name': r[2],
-        'level': r[3],
-        'department': r[4],
-        'curriculum_count': _int(r[5]),
-        'published_curriculum': r[6],
-      };
+    'id': _int(r[0]),
+    'code': r[1],
+    'name': r[2],
+    'level': r[3],
+    'department': r[4],
+    'curriculum_count': _int(r[5]),
+    'published_curriculum': r[6],
+  };
 
   static const _programSelect = '''
     SELECT p.id, p.code, p.name, p.level, p.department,
@@ -156,6 +160,7 @@ class AcademicService {
     FROM academic_programs p
   ''';
 
+  /// Lists active academic programs.
   static Future<List<Map<String, dynamic>>> listPrograms({String? q}) async {
     final term = _textOrNull(q);
     final result = await Database.pool.execute(
@@ -185,7 +190,7 @@ class AcademicService {
   }
 
   static ({String code, String name, String level, String? department})
-      _programInput(Map<String, dynamic> body) {
+  _programInput(Map<String, dynamic> body) {
     final code = _text(body['code']).toUpperCase();
     final name = _text(body['name']);
     final level = _text(body['level']).toLowerCase();
@@ -230,6 +235,7 @@ class AcademicService {
     }
   }
 
+  /// Creates an academic program.
   static Future<Map<String, dynamic>> createProgram(
     Map<String, dynamic> body,
   ) async {
@@ -255,6 +261,7 @@ class AcademicService {
     });
   }
 
+  /// Updates an academic program.
   static Future<Map<String, dynamic>> updateProgram(
     int id,
     Map<String, dynamic> body,
@@ -292,13 +299,14 @@ class AcademicService {
     });
   }
 
+  /// Archives an academic program.
   static Future<void> deleteProgram(int id, int? actor) async {
     await _tx((tx) async {
       final program = await _programById(tx, id);
 
       if (_int(program['curriculum_count']) > 0) {
         throw AcademicException(
-          'Delete this program\'s curricula first, then delete the program.',
+          "Delete this program's curricula first, then delete the program.",
           statusCode: 409,
         );
       }
@@ -312,13 +320,14 @@ class AcademicService {
   // ------------------------------------------------------------------
 
   static Map<String, dynamic> _catalogJson(ResultRow r) => {
-        'id': _int(r[0]),
-        'code': r[1],
-        'name': r[2],
-        'units': r[3],
-        'hours': r[4],
-      };
+    'id': _int(r[0]),
+    'code': r[1],
+    'name': r[2],
+    'units': r[3],
+    'hours': r[4],
+  };
 
+  /// Searches the subject catalog.
   static Future<List<Map<String, dynamic>>> searchCatalog(String? q) async {
     final term = _textOrNull(q);
     final result = await Database.pool.execute(
@@ -367,7 +376,8 @@ class AcademicService {
       final foundBlob = '${found.first[1] ?? ''} ${found.first[2]}';
       if (_ojtLike.hasMatch(foundBlob)) {
         throw AcademicException(
-          'OJT, practicum, internship and work immersion subjects are not added.',
+          'OJT, practicum, internship and work immersion '
+          'subjects are not added.',
         );
       }
       return given;
@@ -420,7 +430,7 @@ class AcademicService {
           );
 
     if (existing.isNotEmpty) {
-      final existingName = existing.first[1] as String;
+      final existingName = existing.first[1]! as String;
       if (code != null && existingName.toLowerCase() != name.toLowerCase()) {
         throw AcademicException(
           'Course code $code already exists as "$existingName". '
@@ -447,16 +457,16 @@ class AcademicService {
   // ------------------------------------------------------------------
 
   static Map<String, dynamic> _curriculumJson(ResultRow r) => {
-        'id': _int(r[0]),
-        'program_id': _int(r[1]),
-        'code': r[2],
-        'status': r[3],
-        'copied_from_id': r[4] == null ? null : _int(r[4]),
-        'published_at': r[5]?.toString(),
-        'subject_count': _int(r[6]),
-        'elective_count': _int(r[7]),
-        'level': r[8],
-      };
+    'id': _int(r[0]),
+    'program_id': _int(r[1]),
+    'code': r[2],
+    'status': r[3],
+    'copied_from_id': r[4] == null ? null : _int(r[4]),
+    'published_at': r[5]?.toString(),
+    'subject_count': _int(r[6]),
+    'elective_count': _int(r[7]),
+    'level': r[8],
+  };
 
   static const _curriculumSelect = '''
     SELECT c.id, c.program_id, c.code, c.status, c.copied_from_id,
@@ -470,6 +480,7 @@ class AcademicService {
     JOIN academic_programs p ON p.id = c.program_id
   ''';
 
+  /// Lists curricula for a program.
   static Future<List<Map<String, dynamic>>> listCurricula({
     required int programId,
     String? status,
@@ -505,6 +516,7 @@ class AcademicService {
     return _curriculumJson(result.first);
   }
 
+  /// Gets a curriculum by ID.
   static Future<Map<String, dynamic>> getCurriculum(int id) async {
     return _curriculumById(Database.pool, id);
   }
@@ -513,10 +525,40 @@ class AcademicService {
     final code = _text(raw).toUpperCase();
     if (!_curriculumCode.hasMatch(code)) {
       throw AcademicException(
-        'Curriculum code must be 2 to 20 letters, numbers or dashes (e.g. 2401).',
+        'Curriculum code must be 2 to 20 letters, numbers or dashes '
+        '(e.g. 2401).',
       );
     }
     return code;
+  }
+
+  static Future<String> _nextShsCode(
+    Session s,
+    int programId,
+  ) async {
+    final rows = await s.execute(
+      Sql.named('''
+      SELECT UPPER(code)
+      FROM curricula
+      WHERE program_id = @pid
+        AND is_deleted = FALSE
+    '''),
+      parameters: {'pid': programId},
+    );
+
+    final used = rows.map((r) => r[0]?.toString()).whereType<String>().toSet();
+
+    if (!used.contains('SHS')) {
+      return 'SHS';
+    }
+
+    var n = 2;
+
+    while (used.contains('SHS-$n')) {
+      n++;
+    }
+
+    return 'SHS-$n';
   }
 
   static Future<Map<String, dynamic>> _requireDraft(
@@ -526,7 +568,8 @@ class AcademicService {
     final c = await _curriculumById(s, curriculumId);
     if (c['status'] != 'draft') {
       throw AcademicException(
-        'A published curriculum is read-only. Copy it to a draft to make changes.',
+        'A published curriculum is read-only. Copy it to a draft '
+        'to make changes.',
         statusCode: 409,
       );
     }
@@ -544,7 +587,6 @@ class AcademicService {
     if (programId == null) {
       throw AcademicException('Choose a program.');
     }
-    final code = _curriculumCodeInput(body['code']);
     final copyFrom = int.tryParse(body['copy_from_id']?.toString() ?? '');
     final rows = body['rows'];
     if (rows != null && rows is! List) {
@@ -554,16 +596,22 @@ class AcademicService {
     if (electiveRows != null && electiveRows is! List) {
       throw AcademicException('electives must be a list.');
     }
-    final hasFile = (rows is List && rows.isNotEmpty) ||
+    final hasFile =
+        (rows is List && rows.isNotEmpty) ||
         (electiveRows is List && electiveRows.isNotEmpty);
     if (copyFrom != null && hasFile) {
       throw AcademicException(
-        'Choose either Copy from an existing curriculum or an uploaded file, not both.',
+        'Choose either Copy from an existing curriculum or an uploaded '
+        'file, not both.',
       );
     }
 
     return _tx((tx) async {
       final program = await _programById(tx, programId);
+
+      final code = program['level'] == 'shs'
+          ? await _nextShsCode(tx, programId)
+          : _curriculumCodeInput(body['code']);
 
       final dup = await tx.execute(
         Sql.named('''
@@ -679,7 +727,9 @@ class AcademicService {
         for (var i = 0; i < electiveRows.length; i++) {
           final item = electiveRows[i];
           if (item is! Map) {
-            throw AcademicException('Elective ${i + 1} of the file is invalid.');
+            throw AcademicException(
+              'Elective ${i + 1} of the file is invalid.',
+            );
           }
           final row = Map<String, dynamic>.from(item);
           try {
@@ -714,7 +764,9 @@ class AcademicService {
           throw AcademicException(
             'This file is exactly the same as ${program['code']} $same. '
             'A new curriculum needs at least one change: a replaced, added or '
-            'removed subject${program['level'] == 'shs' ? ', or a different group or required hours' : ' or elective'}. '
+            'removed subject'
+            '${program['level'] == 'shs' ? ', or a different group or required'
+                      ' hours' : ' or elective'}. '
             'To start from the old one, use Copy existing and edit the draft.',
             statusCode: 409,
           );
@@ -736,14 +788,22 @@ class AcademicService {
     return v;
   }
 
+  /// Updates a draft curriculum.
   static Future<Map<String, dynamic>> updateCurriculum(
     int id,
     Map<String, dynamic> body,
   ) async {
-    final code = _curriculumCodeInput(body['code']);
-
     return _tx((tx) async {
       final current = await _requireDraft(tx, id);
+
+      if (current['level'] == 'shs') {
+        throw AcademicException(
+          'Senior High School curriculum codes cannot be renamed.',
+          statusCode: 409,
+        );
+      }
+
+      final code = _curriculumCodeInput(body['code']);
 
       final dup = await tx.execute(
         Sql.named('''
@@ -771,6 +831,7 @@ class AcademicService {
     });
   }
 
+  /// Archives a draft curriculum.
   static Future<void> deleteCurriculum(int id, int? actor) async {
     await _tx((tx) async {
       await _requireDraft(tx, id);
@@ -780,11 +841,18 @@ class AcademicService {
       await _remove(
         tx,
         'elective_selections',
-        'curriculum_subject_id IN (SELECT id FROM curriculum_subjects WHERE curriculum_id = @id)',
+        'curriculum_subject_id IN (SELECT id FROM curriculum_subjects '
+            'WHERE curriculum_id = @id)',
         p,
         actor,
       );
-      await _remove(tx, 'curriculum_electives', 'curriculum_id = @id', p, actor);
+      await _remove(
+        tx,
+        'curriculum_electives',
+        'curriculum_id = @id',
+        p,
+        actor,
+      );
       await _remove(tx, 'curriculum_subjects', 'curriculum_id = @id', p, actor);
 
       await _remove(tx, 'curricula', 'id = @id', p, actor);
@@ -851,7 +919,7 @@ class AcademicService {
       parameters: {'pid': programId, 'id': id},
     );
     for (final o in others) {
-      if (await _signature(s, _int(o[0])) == mine) return o[1] as String;
+      if (await _signature(s, _int(o[0])) == mine) return o[1]! as String;
     }
     return null;
   }
@@ -884,17 +952,21 @@ class AcademicService {
       final year = _int(r[0]);
       final term = _int(r[1]);
       final code = r[2] as String?;
-      final name = r[3] as String;
+      final name = r[3]! as String;
       final where = '${_yearLabel(c['level'] as String, year)}, Sem $term';
 
       if (year > maxYear) {
         issues.add('$name is placed in an invalid year level ($where).');
       }
       if (_ojtLike.hasMatch('${code ?? ''} $name')) {
-        issues.add('$name is an OJT/practicum subject and must be removed ($where).');
+        issues.add(
+          '$name is an OJT/practicum subject and must be removed ($where).',
+        );
       }
       if (shs && r[4] == null) {
-        issues.add('$name needs a group: Core, Applied or Specialized ($where).');
+        issues.add(
+          '$name needs a group: Core, Applied or Specialized ($where).',
+        );
       }
       if (shs && r[5] == null) {
         issues.add('$name needs its required hours ($where).');
@@ -929,10 +1001,13 @@ class AcademicService {
     return '${names[year - 1]} Year';
   }
 
+  /// Validates a curriculum before publishing.
   static Future<List<String>> validateCurriculum(int id) async {
     return _issues(Database.pool, id);
   }
 
+  /// Publishes a draft curriculum. It must have at least one subject and
+  /// pass all validation checks.
   static Future<Map<String, dynamic>> publishCurriculum(
     int id,
     int? actor,
@@ -966,25 +1041,25 @@ class AcademicService {
   // ------------------------------------------------------------------
 
   static Map<String, dynamic> _csJson(ResultRow r) => {
-        'id': _int(r[0]),
-        'subject_id': _int(r[1]),
-        'code': r[2],
-        'name': r[3],
-        'units': r[4],
-        'hours': r[5],
-        'year_level': _int(r[6]),
-        'term': _int(r[7]),
-        'category': r[8],
-        'is_elective_slot': r[9] == true,
-        'selection': r[10] == null
-            ? null
-            : {
-                'elective_id': _int(r[10]),
-                'code': r[11],
-                'name': r[12],
-                'school_year': r[13],
-              },
-      };
+    'id': _int(r[0]),
+    'subject_id': _int(r[1]),
+    'code': r[2],
+    'name': r[3],
+    'units': r[4],
+    'hours': r[5],
+    'year_level': _int(r[6]),
+    'term': _int(r[7]),
+    'category': r[8],
+    'is_elective_slot': r[9] == true,
+    'selection': r[10] == null
+        ? null
+        : {
+            'elective_id': _int(r[10]),
+            'code': r[11],
+            'name': r[12],
+            'school_year': r[13],
+          },
+  };
 
   /// Only the subjects of this exact curriculum + year level + semester.
   /// When [schoolYear] is given, each elective slot also reports the
@@ -1081,6 +1156,7 @@ class AcademicService {
     }
   }
 
+  /// Adds a curriculum subject.
   static Future<Map<String, dynamic>> addSubject(
     int curriculumId,
     Map<String, dynamic> body,
@@ -1140,6 +1216,7 @@ class AcademicService {
     });
   }
 
+  /// Updates a curriculum subject.
   static Future<Map<String, dynamic>> updateSubject(
     int curriculumId,
     int csId,
@@ -1231,6 +1308,7 @@ class AcademicService {
     });
   }
 
+  /// Archives a curriculum subject.
   static Future<void> deleteSubject(
     int curriculumId,
     int csId,
@@ -1285,7 +1363,8 @@ class AcademicService {
       await _remove(
         tx,
         'elective_selections',
-        '''curriculum_subject_id IN (
+        '''
+curriculum_subject_id IN (
              SELECT id FROM curriculum_subjects
              WHERE curriculum_id = @cid AND year_level = @year AND term = @term)''',
         p,
@@ -1307,13 +1386,13 @@ class AcademicService {
   // ------------------------------------------------------------------
 
   static Map<String, dynamic> _electiveJson(ResultRow r) => {
-        'id': _int(r[0]),
-        'subject_id': _int(r[1]),
-        'code': r[2],
-        'name': r[3],
-        'units': r[4],
-        'group_name': r[5],
-      };
+    'id': _int(r[0]),
+    'subject_id': _int(r[1]),
+    'code': r[2],
+    'name': r[3],
+    'units': r[4],
+    'group_name': r[5],
+  };
 
   static const _electiveSelect = '''
     SELECT ce.id, ce.subject_id, a.code, a.name, a.units::float8, ce.group_name
@@ -1321,6 +1400,7 @@ class AcademicService {
     JOIN academic_subjects a ON a.id = ce.subject_id
   ''';
 
+  /// Lists electives for a curriculum.
   static Future<List<Map<String, dynamic>>> listElectives(
     int curriculumId,
   ) async {
@@ -1365,6 +1445,7 @@ class AcademicService {
     }
   }
 
+  /// Adds a curriculum elective.
   static Future<Map<String, dynamic>> addElective(
     int curriculumId,
     Map<String, dynamic> body,
@@ -1407,6 +1488,7 @@ class AcademicService {
     });
   }
 
+  /// Updates a curriculum elective.
   static Future<Map<String, dynamic>> updateElective(
     int curriculumId,
     int electiveId,
@@ -1438,7 +1520,8 @@ class AcademicService {
         );
         if (used.isNotEmpty) {
           throw AcademicException(
-            'This elective is finalized for a school year. Clear that choice first.',
+            'This elective is finalized for a school year. '
+            'Clear that choice first.',
             statusCode: 409,
           );
         }
@@ -1470,6 +1553,7 @@ class AcademicService {
     });
   }
 
+  /// Archives a curriculum elective.
   static Future<void> deleteElective(
     int curriculumId,
     int electiveId,
@@ -1508,7 +1592,7 @@ class AcademicService {
   // ------------------------------------------------------------------
   // elective selections (finalized per school year)
   // ------------------------------------------------------------------
-
+  /// Lists finalized elective selections.
   static Future<List<Map<String, dynamic>>> listSelections({
     required int curriculumId,
     required String schoolYear,
@@ -1599,6 +1683,7 @@ class AcademicService {
     });
   }
 
+  /// Archives an elective selection.
   static Future<void> clearSelection({
     required int curriculumId,
     required int curriculumSubjectId,
