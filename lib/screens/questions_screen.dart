@@ -282,6 +282,33 @@ class _QuestionsScreenState
     }
   }
 
+  Future<void> _deleteQuestion(int questionId, String questionNumber) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete question?'),
+        content: Text('Delete question $questionNumber? This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      final token = await AuthStorage.getToken();
+      if (token == null || token.isEmpty) throw Exception('Session expired.');
+      await ApiService.deleteQuestion(token: token, questionId: questionId);
+      if (!mounted) return;
+      await _loadQuestions();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Question deleted.')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
+    }
+  }
+
   Future<void> _showAddQuestionDialog() async {
     final questionController =
         TextEditingController();
@@ -386,8 +413,12 @@ class _QuestionsScreenState
                 await ApiService.createQuestion(
                   token: token,
                   sectionId: widget.sectionId,
-                  questionNumber:
-                      _questions.length + 1,
+                  questionNumber: _questions.fold<int>(0, (maxNumber, question) {
+                    final number = int.tryParse(
+                      question['question_number']?.toString() ?? '',
+                    ) ?? 0;
+                    return number > maxNumber ? number : maxNumber;
+                  }) + 1,
                   questionText: questionText,
                   points: points,
                   choices: choices,
@@ -762,6 +793,11 @@ class _QuestionsScreenState
                               FontWeight.w600,
                         ),
                       ),
+                    ),
+                    IconButton(
+                      tooltip: 'Delete question',
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: questionId == null ? null : () => _deleteQuestion(questionId, questionNumber),
                     ),
                   ],
                 ),

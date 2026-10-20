@@ -5,6 +5,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import 'package:checkmate/services/answer_sheet_processor.dart';
+import 'package:checkmate/screens/answer_sheet_upload_screen.dart';
 import 'package:checkmate/services/document_scanner_models.dart';
 import 'package:checkmate/services/document_scanner_service.dart';
 import 'package:checkmate/services/opencv_omr_service.dart';
@@ -239,6 +240,23 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
         SnackBar(content: Text('Failed to capture answer sheet: $e')),
       );
     }
+  }
+
+  // Continue into the same review/verification workflow used on Chrome.
+  // The image is processed there; no OMR debug overlay is shown.
+  void _openUploadVerification() {
+    final bytes = _capturedImageBytes;
+    if (bytes == null || _isProcessing) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => AnswerSheetUploadScreen(
+          examId: widget.examId,
+          sections: widget.sections,
+          initialImageBytes: bytes,
+          initialFileName: 'Camera capture.jpg',
+        ),
+      ),
+    );
   }
 
   // ============================================================
@@ -1097,7 +1115,7 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
 
                   Expanded(
                     child: ElevatedButton.icon(
-                      onPressed: _isProcessing ? null : _continueWithImage,
+                      onPressed: _isProcessing ? null : _openUploadVerification,
                       icon: _isProcessing
                           ? const SizedBox(
                               width: 18,
@@ -1105,14 +1123,12 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : Icon(
-                              hasCorrectedImage ? Icons.refresh : Icons.check,
+                              Icons.arrow_forward,
                             ),
                       label: Text(
                         _isProcessing
                             ? 'Processing...'
-                            : hasCorrectedImage
-                            ? 'Process Again'
-                            : 'Process Sheet',
+                            : 'Review & Process',
                       ),
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 15),

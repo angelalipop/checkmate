@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
@@ -16,7 +15,7 @@ class _ExamsScreenState extends State<ExamsScreen> {
   List<Map<String, dynamic>> _exams = [];
   List<Map<String, dynamic>> _classes = [];
 
-  int? _selectedClassId;
+  String? _selectedSection;
 
   bool _loading = true;
   String? _error;
@@ -37,16 +36,11 @@ class _ExamsScreenState extends State<ExamsScreen> {
       final token = await AuthStorage.getToken();
 
       if (token == null || token.isEmpty) {
-        throw Exception(
-          'Authentication token not found.',
-        );
+        throw Exception('Authentication token not found.');
       }
 
       final results = await Future.wait([
-        ApiService.getExams(
-          token,
-          classId: _selectedClassId,
-        ),
+        ApiService.getExams(token),
         ApiService.getClasses(token),
       ]);
 
@@ -61,17 +55,115 @@ class _ExamsScreenState extends State<ExamsScreen> {
       if (!mounted) return;
 
       setState(() {
-        _error = e.toString().replaceFirst(
-          'Exception: ',
-          '',
-        );
+        _error = e.toString().replaceFirst('Exception: ', '');
         _loading = false;
       });
     }
   }
 
+  String _sectionOf(Map<String, dynamic> item) =>
+      (item['section']?.toString() ?? '').trim();
+
+  List<String> get _sections {
+    final values =
+        _classes
+            .map(_sectionOf)
+            .where((section) => section.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return values;
+  }
+
+  List<Map<String, dynamic>> get _visibleExams {
+    if (_selectedSection == null) return _exams;
+    final classIds = _classes
+        .where((c) => _sectionOf(c) == _selectedSection)
+        .map((c) => c['id']?.toString())
+        .toSet();
+    return _exams.where((exam) {
+      final linkedClass = exam['class'];
+      if (linkedClass is Map &&
+          linkedClass['section']?.toString() == _selectedSection) {
+        return true;
+      }
+      return classIds.contains(exam['class_id']?.toString()) ||
+          (linkedClass is Map &&
+              classIds.contains(linkedClass['id']?.toString()));
+    }).toList();
+  }
+
+  Future<void> _chooseCreationMethod() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Create Exam',
+                style: Theme.of(sheetContext).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                leading: const Icon(Icons.edit_document),
+                title: const Text('Build Exam'),
+                subtitle: const Text(
+                  'Create an exam using CheckMate questions and answer keys.',
+                ),
+                onTap: () => Navigator.pop(sheetContext, 'builder'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.picture_as_pdf_outlined),
+                title: const Text('Upload Question Paper PDF'),
+                subtitle: const Text(
+                  'Use an existing PDF and configure its answer key.',
+                ),
+                onTap: () => Navigator.pop(sheetContext, 'pdf'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (choice == 'builder') {
+      await _showAddExamDialog();
+    } else if (choice == 'pdf') {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('PDF Upload — Coming Next'),
+          content: const Text(
+            'The PDF upload workflow needs file storage and an API endpoint. '
+            'It is not connected yet, so no exam or file will be saved. '
+            'You can use Build Exam in the meantime.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
   Future<void> _showAddExamDialog() async {
-    int? selectedClassId = _selectedClassId;
+    int? selectedClassId;
+    if (_selectedSection != null) {
+      for (final item in _classes) {
+        if (_sectionOf(item) == _selectedSection) {
+          selectedClassId = int.tryParse(item['id']?.toString() ?? '');
+          break;
+        }
+      }
+    }
 
     final titleController = TextEditingController();
     final descriptionController = TextEditingController();
@@ -84,10 +176,7 @@ class _ExamsScreenState extends State<ExamsScreen> {
         String? dialogError;
 
         return StatefulBuilder(
-          builder: (
-            context,
-            setDialogState,
-          ) {
+          builder: (context, setDialogState) {
             Future<void> saveExam() async {
               if (selectedClassId == null) {
                 setDialogState(() {
@@ -97,10 +186,8 @@ class _ExamsScreenState extends State<ExamsScreen> {
               }
 
               final title = titleController.text.trim();
-              final description =
-                  descriptionController.text.trim();
-              final instructions =
-                  instructionsController.text.trim();
+              final description = descriptionController.text.trim();
+              final instructions = instructionsController.text.trim();
 
               if (title.isEmpty) {
                 setDialogState(() {
@@ -118,23 +205,15 @@ class _ExamsScreenState extends State<ExamsScreen> {
                 final token = await AuthStorage.getToken();
 
                 if (token == null || token.isEmpty) {
-                  throw Exception(
-                    'Authentication token not found.',
-                  );
+                  throw Exception('Authentication token not found.');
                 }
 
                 await ApiService.createExam(
                   token: token,
                   classId: selectedClassId!,
                   title: title,
-                  description:
-                      description.isEmpty
-                          ? null
-                          : description,
-                  instructions:
-                      instructions.isEmpty
-                          ? null
-                          : instructions,
+                  description: description.isEmpty ? null : description,
+                  instructions: instructions.isEmpty ? null : instructions,
                   status: 'draft',
                 );
 
@@ -142,17 +221,11 @@ class _ExamsScreenState extends State<ExamsScreen> {
                   return;
                 }
 
-                Navigator.pop(
-                  context,
-                  true,
-                );
+                Navigator.pop(context, true);
               } catch (e) {
                 setDialogState(() {
                   saving = false;
-                  dialogError = e.toString().replaceFirst(
-                    'Exception: ',
-                    '',
-                  );
+                  dialogError = e.toString().replaceFirst('Exception: ', '');
                 });
               }
             }
@@ -167,25 +240,17 @@ class _ExamsScreenState extends State<ExamsScreen> {
                       initialValue: selectedClassId,
                       decoration: const InputDecoration(
                         labelText: 'Class',
-                        prefixIcon: Icon(
-                          Icons.class_outlined,
-                        ),
+                        prefixIcon: Icon(Icons.class_outlined),
                         border: OutlineInputBorder(),
                       ),
-                      items: _classes.map(
-                        (item) {
-                          final id = int.parse(
-                            item['id'].toString(),
-                          );
+                      items: _classes.map((item) {
+                        final id = int.parse(item['id'].toString());
 
-                          return DropdownMenuItem<int>(
-                            value: id,
-                            child: Text(
-                              _getClassLabel(item),
-                            ),
-                          );
-                        },
-                      ).toList(),
+                        return DropdownMenuItem<int>(
+                          value: id,
+                          child: Text(_getClassLabel(item)),
+                        );
+                      }).toList(),
                       onChanged: saving
                           ? null
                           : (value) {
@@ -200,11 +265,8 @@ class _ExamsScreenState extends State<ExamsScreen> {
                       enabled: !saving,
                       decoration: const InputDecoration(
                         labelText: 'Exam Title',
-                        hintText:
-                            'e.g. Computer Programming Midterm Exam',
-                        prefixIcon: Icon(
-                          Icons.assignment_outlined,
-                        ),
+                        hintText: 'e.g. Computer Programming Midterm Exam',
+                        prefixIcon: Icon(Icons.assignment_outlined),
                         border: OutlineInputBorder(),
                       ),
                     ),
@@ -216,9 +278,7 @@ class _ExamsScreenState extends State<ExamsScreen> {
                       decoration: const InputDecoration(
                         labelText: 'Description',
                         hintText: 'Optional',
-                        prefixIcon: Icon(
-                          Icons.description_outlined,
-                        ),
+                        prefixIcon: Icon(Icons.description_outlined),
                         border: OutlineInputBorder(),
                         alignLabelWithHint: true,
                       ),
@@ -231,9 +291,7 @@ class _ExamsScreenState extends State<ExamsScreen> {
                       decoration: const InputDecoration(
                         labelText: 'Instructions',
                         hintText: 'Optional',
-                        prefixIcon: Icon(
-                          Icons.list_alt_outlined,
-                        ),
+                        prefixIcon: Icon(Icons.list_alt_outlined),
                         border: OutlineInputBorder(),
                         alignLabelWithHint: true,
                       ),
@@ -244,9 +302,7 @@ class _ExamsScreenState extends State<ExamsScreen> {
                         dialogError!,
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.error,
+                          color: Theme.of(context).colorScheme.error,
                         ),
                       ),
                     ],
@@ -258,10 +314,7 @@ class _ExamsScreenState extends State<ExamsScreen> {
                   onPressed: saving
                       ? null
                       : () {
-                          Navigator.pop(
-                            context,
-                            false,
-                          );
+                          Navigator.pop(context, false);
                         },
                   child: const Text('Cancel'),
                 ),
@@ -271,9 +324,7 @@ class _ExamsScreenState extends State<ExamsScreen> {
                       ? const SizedBox(
                           width: 20,
                           height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                          ),
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Text('Save'),
                 ),
@@ -293,22 +344,14 @@ class _ExamsScreenState extends State<ExamsScreen> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Exam added successfully.',
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Exam added successfully.')));
     }
   }
 
-  String _getClassLabel(
-    Map<String, dynamic> item,
-  ) {
-    final section =
-        item['section']?.toString() ??
-        'Unknown Section';
+  String _getClassLabel(Map<String, dynamic> item) {
+    final section = item['section']?.toString() ?? 'Unknown Section';
 
     final subject = item['subject'];
 
@@ -316,13 +359,9 @@ class _ExamsScreenState extends State<ExamsScreen> {
       return section;
     }
 
-    final name =
-        subject['name']?.toString() ??
-        'Unknown Subject';
+    final name = subject['name']?.toString() ?? 'Unknown Subject';
 
-    final code =
-        subject['code']?.toString() ??
-        '';
+    final code = subject['code']?.toString() ?? '';
 
     if (code.isEmpty) {
       return '$section - $name';
@@ -331,9 +370,7 @@ class _ExamsScreenState extends State<ExamsScreen> {
     return '$section - $code - $name';
   }
 
-  String _getStatusLabel(
-    String status,
-  ) {
+  String _getStatusLabel(String status) {
     switch (status.toLowerCase()) {
       case 'published':
         return 'Published';
@@ -347,10 +384,7 @@ class _ExamsScreenState extends State<ExamsScreen> {
     }
   }
 
-  Color _getStatusColor(
-    BuildContext context,
-    String status,
-  ) {
+  Color _getStatusColor(BuildContext context, String status) {
     switch (status.toLowerCase()) {
       case 'published':
         return Colors.green;
@@ -365,15 +399,11 @@ class _ExamsScreenState extends State<ExamsScreen> {
   }
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Exams'),
-      ),
+      appBar: AppBar(title: const Text('Exams')),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showAddExamDialog,
+        onPressed: _chooseCreationMethod,
         icon: const Icon(Icons.add),
         label: const Text('Add Exam'),
       ),
@@ -381,55 +411,34 @@ class _ExamsScreenState extends State<ExamsScreen> {
         children: [
           if (_classes.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.fromLTRB(
-                16,
-                16,
-                16,
-                8,
-              ),
-              child: DropdownButtonFormField<int?>(
-                initialValue: _selectedClassId,
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: DropdownButtonFormField<String?>(
+                key: ValueKey(_selectedSection),
+                initialValue: _selectedSection,
                 decoration: const InputDecoration(
-                  labelText: 'Filter by Class',
-                  prefixIcon: Icon(
-                    Icons.filter_list,
-                  ),
+                  labelText: 'Filter by Section',
+                  prefixIcon: Icon(Icons.filter_list),
                   border: OutlineInputBorder(),
                 ),
                 items: [
-                  const DropdownMenuItem<int?>(
+                  const DropdownMenuItem<String?>(
                     value: null,
-                    child: Text('All Classes'),
+                    child: Text('All Sections'),
                   ),
-                  ..._classes.map(
-                    (item) {
-                      final id = int.parse(
-                        item['id'].toString(),
-                      );
-
-                      return DropdownMenuItem<int?>(
-                        value: id,
-                        child: Text(
-                          _getClassLabel(item),
-                        ),
-                      );
-                    },
+                  ..._sections.map(
+                    (section) => DropdownMenuItem<String?>(
+                      value: section,
+                      child: Text(section),
+                    ),
                   ),
                 ],
                 onChanged: (value) {
-                  setState(() {
-                    _selectedClassId = value;
-                  });
-
-                  _loadData();
+                  setState(() => _selectedSection = value);
                 },
               ),
             ),
           Expanded(
-            child: RefreshIndicator(
-              onRefresh: _loadData,
-              child: _buildBody(),
-            ),
+            child: RefreshIndicator(onRefresh: _loadData, child: _buildBody()),
           ),
         ],
       ),
@@ -438,9 +447,7 @@ class _ExamsScreenState extends State<ExamsScreen> {
 
   Widget _buildBody() {
     if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
 
     if (_error != null) {
@@ -452,15 +459,9 @@ class _ExamsScreenState extends State<ExamsScreen> {
               padding: const EdgeInsets.all(24),
               child: Column(
                 children: [
-                  const Icon(
-                    Icons.error_outline,
-                    size: 48,
-                  ),
+                  const Icon(Icons.error_outline, size: 48),
                   const SizedBox(height: 16),
-                  Text(
-                    _error!,
-                    textAlign: TextAlign.center,
-                  ),
+                  Text(_error!, textAlign: TextAlign.center),
                   const SizedBox(height: 16),
                   FilledButton(
                     onPressed: _loadData,
@@ -474,29 +475,21 @@ class _ExamsScreenState extends State<ExamsScreen> {
       );
     }
 
-    if (_exams.isEmpty) {
+    if (_visibleExams.isEmpty) {
       return ListView(
         children: const [
           SizedBox(height: 120),
           Center(
             child: Column(
               children: [
-                Icon(
-                  Icons.assignment_outlined,
-                  size: 56,
-                ),
+                Icon(Icons.assignment_outlined, size: 56),
                 SizedBox(height: 16),
                 Text(
-                  'No exams yet.',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  'No exams in this section.',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 SizedBox(height: 8),
-                Text(
-                  'Tap "Add Exam" to create one.',
-                ),
+                Text('Choose another section or tap Add Exam.'),
               ],
             ),
           ),
@@ -506,25 +499,17 @@ class _ExamsScreenState extends State<ExamsScreen> {
 
     return ListView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: _exams.length,
+      itemCount: _visibleExams.length,
       itemBuilder: (context, index) {
-        final exam = _exams[index];
+        final exam = _visibleExams[index];
 
-        final title =
-            exam['title']?.toString() ??
-            'Untitled Exam';
+        final title = exam['title']?.toString() ?? 'Untitled Exam';
 
-        final description =
-            exam['description']?.toString() ??
-            '';
+        final description = exam['description']?.toString() ?? '';
 
-        final instructions =
-            exam['instructions']?.toString() ??
-            '';
+        final instructions = exam['instructions']?.toString() ?? '';
 
-        final status =
-            exam['status']?.toString() ??
-            'draft';
+        final status = exam['status']?.toString() ?? 'draft';
 
         final classData = exam['class'];
 
@@ -538,22 +523,14 @@ class _ExamsScreenState extends State<ExamsScreen> {
         }
 
         return Card(
-          margin: const EdgeInsets.only(
-            bottom: 12,
-          ),
+          margin: const EdgeInsets.only(bottom: 12),
           child: ListTile(
             onTap: () {
-              final examId = int.tryParse(
-                exam['id']?.toString() ?? '',
-              );
+              final examId = int.tryParse(exam['id']?.toString() ?? '');
 
               if (examId == null) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'Invalid exam ID.',
-                    ),
-                  ),
+                  const SnackBar(content: Text('Invalid exam ID.')),
                 );
                 return;
               }
@@ -561,38 +538,24 @@ class _ExamsScreenState extends State<ExamsScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => ExamBuilderScreen(
-                    examId: examId,
-                  ),
+                  builder: (_) => ExamBuilderScreen(examId: examId),
                 ),
               );
             },
             contentPadding: const EdgeInsets.all(16),
-            leading: const CircleAvatar(
-              child: Icon(
-                Icons.assignment_outlined,
-              ),
-            ),
+            leading: const CircleAvatar(child: Icon(Icons.assignment_outlined)),
             title: Text(
               title,
-              style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.bold,
-              ),
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
             ),
             subtitle: Padding(
-              padding: const EdgeInsets.only(
-                top: 8,
-              ),
+              padding: const EdgeInsets.only(top: 8),
               child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     classLabel,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w500,
-                    ),
+                    style: const TextStyle(fontWeight: FontWeight.w500),
                   ),
                   if (description.isNotEmpty) ...[
                     const SizedBox(height: 6),
@@ -613,17 +576,12 @@ class _ExamsScreenState extends State<ExamsScreen> {
                         context,
                         status,
                       ).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(
-                        20,
-                      ),
+                      borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
                       _getStatusLabel(status),
                       style: TextStyle(
-                        color: _getStatusColor(
-                          context,
-                          status,
-                        ),
+                        color: _getStatusColor(context, status),
                         fontWeight: FontWeight.w600,
                       ),
                     ),

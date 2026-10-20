@@ -49,8 +49,7 @@ class ExamSectionService {
       'identification',
     };
 
-    final normalizedQuestionType =
-        questionType.trim().toLowerCase();
+    final normalizedQuestionType = questionType.trim().toLowerCase();
 
     if (!allowedQuestionTypes.contains(
       normalizedQuestionType,
@@ -122,5 +121,23 @@ class ExamSectionService {
       'section_order': row[4],
       'default_points': row[5].toString(),
     };
+  }
+
+  static Future<bool> deleteDraftSection(
+    int id, {
+    required int userId,
+    required String role,
+  }) async {
+    final result = await Database.pool.execute(
+      Sql.named('''DELETE FROM exam_sections AS s
+          USING exams AS e, classes AS c
+          WHERE s.id = @id AND e.id = s.exam_id AND c.id = e.class_id
+            AND (@role = 'admin' OR (@role = 'teacher' AND c.teacher_id = @user_id))
+            AND e.status = 'draft'
+            AND NOT EXISTS (SELECT 1 FROM exam_attempts a WHERE a.exam_id = e.id)
+          RETURNING s.id'''),
+      parameters: {'id': id, 'user_id': userId, 'role': role},
+    );
+    return result.isNotEmpty;
   }
 }

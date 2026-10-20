@@ -10,12 +10,16 @@ import '../services/scoring_service.dart';
 
 class AnswerSheetUploadScreen extends StatefulWidget {
   final dynamic examId;
+  final Uint8List? initialImageBytes;
+  final String? initialFileName;
 
   final List<Map<String, dynamic>> sections;
 
   const AnswerSheetUploadScreen({
     super.key,
     this.examId,
+    this.initialImageBytes,
+    this.initialFileName,
     this.sections = const [],
   });
 
@@ -37,6 +41,15 @@ class _AnswerSheetUploadScreenState
 
   OMRProcessingResult? _omrResult;
   ScoringResult? _scoringResult;
+  bool _answersVerified = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _imageBytes = widget.initialImageBytes;
+    _fileName = widget.initialFileName ??
+        (widget.initialImageBytes != null ? 'Camera capture' : null);
+  }
 
   // ------------------------------------------------------------
   // PICK IMAGE
@@ -75,6 +88,7 @@ class _AnswerSheetUploadScreenState
       _detectedMarkers = null;
       _omrResult = null;
       _scoringResult = null;
+      _answersVerified = false;
       _fileName = file.name;
       _isProcessing = false;
     });
@@ -96,6 +110,7 @@ class _AnswerSheetUploadScreenState
       _detectedMarkers = null;
       _omrResult = null;
       _scoringResult = null;
+      _answersVerified = false;
     });
 
     try {
@@ -176,7 +191,7 @@ class _AnswerSheetUploadScreenState
 
     try {
       // ----------------------------------------------------------
-      // STEP 1: RUN OMR
+      // STEP 1: RUN OMR AFTER IMAGE CONFIRMATION
       // ----------------------------------------------------------
 
       final OpenCVOMRResult openCVResult = await OpenCVOMRService.process(
@@ -188,39 +203,15 @@ class _AnswerSheetUploadScreenState
         openCVResult,
       );
 
-      // ----------------------------------------------------------
-      // STEP 2: SCORE THE DETECTED ANSWERS
-      // ----------------------------------------------------------
-
-      final ScoringResult scoringResult =
-          ScoringService.score(
-        omrResult: result,
-        sections: widget.sections,
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      // ----------------------------------------------------------
-      // STEP 3: SAVE RESULTS TO SCREEN STATE
-      // ----------------------------------------------------------
-
+      if (!mounted) return;
       setState(() {
         _omrResult = result;
-        _scoringResult = scoringResult;
+        _scoringResult = null;
+        _answersVerified = false;
         _omrDebugImageBytes = result.debugImageBytes;
         _isProcessing = false;
       });
-
-      // ----------------------------------------------------------
-      // STEP 4: SHOW OMR + SCORE RESULTS
-      // ----------------------------------------------------------
-
-      await _showOMRResults(
-        result,
-        scoringResult,
-      );
+      await _verifyDetectedAnswers(result);
     } catch (e) {
       if (!mounted) {
         return;
@@ -269,6 +260,10 @@ class _AnswerSheetUploadScreenState
           : int.tryParse(sourceSection['question_count']?.toString() ?? '0') ?? 0;
 
       if (sectionType == 'identification') {
+        if (openCVSectionIndex < openCVResult.sections.length &&
+            openCVResult.sections[openCVSectionIndex].sectionType == 'identification') {
+          openCVSectionIndex++;
+        }
         convertedSections.add(OMRSectionResult(
           sectionName: sectionName,
           sectionType: sectionType,
@@ -307,7 +302,12 @@ class _AnswerSheetUploadScreenState
       }
 
       final OpenCVSectionMeasurement measuredSection =
-          openCVResult.sections[openCVSectionIndex++];
+          openCVResult.sections[openCVSectionIndex];
+      if (measuredSection.sectionType != sectionType) {
+        throw StateError('OMR section mismatch at "$sectionName": '
+            'expected $sectionType but received ${measuredSection.sectionType}.');
+      }
+      openCVSectionIndex++;
       final List<OMRAnswer> answers = [];
 
       for (final OpenCVQuestionMeasurement question in measuredSection.questions) {
@@ -328,6 +328,14 @@ class _AnswerSheetUploadScreenState
         final OpenCVBubbleMeasurement? second =
             bubbles.length > 1 ? bubbles[1] : null;
 
+        if (strongest.fillRatio >= 0.46 && strongest.fillRatio < markedThreshold) {
+          answers.add(OMRAnswer(
+            questionNumber: question.questionNumber,
+            answer: 'Ambiguous',
+            confidence: strongest.fillRatio,
+          ));
+          continue;
+        }
         if (strongest.fillRatio < markedThreshold) {
           answers.add(OMRAnswer(
             questionNumber: question.questionNumber,
@@ -346,6 +354,14 @@ class _AnswerSheetUploadScreenState
           continue;
         }
 
+        if (second != null && strongest.fillRatio - second.fillRatio < 0.12) {
+          answers.add(OMRAnswer(
+            questionNumber: question.questionNumber,
+            answer: 'Ambiguous',
+            confidence: strongest.fillRatio,
+          ));
+          continue;
+        }
         answers.add(OMRAnswer(
           questionNumber: question.questionNumber,
           answer: strongest.label,
@@ -390,306 +406,179 @@ class _AnswerSheetUploadScreenState
   }
 
   // ------------------------------------------------------------
-  // OMR RESULTS DIALOG
+  // REVIEW DETECTED STUDENT ANSWERS BEFORE SCORING
   // ------------------------------------------------------------
 
-  Future<void> _showOMRResults(
-    OMRProcessingResult result,
-    ScoringResult scoringResult,
-  ) async {
-    await showDialog<void>(
+  Future<void> _verifyDetectedAnswers(OMRProcessingResult rawResult) async {
+    final edits = <String, String>{};
+    for (var sectionIndex = 0; sectionIndex < rawResult.sections.length; sectionIndex++) {
+      final section = rawResult.sections[sectionIndex];
+      for (final answer in section.answers) {
+        edits['$sectionIndex:${answer.questionNumber}'] = answer.answer;
+      }
+    }
+
+    final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text(
-            'OMR Detection & Score',
-          ),
-          content: SizedBox(
-            width: 650,
-            height: 500,
-            child: _buildOMRDialogContent(
-              result,
-              scoringResult,
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop();
-              },
-              child: const Text('Close'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildOMRDialogContent(
-    OMRProcessingResult result,
-    ScoringResult scoringResult,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '${result.detectedQuestions} questions',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '${result.answeredQuestions} answered',
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-
-        const SizedBox(height: 16),
-
-        // --------------------------------------------------------
-        // SCORE CARD
-        // --------------------------------------------------------
-
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Score',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 18,
-                  ),
-                ),
-
-                const SizedBox(height: 8),
-
-                Text(
-                  '${scoringResult.earnedPoints.toStringAsFixed(2)} '
-                  '/ '
-                  '${scoringResult.totalPoints.toStringAsFixed(2)}',
-                  style: const TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-
-                const SizedBox(height: 4),
-
-                Text(
-                  '${scoringResult.percentage.toStringAsFixed(1)}%',
-                  style: const TextStyle(
-                    fontSize: 16,
-                  ),
-                ),
-
-                const SizedBox(height: 4),
-
-                Text(
-                  '${scoringResult.correctAnswers} '
-                  'correct out of '
-                  '${scoringResult.totalQuestions}',
-                ),
-              ],
-            ),
-          ),
-        ),
-
-        const SizedBox(height: 16),
-
-        // --------------------------------------------------------
-        // SECTION RESULTS
-        // --------------------------------------------------------
-
-        Expanded(
-          child: ListView.builder(
-            itemCount: result.sections.length,
-            itemBuilder: (context, index) {
-              final OMRSectionResult omrSection =
-                  result.sections[index];
-
-              ScoredSection? scoredSection;
-
-              if (index < scoringResult.sections.length) {
-                scoredSection =
-                    scoringResult.sections[index];
-              }
-
-              return _buildSectionResult(
-                omrSection,
-                scoredSection,
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ------------------------------------------------------------
-  // SECTION RESULT
-  // ------------------------------------------------------------
-
-  Widget _buildSectionResult(
-    OMRSectionResult section,
-    ScoredSection? scoredSection,
-  ) {
-    final String displayType =
-        _displaySectionType(section.sectionType);
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Icon(
-                  _sectionIcon(section.sectionType),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    section.sectionName,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, refresh) {
+          final pending = edits.values.where((v) =>
+              v == 'Ambiguous' || v == 'Multiple').length;
+          return AlertDialog(
+            title: const Text('Verify Student Answers'),
+            content: SizedBox(
+              width: MediaQuery.sizeOf(dialogContext).width * 0.85,
+              height: MediaQuery.sizeOf(dialogContext).height * 0.65,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Compare each detection against the scanned sheet. '
+                      'Change incorrect answers before scoring.'),
+                  const SizedBox(height: 8),
+                  if (pending > 0)
+                    Text('$pending answer(s) require manual review.',
+                        style: const TextStyle(color: Colors.deepOrange)),
+                  const Divider(),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: rawResult.sections.length,
+                      itemBuilder: (context, sectionIndex) {
+                        final section = rawResult.sections[sectionIndex];
+                        final options = section.sectionType == 'multiple_choice'
+                            ? <String>['A', 'B', 'C', 'D']
+                            : section.sectionType == 'true_false'
+                                ? <String>['T', 'F']
+                                : <String>[];
+                        return Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(section.sectionName,
+                                    style: Theme.of(context).textTheme.titleMedium),
+                                Text(_displaySectionType(section.sectionType)),
+                                const SizedBox(height: 8),
+                                for (final answer in section.answers)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 4),
+                                    child: Row(
+                                      children: [
+                                        SizedBox(width: 48,
+                                            child: Text('Q${answer.questionNumber}')),
+                                        Expanded(
+                                          child: section.sectionType == 'identification'
+                                              ? TextFormField(
+                                                  initialValue: (edits['$sectionIndex:${answer.questionNumber}'] == 'OCR Pending' ||
+                                                      edits['$sectionIndex:${answer.questionNumber}'] == 'Unanswered')
+                                                      ? ''
+                                                      : edits['$sectionIndex:${answer.questionNumber}'],
+                                                  decoration: const InputDecoration(
+                                                    labelText: 'Transcribe handwritten answer',
+                                                    isDense: true,
+                                                    border: OutlineInputBorder(),
+                                                  ),
+                                                  onChanged: (value) => refresh(() => edits[
+                                                      '$sectionIndex:${answer.questionNumber}'] =
+                                                      value.trim().isEmpty ? 'Unanswered' : value.trim()),
+                                                )
+                                              : DropdownButtonFormField<String>(
+                                                  value: options.contains(edits['$sectionIndex:${answer.questionNumber}'])
+                                                      ? edits['$sectionIndex:${answer.questionNumber}']
+                                                      : edits['$sectionIndex:${answer.questionNumber}'] == 'Unanswered'
+                                                          ? 'Unanswered'
+                                                          : 'Ambiguous',
+                                                  isExpanded: true,
+                                                  decoration: const InputDecoration(
+                                                    labelText: 'Verified answer',
+                                                    isDense: true,
+                                                    border: OutlineInputBorder(),
+                                                  ),
+                                                  items: [
+                                                    ...options,
+                                                    'Unanswered',
+                                                    'Ambiguous',
+                                                  ].map((value) => DropdownMenuItem(
+                                                    value: value,
+                                                    child: Text(value),
+                                                  )).toList(),
+                                                  onChanged: (value) {
+                                                    if (value != null) refresh(() => edits[
+                                                        '$sectionIndex:${answer.questionNumber}'] = value);
+                                                  },
+                                                ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        SizedBox(width: 65,
+                                          child: Text(answer.confidence > 0
+                                              ? '${(answer.confidence * 100).round()}%'
+                                              : 'Manual',
+                                            textAlign: TextAlign.end),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-
-            const SizedBox(height: 4),
-
-            Text(
-              '$displayType • '
-              '${section.questionCount} questions',
-            ),
-
-            if (scoredSection != null) ...[
-              const SizedBox(height: 6),
-              Text(
-                'Score: '
-                '${scoredSection.earnedPoints.toStringAsFixed(2)}'
-                ' / '
-                '${scoredSection.totalPoints.toStringAsFixed(2)}',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: pending > 0 ? null : () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Confirm & Calculate Score'),
               ),
             ],
-
-            const Divider(),
-
-            // Use Column instead of another ListView.
-            //
-            // The outer dialog already contains the
-            // single scrollable ListView.
-            for (final answer in section.answers)
-              _buildAnswerRow(
-                answer,
-                section.sectionType,
-                scoredSection,
-              ),
-          ],
-        ),
+          );
+        },
       ),
     );
-  }
 
-  // ------------------------------------------------------------
-  // ANSWER ROW
-  // ------------------------------------------------------------
-
-  Widget _buildAnswerRow(
-    OMRAnswer answer,
-    String sectionType,
-    ScoredSection? scoredSection,
-  ) {
-    final bool unanswered = answer.isUnanswered;
-
-    final bool ocrPending =
-        answer.answer == 'OCR Pending';
-
-    String answerText = answer.answer;
-
-    if (sectionType == 'true_false') {
-      if (answer.answer == 'T') {
-        answerText = 'True';
-      } else if (answer.answer == 'F') {
-        answerText = 'False';
-      }
-    }
-
-    ScoredAnswer? scoredAnswer;
-
-    if (scoredSection != null) {
-      for (final item in scoredSection.answers) {
-        if (item.questionNumber ==
-            answer.questionNumber) {
-          scoredAnswer = item;
-          break;
-        }
-      }
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        vertical: 4,
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: 55,
-            child: Text(
-              'Q${answer.questionNumber}',
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-
-          Expanded(
-            child: Text(
-              answerText,
-            ),
-          ),
-
-          // Correct / incorrect indicator
-          if (scoredAnswer != null &&
-              !unanswered &&
-              !ocrPending)
-            Padding(
-              padding: const EdgeInsets.only(
-                left: 8,
-              ),
-              child: Icon(
-                scoredAnswer.isCorrect
-                    ? Icons.check_circle
-                    : Icons.cancel,
-                size: 18,
-              ),
-            ),
-
-          // OMR confidence
-          if (!unanswered &&
-              !ocrPending &&
-              answer.confidence > 0)
-            Padding(
-              padding: const EdgeInsets.only(
-                left: 8,
-              ),
-              child: Text(
-                '${(answer.confidence * 100).round()}%',
-              ),
+    if (confirmed != true || !mounted) return;
+    final verifiedSections = <OMRSectionResult>[];
+    for (var i = 0; i < rawResult.sections.length; i++) {
+      final section = rawResult.sections[i];
+      verifiedSections.add(OMRSectionResult(
+        sectionName: section.sectionName,
+        sectionType: section.sectionType,
+        questionCount: section.questionCount,
+        answers: [
+          for (final answer in section.answers)
+            OMRAnswer(
+              questionNumber: answer.questionNumber,
+              answer: (edits['$i:${answer.questionNumber}'] ?? answer.answer) == 'OCR Pending'
+                  ? 'Unanswered'
+                  : (edits['$i:${answer.questionNumber}'] ?? answer.answer),
+              confidence: answer.confidence,
             ),
         ],
-      ),
+      ));
+    }
+    final verified = OMRProcessingResult(
+      sections: verifiedSections,
+      debugImageBytes: rawResult.debugImageBytes,
+    );
+    final score = ScoringService.score(
+      omrResult: verified,
+      sections: widget.sections,
+    );
+    setState(() {
+      _omrResult = verified;
+      _scoringResult = score;
+      _answersVerified = true;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Answers verified and score calculated. Not yet saved to database.')),
     );
   }
 
@@ -749,6 +638,7 @@ class _AnswerSheetUploadScreenState
       _detectedMarkers = null;
       _omrResult = null;
       _scoringResult = null;
+      _answersVerified = false;
       _fileName = null;
       _isProcessing = false;
     });
@@ -968,22 +858,6 @@ class _AnswerSheetUploadScreenState
 
         const SizedBox(height: 16),
 
-        if (_omrDebugImageBytes != null) ...[
-          Text(
-            'OMR Debug Overlay',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Red = Multiple Choice sampling points. '
-            'Blue = True/False sampling points. '
-            'Each crosshair should sit in the center of its printed bubble.',
-          ),
-          const SizedBox(height: 12),
-          _buildImagePreview(_omrDebugImageBytes!),
-          const SizedBox(height: 16),
-        ],
-
         // Do NOT render the full OMR result list here.
         //
         // The complete result is displayed in the dialog
@@ -1189,7 +1063,14 @@ class _AnswerSheetUploadScreenState
             ),
           ),
 
-        if (_processedImageBytes != null)
+        if (_omrResult != null)
+          OutlinedButton.icon(
+            onPressed: _isProcessing ? null : () => _verifyDetectedAnswers(_omrResult!),
+            icon: const Icon(Icons.fact_check_outlined),
+            label: Text(_answersVerified ? 'Review Answers Again' : 'Verify Answers'),
+          ),
+
+        if (_processedImageBytes != null && _omrResult == null)
           ElevatedButton.icon(
             onPressed:
                 _isProcessing
@@ -1199,7 +1080,7 @@ class _AnswerSheetUploadScreenState
               Icons.document_scanner,
             ),
             label: const Text(
-              'Run OMR',
+              'Confirm Processed Image & Detect Answers',
             ),
           ),
       ],

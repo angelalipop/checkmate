@@ -101,9 +101,7 @@ class QuestionService {
         'question_number': questionNumber,
         'question_text': questionText.trim(),
         'points': points,
-        'choices': choices == null
-            ? null
-            : jsonEncode(choices),
+        'choices': choices == null ? null : jsonEncode(choices),
         'correct_answer': correctAnswer?.trim().isEmpty ?? false
             ? null
             : correctAnswer?.trim(),
@@ -122,5 +120,23 @@ class QuestionService {
       'correct_answer': row[6],
       'created_at': row[7].toString(),
     };
+  }
+
+  static Future<bool> deleteDraftQuestion(
+    int id, {
+    required int userId,
+    required String role,
+  }) async {
+    final result = await Database.pool.execute(
+      Sql.named('''DELETE FROM questions AS q
+          USING exam_sections AS s, exams AS e, classes AS c
+          WHERE q.id = @id AND s.id = q.section_id AND e.id = s.exam_id AND c.id = e.class_id
+            AND (@role = 'admin' OR (@role = 'teacher' AND c.teacher_id = @user_id))
+            AND e.status = 'draft'
+            AND NOT EXISTS (SELECT 1 FROM exam_attempts a WHERE a.exam_id = e.id)
+          RETURNING q.id'''),
+      parameters: {'id': id, 'user_id': userId, 'role': role},
+    );
+    return result.isNotEmpty;
   }
 }

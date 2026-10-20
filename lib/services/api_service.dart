@@ -22,22 +22,14 @@ class ApiService {
   }) async {
     final response = await http.post(
       Uri.parse('$baseUrl/auth/login'),
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({
-        'email': email,
-        'password': password,
-      }),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'email': email, 'password': password}),
     );
 
-    final data =
-        jsonDecode(response.body) as Map<String, dynamic>;
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
 
     if (response.statusCode != 200) {
-      throw Exception(
-        data['message'] ?? 'Login failed',
-      );
+      throw Exception(data['message'] ?? 'Login failed');
     }
 
     return data;
@@ -47,9 +39,7 @@ class ApiService {
   // CURRENT USER / SESSION
   // =========================
 
-  static Future<Map<String, dynamic>> getCurrentUser(
-    String token,
-  ) async {
+  static Future<Map<String, dynamic>> getCurrentUser(String token) async {
     final response = await http.get(
       Uri.parse('$baseUrl/me'),
       headers: {
@@ -58,13 +48,10 @@ class ApiService {
       },
     );
 
-    final data =
-        jsonDecode(response.body) as Map<String, dynamic>;
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
 
     if (response.statusCode != 200) {
-      throw Exception(
-        data['message'] ?? 'Session expired',
-      );
+      throw Exception(data['message'] ?? 'Session expired');
     }
 
     return data;
@@ -74,9 +61,7 @@ class ApiService {
   // GET SUBJECTS
   // =========================
 
-  static Future<List<Map<String, dynamic>>> getSubjects(
-    String token,
-  ) async {
+  static Future<List<Map<String, dynamic>>> getSubjects(String token) async {
     final response = await http.get(
       Uri.parse('$baseUrl/subjects'),
       headers: {
@@ -85,28 +70,20 @@ class ApiService {
       },
     );
 
-    final data =
-        jsonDecode(response.body) as Map<String, dynamic>;
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
 
     if (response.statusCode != 200) {
-      throw Exception(
-        data['message'] ?? 'Failed to load subjects',
-      );
+      throw Exception(data['message'] ?? 'Failed to load subjects');
     }
 
     final subjects = data['subjects'];
 
     if (subjects is! List) {
-      throw Exception(
-        'Invalid subjects data received.',
-      );
+      throw Exception('Invalid subjects data received.');
     }
 
     return subjects
-        .map(
-          (subject) =>
-              Map<String, dynamic>.from(subject as Map),
-        )
+        .map((subject) => Map<String, dynamic>.from(subject as Map))
         .toList();
   }
 
@@ -125,27 +102,19 @@ class ApiService {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $token',
       },
-      body: jsonEncode({
-        'name': name,
-        'code': code,
-      }),
+      body: jsonEncode({'name': name, 'code': code}),
     );
 
-    final data =
-        jsonDecode(response.body) as Map<String, dynamic>;
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
 
     if (response.statusCode != 201) {
-      throw Exception(
-        data['message'] ?? 'Failed to create subject',
-      );
+      throw Exception(data['message'] ?? 'Failed to create subject');
     }
 
     final subject = data['subject'];
 
     if (subject is! Map) {
-      throw Exception(
-        'Invalid subject data received.',
-      );
+      throw Exception('Invalid subject data received.');
     }
 
     return Map<String, dynamic>.from(subject);
@@ -155,9 +124,7 @@ class ApiService {
   // GET CLASSES
   // =========================
 
-  static Future<List<Map<String, dynamic>>> getClasses(
-    String token,
-  ) async {
+  static Future<List<Map<String, dynamic>>> getClasses(String token) async {
     final response = await http.get(
       Uri.parse('$baseUrl/classes'),
       headers: {
@@ -166,28 +133,20 @@ class ApiService {
       },
     );
 
-    final data =
-        jsonDecode(response.body) as Map<String, dynamic>;
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
 
     if (response.statusCode != 200) {
-      throw Exception(
-        data['message'] ?? 'Failed to load classes',
-      );
+      throw Exception(data['message'] ?? 'Failed to load classes');
     }
 
     final classes = data['classes'];
 
     if (classes is! List) {
-      throw Exception(
-        'Invalid classes data received.',
-      );
+      throw Exception('Invalid classes data received.');
     }
 
     return classes
-        .map(
-          (item) =>
-              Map<String, dynamic>.from(item as Map),
-        )
+        .map((item) => Map<String, dynamic>.from(item as Map))
         .toList();
   }
 
@@ -218,21 +177,16 @@ class ApiService {
       }),
     );
 
-    final data =
-        jsonDecode(response.body) as Map<String, dynamic>;
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
 
     if (response.statusCode != 201) {
-      throw Exception(
-        data['message'] ?? 'Failed to create class',
-      );
+      throw Exception(data['message'] ?? 'Failed to create class');
     }
 
     final newClass = data['class'];
 
     if (newClass is! Map) {
-      throw Exception(
-        'Invalid class data received.',
-      );
+      throw Exception('Invalid class data received.');
     }
 
     return Map<String, dynamic>.from(newClass);
@@ -242,9 +196,7 @@ class ApiService {
   // GET TEACHERS
   // =========================
 
-  static Future<List<Map<String, dynamic>>> getTeachers(
-    String token,
-  ) async {
+  static Future<List<Map<String, dynamic>>> getTeachers(String token) async {
     final response = await http.get(
       Uri.parse('$baseUrl/teachers'),
       headers: {
@@ -253,28 +205,20 @@ class ApiService {
       },
     );
 
-    final data =
-        jsonDecode(response.body) as Map<String, dynamic>;
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
 
     if (response.statusCode != 200) {
-      throw Exception(
-        data['message'] ?? 'Failed to load teachers',
-      );
+      throw Exception(data['message'] ?? 'Failed to load teachers');
     }
 
     final teachers = data['teachers'];
 
     if (teachers is! List) {
-      throw Exception(
-        'Invalid teachers data received.',
-      );
+      throw Exception('Invalid teachers data received.');
     }
 
     return teachers
-        .map(
-          (teacher) =>
-              Map<String, dynamic>.from(teacher as Map),
-        )
+        .map((teacher) => Map<String, dynamic>.from(teacher as Map))
         .toList();
   }
 
@@ -288,9 +232,7 @@ class ApiService {
   }) async {
     final uri = classId == null
         ? Uri.parse('$baseUrl/students')
-        : Uri.parse(
-            '$baseUrl/students?class_id=$classId',
-          );
+        : Uri.parse('$baseUrl/students?class_id=$classId');
 
     final response = await http.get(
       uri,
@@ -300,28 +242,20 @@ class ApiService {
       },
     );
 
-    final data =
-        jsonDecode(response.body) as Map<String, dynamic>;
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
 
     if (response.statusCode != 200) {
-      throw Exception(
-        data['message'] ?? 'Failed to load students',
-      );
+      throw Exception(data['message'] ?? 'Failed to load students');
     }
 
     final students = data['students'];
 
     if (students is! List) {
-      throw Exception(
-        'Invalid students data received.',
-      );
+      throw Exception('Invalid students data received.');
     }
 
     return students
-        .map(
-          (student) =>
-              Map<String, dynamic>.from(student as Map),
-        )
+        .map((student) => Map<String, dynamic>.from(student as Map))
         .toList();
   }
 
@@ -352,21 +286,16 @@ class ApiService {
       }),
     );
 
-    final data =
-        jsonDecode(response.body) as Map<String, dynamic>;
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
 
     if (response.statusCode != 201) {
-      throw Exception(
-        data['message'] ?? 'Failed to create student',
-      );
+      throw Exception(data['message'] ?? 'Failed to create student');
     }
 
     final student = data['student'];
 
     if (student is! Map) {
-      throw Exception(
-        'Invalid student data received.',
-      );
+      throw Exception('Invalid student data received.');
     }
 
     return Map<String, dynamic>.from(student);
@@ -387,9 +316,7 @@ class ApiService {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $token',
       },
-      body: jsonEncode({
-        'email': email,
-      }),
+      body: jsonEncode({'email': email}),
     );
 
     Map<String, dynamic> data = {};
@@ -405,9 +332,7 @@ class ApiService {
     }
 
     if (response.statusCode != 200) {
-      throw Exception(
-        data['message'] ?? 'Failed to update student',
-      );
+      throw Exception(data['message'] ?? 'Failed to update student');
     }
 
     final student = data['student'];
@@ -425,9 +350,7 @@ class ApiService {
   }) async {
     final uri = classId == null
         ? Uri.parse('$baseUrl/exams')
-        : Uri.parse(
-            '$baseUrl/exams?class_id=$classId',
-          );
+        : Uri.parse('$baseUrl/exams?class_id=$classId');
 
     final response = await http.get(
       uri,
@@ -437,29 +360,19 @@ class ApiService {
       },
     );
 
-    final data =
-        jsonDecode(response.body) as Map<String, dynamic>;
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
 
     if (response.statusCode != 200) {
-      throw Exception(
-        data['message'] ?? 'Failed to load exams',
-      );
+      throw Exception(data['message'] ?? 'Failed to load exams');
     }
 
     final exams = data['exams'];
 
     if (exams is! List) {
-      throw Exception(
-        'Invalid exams data received.',
-      );
+      throw Exception('Invalid exams data received.');
     }
 
-    return exams
-        .map(
-          (exam) =>
-              Map<String, dynamic>.from(exam as Map),
-        )
-        .toList();
+    return exams.map((exam) => Map<String, dynamic>.from(exam as Map)).toList();
   }
 
   // =========================
@@ -489,24 +402,90 @@ class ApiService {
       }),
     );
 
-    final data =
-        jsonDecode(response.body) as Map<String, dynamic>;
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
 
     if (response.statusCode != 201) {
-      throw Exception(
-        data['message'] ?? 'Failed to create exam',
-      );
+      throw Exception(data['message'] ?? 'Failed to create exam');
     }
 
     final exam = data['exam'];
 
     if (exam is! Map) {
-      throw Exception(
-        'Invalid exam data received.',
-      );
+      throw Exception('Invalid exam data received.');
     }
 
     return Map<String, dynamic>.from(exam);
+  }
+
+  // =========================
+  // CREATE EXAM SECTION
+  // =========================
+  static Future<Map<String, dynamic>> createExamSection({
+    required String token,
+    required int examId,
+    required String name,
+    required String questionType,
+    required int sectionOrder,
+    required num defaultPoints,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/exam_sections'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode({
+        'exam_id': examId,
+        'name': name,
+        'question_type': questionType,
+        'section_order': sectionOrder,
+        'default_points': defaultPoints,
+      }),
+    );
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map) throw Exception('Invalid section response.');
+    final data = Map<String, dynamic>.from(decoded);
+    if (response.statusCode != 201) {
+      throw Exception(
+        data['message']?.toString() ?? 'Failed to create section.',
+      );
+    }
+    final section = data['section'];
+    if (section is! Map) throw Exception('Invalid section data received.');
+    return Map<String, dynamic>.from(section);
+  }
+
+  static Future<void> deleteExamSection({
+    required String token,
+    required int sectionId,
+  }) async {
+    final response = await http.delete(
+      Uri.parse('$baseUrl/exam_sections/$sectionId'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+    if (response.statusCode != 200) {
+      final data = _decodeBody(response);
+      throw Exception(
+        data['message']?.toString() ?? 'Failed to delete section.'
+        '(HTTP ${response.statusCode}): ${response.body}',
+      );
+    }
+  }
+
+  static Future<void> deleteQuestion({
+    required String token,
+    required int questionId,
+  }) async {
+    final response = await http.delete(
+      Uri.parse('$baseUrl/questions/$questionId'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+    if (response.statusCode != 200) {
+      final data = _decodeBody(response);
+      throw Exception(
+        data['message']?.toString() ?? 'Failed to delete question.',
+      );
+    }
   }
 
   // =========================
@@ -517,9 +496,7 @@ class ApiService {
     String token,
     int examId,
   ) async {
-    final uri = Uri.parse(
-      '$baseUrl/exam_sections?exam_id=$examId',
-    );
+    final uri = Uri.parse('$baseUrl/exam_sections?exam_id=$examId');
 
     final response = await http.get(
       uri,
@@ -529,32 +506,25 @@ class ApiService {
       },
     );
 
-    final data =
-        jsonDecode(response.body) as Map<String, dynamic>;
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
 
     if (response.statusCode != 200) {
       throw Exception(
-        data['message']?.toString() ??
-            'Failed to load exam sections.',
+        data['message']?.toString() ?? 'Failed to load exam sections.',
       );
     }
 
     final sections = data['sections'];
 
     if (sections is! List) {
-      throw Exception(
-        'Invalid exam sections data received.',
-      );
+      throw Exception('Invalid exam sections data received.');
     }
 
     return sections
-        .map(
-          (section) =>
-              Map<String, dynamic>.from(section as Map),
-        )
+        .map((section) => Map<String, dynamic>.from(section as Map))
         .toList();
   }
-    // =========================
+  // =========================
   // GET QUESTIONS
   // =========================
 
@@ -562,9 +532,7 @@ class ApiService {
     String token,
     int sectionId,
   ) async {
-    final uri = Uri.parse(
-      '$baseUrl/questions?section_id=$sectionId',
-    );
+    final uri = Uri.parse('$baseUrl/questions?section_id=$sectionId');
 
     final response = await http.get(
       uri,
@@ -574,34 +542,25 @@ class ApiService {
       },
     );
 
-    final data =
-        jsonDecode(response.body) as Map<String, dynamic>;
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
 
     if (response.statusCode != 200) {
       throw Exception(
-        data['message']?.toString() ??
-            'Failed to load questions.',
+        data['message']?.toString() ?? 'Failed to load questions.',
       );
     }
 
     final questions = data['questions'];
 
     if (questions is! List) {
-      throw Exception(
-        'Invalid questions data received.',
-      );
+      throw Exception('Invalid questions data received.');
     }
 
     return questions
-        .map(
-          (question) =>
-              Map<String, dynamic>.from(
-                question as Map,
-              ),
-        )
+        .map((question) => Map<String, dynamic>.from(question as Map))
         .toList();
   }
-    // =========================
+  // =========================
   // CREATE QUESTION
   // =========================
 
@@ -630,106 +589,87 @@ class ApiService {
       }),
     );
 
-    final data =
-        jsonDecode(response.body) as Map<String, dynamic>;
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
 
     if (response.statusCode != 201) {
       throw Exception(
-        data['message']?.toString() ??
-            'Failed to create question.',
+        data['message']?.toString() ?? 'Failed to create question.',
       );
     }
 
     final question = data['question'];
 
     if (question is! Map) {
-      throw Exception(
-        'Invalid question data received.',
-      );
+      throw Exception('Invalid question data received.');
     }
 
     return Map<String, dynamic>.from(question);
   }
+
   static Future<List<Map<String, dynamic>>> getAcceptableAnswers(
-  String token,
-  int questionId,
-) async {
-  final uri = Uri.parse(
-    '$baseUrl/acceptable_answers?question_id=$questionId',
-  );
-
-  final response = await http.get(
-    uri,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $token',
-    },
-  );
-
-  final data =
-      jsonDecode(response.body) as Map<String, dynamic>;
-
-  if (response.statusCode != 200) {
-    throw Exception(
-      data['message']?.toString() ??
-          'Failed to load acceptable answers.',
+    String token,
+    int questionId,
+  ) async {
+    final uri = Uri.parse(
+      '$baseUrl/acceptable_answers?question_id=$questionId',
     );
+
+    final response = await http.get(
+      uri,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+    );
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        data['message']?.toString() ?? 'Failed to load acceptable answers.',
+      );
+    }
+
+    final answers = data['answers'];
+
+    if (answers is! List) {
+      throw Exception('Invalid acceptable answers data received.');
+    }
+
+    return answers
+        .map((answer) => Map<String, dynamic>.from(answer as Map))
+        .toList();
   }
 
-  final answers = data['answers'];
-
-  if (answers is! List) {
-    throw Exception(
-      'Invalid acceptable answers data received.',
+  static Future<Map<String, dynamic>> createAcceptableAnswer({
+    required String token,
+    required int questionId,
+    required String answer,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/acceptable_answers'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode({'question_id': questionId, 'answer': answer}),
     );
-  }
 
-  return answers
-      .map(
-        (answer) =>
-            Map<String, dynamic>.from(
-              answer as Map,
-            ),
-      )
-      .toList();
-}
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
 
-static Future<Map<String, dynamic>> createAcceptableAnswer({
-  required String token,
-  required int questionId,
-  required String answer,
-}) async {
-  final response = await http.post(
-    Uri.parse('$baseUrl/acceptable_answers'),
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $token',
-    },
-    body: jsonEncode({
-      'question_id': questionId,
-      'answer': answer,
-    }),
-  );
+    if (response.statusCode != 201) {
+      throw Exception(
+        data['message']?.toString() ?? 'Failed to add acceptable answer.',
+      );
+    }
 
-  final data =
-      jsonDecode(response.body) as Map<String, dynamic>;
+    final answerData = data['answer'];
 
-  if (response.statusCode != 201) {
-    throw Exception(
-      data['message']?.toString() ??
-          'Failed to add acceptable answer.',
-    );
-  }
+    if (answerData is! Map) {
+      throw Exception('Invalid acceptable answer data received.');
+    }
 
-  final answerData = data['answer'];
-
-  if (answerData is! Map) {
-    throw Exception(
-      'Invalid acceptable answer data received.',
-    );
-  }
-
-  return Map<String, dynamic>.from(answerData);
+    return Map<String, dynamic>.from(answerData);
   }
 
   // =========================
@@ -745,9 +685,9 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
   //   DELETE /teachers/:id                -> 200 { message }
 
   static Map<String, String> _authHeaders(String token) => {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      };
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer $token',
+  };
 
   /// Decodes a JSON object body, tolerating empty / non-JSON responses.
   static Map<String, dynamic> _decodeBody(http.Response response) {
@@ -762,31 +702,29 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
     return <String, dynamic>{};
   }
 
-
-
   /// Retrieves a list of all teacher departments.
   static Future<List<String>> getTeacherDepartments(String token) async {
-  final response = await http.get(
-    Uri.parse('$baseUrl/teacher_departments'),
-    headers: _authHeaders(token),
-  );
-
-  final data = _decodeBody(response);
-
-  if (response.statusCode != 200) {
-    throw Exception(
-      data['message']?.toString() ?? 'Failed to load teacher departments',
+    final response = await http.get(
+      Uri.parse('$baseUrl/teacher_departments'),
+      headers: _authHeaders(token),
     );
+
+    final data = _decodeBody(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        data['message']?.toString() ?? 'Failed to load teacher departments',
+      );
+    }
+
+    final departments = data['departments'];
+
+    if (departments is! List) {
+      return <String>[];
+    }
+
+    return departments.map((item) => item.toString()).toList();
   }
-
-  final departments = data['departments'];
-
-  if (departments is! List) {
-    return <String>[];
-  }
-
-  return departments.map((item) => item.toString()).toList();
-}
 
   /// [assignments]: [{subject_id, section, school_year, semester}, ...]
   /// A Subject + Section already owned by another teacher => HTTP 409.
@@ -795,76 +733,73 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
     required String firstName,
     String middleName = '',
     required String lastName,
-   required String department,
-   required String temporaryPassword,
+    required String department,
+    required String temporaryPassword,
     List<Map<String, dynamic>> assignments = const [],
-}) async {
+  }) async {
     final response = await http.post(
       Uri.parse('$baseUrl/teachers'),
-     headers: _authHeaders(token),
-     body: jsonEncode({
-      'first_name': firstName,
-      'middle_name': middleName,
-      'last_name': lastName,
-      'department': department,
-      'temporary_password': temporaryPassword,
-      'assignments': assignments,
+      headers: _authHeaders(token),
+      body: jsonEncode({
+        'first_name': firstName,
+        'middle_name': middleName,
+        'last_name': lastName,
+        'department': department,
+        'temporary_password': temporaryPassword,
+        'assignments': assignments,
       }),
-  );  
-
-  final data = _decodeBody(response);
-
-  if (response.statusCode != 201) {
-    throw Exception(
-      data['message']?.toString() ?? 'Failed to create teacher',
     );
+
+    final data = _decodeBody(response);
+
+    if (response.statusCode != 201) {
+      throw Exception(
+        data['message']?.toString() ?? 'Failed to create teacher',
+      );
+    }
+
+    final teacher = data['teacher'];
+
+    return teacher is Map ? Map<String, dynamic>.from(teacher) : data;
   }
-
-  final teacher = data['teacher'];
-
-  return teacher is Map ? Map<String, dynamic>.from(teacher) : data;
-}
 
   /// Pass [assignments] to change them in the same transaction as the
   /// profile; leave it null to keep the teacher's assignments untouched.
   static Future<Map<String, dynamic>> updateTeacher({
-  required String token,
-  required int teacherId,
-  required String firstName,
-  String middleName = '',
-  required String lastName,
-  required String department,
-  bool? isActive,
-  List<Map<String, dynamic>>? assignments,
-}) async {
-  final response = await http.put(
-    Uri.parse('$baseUrl/teachers/$teacherId'),
-    headers: _authHeaders(token),
-    body: jsonEncode({
-      'first_name': firstName,
-      'middle_name': middleName,
-      'last_name': lastName,
-      'department': department,
-      'is_active': ?isActive,
-      'assignments': ?assignments,
-    }),
-  );
-
-  final data = _decodeBody(response);
-
-  if (response.statusCode != 200) {
-    throw Exception(
-      data['message']?.toString() ?? 'Failed to update teacher',
+    required String token,
+    required int teacherId,
+    required String firstName,
+    String middleName = '',
+    required String lastName,
+    required String department,
+    bool? isActive,
+    List<Map<String, dynamic>>? assignments,
+  }) async {
+    final response = await http.put(
+      Uri.parse('$baseUrl/teachers/$teacherId'),
+      headers: _authHeaders(token),
+      body: jsonEncode({
+        'first_name': firstName,
+        'middle_name': middleName,
+        'last_name': lastName,
+        'department': department,
+        'is_active': ?isActive,
+        'assignments': ?assignments,
+      }),
     );
+
+    final data = _decodeBody(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        data['message']?.toString() ?? 'Failed to update teacher',
+      );
+    }
+
+    final teacher = data['teacher'];
+
+    return teacher is Map ? Map<String, dynamic>.from(teacher) : data;
   }
-
-  final teacher = data['teacher'];
-
-  return teacher is Map
-      ? Map<String, dynamic>.from(teacher)
-      : data;
-}
-
 
   /// Replaces the teacher's whole set of Subject + Section assignments.
   static Future<Map<String, dynamic>> setTeacherAssignments({
@@ -875,9 +810,7 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
     final response = await http.put(
       Uri.parse('$baseUrl/teachers/$teacherId/assignments'),
       headers: _authHeaders(token),
-      body: jsonEncode({
-        'assignments': assignments,
-      }),
+      body: jsonEncode({'assignments': assignments}),
     );
 
     final data = _decodeBody(response);
@@ -908,9 +841,7 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
     final data = _decodeBody(response);
 
     if (response.statusCode != 200) {
-      throw Exception(
-        data['message']?.toString() ?? 'Failed to load sections',
-      );
+      throw Exception(data['message']?.toString() ?? 'Failed to load sections');
     }
 
     final sections = data['sections'];
@@ -919,9 +850,7 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
       return [];
     }
 
-    return sections
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
+    return sections.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
   /// Returns the newly generated temporary password (shown once by the UI).
@@ -961,9 +890,7 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
     final response = await http.patch(
       Uri.parse('$baseUrl/teachers/$teacherId/active'),
       headers: _authHeaders(token),
-      body: jsonEncode({
-        'is_active': active,
-      }),
+      body: jsonEncode({'is_active': active}),
     );
 
     final data = _decodeBody(response);
@@ -971,9 +898,7 @@ static Future<Map<String, dynamic>> createAcceptableAnswer({
     if (response.statusCode != 200) {
       throw Exception(
         data['message']?.toString() ??
-            (active
-                ? 'Failed to enable account'
-                : 'Failed to disable account'),
+            (active ? 'Failed to enable account' : 'Failed to disable account'),
       );
     }
 
