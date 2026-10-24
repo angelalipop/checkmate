@@ -32,6 +32,21 @@ Future<Response> onRequest(RequestContext context) async {
         if (yearLevel == null) return _error(400, 'Year level is required');
         if (semester == null) return _error(400, 'Semester is required');
 
+        final rawNames = body['names'];
+        if (rawNames is List) {
+          final sections = await SectionService.createMany(
+            programId: programId,
+            names: rawNames.map((e) => '$e').toList(),
+            yearLevel: yearLevel,
+            schoolYear: '${body['school_year'] ?? ''}'.trim(),
+            semester: semester,
+          );
+          return Response.json(
+            statusCode: 201,
+            body: {'status': 'ok', 'sections': sections},
+          );
+        }
+
         final section = await SectionService.create(
           programId: programId,
           name: '${body['name'] ?? ''}',

@@ -62,4 +62,37 @@ class SectionApi {
     }
     return Map<String, dynamic>.from(data['section'] as Map);
   }
+
+  /// Creates several sections in one request (all or nothing).
+  /// Returns the created sections.
+  static Future<List<Map<String, dynamic>>> createSections(
+    String token, {
+    required int programId,
+    required List<String> names,
+    required int yearLevel,
+    required String schoolYear,
+    required int semester,
+  }) async {
+    final response = await http.post(
+      Uri.parse('${ApiService.baseUrl}/sections'),
+      headers: _headers(token),
+      body: jsonEncode({
+        'program_id': programId,
+        'names': names,
+        'year_level': yearLevel,
+        'school_year': schoolYear,
+        'semester': semester,
+      }),
+    );
+    final data = _decode(response);
+    if (response.statusCode != 201) {
+      throw Exception(data['message'] ?? 'Failed to create sections');
+    }
+    final list = data['sections'];
+    if (list is! List) throw Exception('Invalid response from server.');
+    return list
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
 }

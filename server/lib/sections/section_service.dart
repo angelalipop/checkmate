@@ -82,4 +82,68 @@ class SectionService {
     );
     return _json(row.first);
   }
+
+  /// Creates all [names] in one transaction: if any name already exists,
+  /// nothing is saved. Throws [ArgumentError] on bad input.
+  static Future<List<Map<String, dynamic>>> createMany({
+    required int programId,
+    required List<String> names,
+    required int yearLevel,
+    required String schoolYear,
+    required int semester,
+  }) async {
+    final cleanNames = names.map((e) => e.trim()).where((e) => e.isNotEmpty);
+    final unique = cleanNames.toSet().toList();
+    if (unique.isEmpty) throw ArgumentError('At least one section is required.');
+    if (unique.length > 26) throw ArgumentError('Too many sections at once.');
+    if (!RegExp(r'^\d{4}-\d{4}$').hasMatch(schoolYear)) {
+      throw ArgumentError('School year must look like 2026-2027.');
+    }
+    if (semester != 1 && semester != 2) {
+      throw ArgumentError('Semester must be 1 or 2.');
+    }
+
+    final program = await Database.pool.execute(
+      Sql.named('''
+        SELECT level FROM academic_programs
+        WHERE id = @id AND is_deleted = FALSE
+      '''),
+      parameters: {'id': programId},
+    );
+    if (program.isEmpty) throw ArgumentError('Program or strand not found.');
+
+    final maxYear = program.first[0] == 'shs' ? 2 : 4;
+    if (yearLevel < 1 || yearLevel > maxYear) {
+      throw ArgumentError('Year level must be between 1 and $maxYear.');
+    }
+
+    final ids = await Database.pool.runTx((tx) async {
+      final out = <Object?>[];
+      for (final name in unique) {
+        final r = await tx.execute(
+          Sql.named('''
+            INSERT INTO sections
+              (program_id, name, year_level, school_year, semester)
+            VALUES (@program_id, @name, @year_level, @school_year, @semester)
+            RETURNING id
+          '''),
+          parameters: {
+            'program_id': programId,
+            'name': name,
+            'year_level': yearLevel,
+            'school_year': schoolYear,
+            'semester': semester,
+          },
+        );
+        out.add(r.first[0]);
+      }
+      return out;
+    });
+
+    final rows = await Database.pool.execute(
+      Sql.named('$_select WHERE s.id = ANY(@ids) ORDER BY s.name'),
+      parameters: {'ids': TypedValue(Type.integerArray, ids)},
+    );
+    return rows.map(_json).toList();
+  }
 }

@@ -1,4 +1,8 @@
+import 'dart:convert';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
@@ -7,11 +11,19 @@ import 'exams_screen.dart';
 import 'login_screen.dart' show CmColors, LoginScreen;
 
 // =============================================================
-// CheckMate — Teacher Dashboard (responsive)
+// CheckMate — Teacher app shell + Dashboard home
 //
-// Desktop  (>= 900):  persistent sidebar + top bar
-// Tablet   (600-899): app bar + drawer
-// Mobile   (< 600):   app bar + drawer + bottom navigation
+// TeacherShell wraps every teacher screen (same pattern as AdminShell):
+//   Desktop  (>= 900):  navy sidebar (256px) that collapses to an
+//                       80px icon rail. The collapse state is shared, so
+//                       it persists across every tab / module screen.
+//   Tablet / phone:     navy top bar (hamburger + logo) and a
+//                       full-height overlay drawer. Closes via the close
+//                       button, backdrop tap, Escape, or after navigating.
+//                       Phones also keep the bottom navigation bar.
+//
+// Module screens (Exams, Scans) are NOT modified. They are simply
+// wrapped by TeacherShell when pushed.
 //
 // Classes and exams come from ApiService. Review queue and analytics
 // are still sample data (no backend endpoints yet).
@@ -19,6 +31,45 @@ import 'login_screen.dart' show CmColors, LoginScreen;
 
 const double _kDesktop = 900;
 const double _kTablet = 600;
+const double _kSidebarWide = 256;
+const double _kSidebarRail = 80;
+
+// =============================================================
+// SIDEBAR PALETTE
+// =============================================================
+
+class _Pal {
+  _Pal._();
+
+  /// Sidebar + mobile top bar background (expanded and collapsed).
+  static const Color sidebar = Color(0xFF162137);
+
+  /// Active / hovered sidebar item.
+  static const Color sidebarActive = Color(0xFF2D384D);
+
+  /// Sidebar text and icons.
+  static const Color sidebarFg = Color(0xFFCFD8E5);
+
+  /// Notification dot (amber).
+  static const Color notifDot = Color(0xFFF7A224);
+
+  /// Divider above Profile / Log out (white at 12% opacity).
+  static final Color divider = Colors.white.withValues(alpha: 0.12);
+}
+
+/// Persists the sidebar collapse state across screens for the session.
+final ValueNotifier<bool> _sidebarCollapsed = ValueNotifier<bool>(false);
+
+/// The dashboard's route, so sidebar items in module screens can return to
+/// it without popping past it (which would land on the login screen).
+Route<dynamic>? _teacherDashboardRoute;
+
+/// Lets a module screen's shell ask the dashboard to switch tab.
+void Function(TeacherPage page)? _dashboardNavigate;
+
+// =============================================================
+// DESTINATIONS
+// =============================================================
 
 enum TeacherPage {
   dashboard('Dashboard', Icons.space_dashboard_outlined),
@@ -33,6 +84,15 @@ enum TeacherPage {
   final String label;
   final IconData icon;
 }
+
+/// Pages shown in the phone bottom navigation bar (a 5th "More" opens the
+/// drawer).
+const List<TeacherPage> _bottomPages = [
+  TeacherPage.dashboard,
+  TeacherPage.classes,
+  TeacherPage.exams,
+  TeacherPage.scans,
+];
 
 // ---------- Placeholder data ----------
 
@@ -94,7 +154,762 @@ class _ExamInfo {
 }
 
 // =============================================================
-// SCREEN
+// SIGNED-IN USER (shown at the bottom of the navigation panel)
+// =============================================================
+
+class _TeacherIdentity {
+  static String? name;
+  static String? email;
+
+  /// Used when the stored token has no name.
+  static String fallbackName = 'Teacher';
+  static bool _loaded = false;
+
+  /// Reads name/email from the stored JWT payload (no network call).
+  static Future<void> load() async {
+    if (_loaded) return;
+    try {
+      final token = await AuthStorage.getToken();
+      if (token == null || token.isEmpty) return;
+
+      final parts = token.split('.');
+      if (parts.length != 3) return;
+
+      final payload = utf8.decode(
+        base64Url.decode(base64Url.normalize(parts[1])),
+      );
+
+      final decoded = jsonDecode(payload);
+
+      if (decoded is Map) {
+        final source = decoded['user'] is Map
+            ? decoded['user'] as Map
+            : decoded;
+
+        final n = (source['name'] ?? source['full_name'] ?? source['username'])
+            ?.toString();
+        final e = source['email']?.toString();
+        if (n != null && n.isNotEmpty) name = n;
+        if (e != null && e.isNotEmpty) email = e;
+      }
+      _loaded = true;
+    } catch (_) {
+      // Fall back to defaults.
+    }
+  }
+
+  static void reset() {
+    name = null;
+    email = null;
+    fallbackName = 'Teacher';
+    _loaded = false;
+  }
+
+  static String get displayName => name ?? fallbackName;
+
+  static String initials(String n) {
+    final parts = n
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    if (parts.isEmpty) return 'T';
+    if (parts.length == 1) {
+      return parts[0].substring(0, math.min(2, parts[0].length)).toUpperCase();
+    }
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+}
+
+// =============================================================
+// NAVIGATION HELPERS
+// =============================================================
+
+/// Teacher-facing module screens (same screens the admin flow used):
+///  - Exams: create exam -> ExamBuilderScreen (sections/questions,
+///    answer-sheet preview + PDF print/download).
+///  - Scans: AnswerSheetInputScreen -> camera/upload -> OMR -> scoring.
+Widget? _moduleScreenFor(TeacherPage page) {
+  switch (page) {
+    case TeacherPage.exams:
+      return const ExamsScreen();
+    case TeacherPage.scans:
+      return const AnswerSheetInputScreen();
+    default:
+      return null; // shown inside the dashboard body
+  }
+}
+
+/// No transition: the shell (sidebar + header) stays visually in place, so
+/// switching to Exams / Scans feels exactly like switching a dashboard tab.
+Route<void> _shellRoute(TeacherPage page, Widget screen) {
+  return PageRouteBuilder<void>(
+    transitionDuration: Duration.zero,
+    reverseTransitionDuration: Duration.zero,
+    pageBuilder: (_, _, _) => _ModuleShell(page: page, child: screen),
+  );
+}
+
+Future<void> _performLogout(BuildContext context) async {
+  await AuthStorage.deleteToken();
+  _TeacherIdentity.reset();
+  if (!context.mounted) return;
+  Navigator.pushAndRemoveUntil(
+    context,
+    MaterialPageRoute(builder: (_) => const LoginScreen()),
+    (route) => false,
+  );
+}
+
+void _soon(BuildContext context, String what) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text('$what is coming soon.')),
+  );
+}
+
+/// Wraps an existing, unmodified module screen with the shared shell.
+class _ModuleShell extends StatelessWidget {
+  const _ModuleShell({required this.page, required this.child});
+
+  final TeacherPage page;
+  final Widget child;
+
+  void _select(BuildContext context, TeacherPage target) {
+    if (target == page) return;
+
+    // Another module screen: swap it in, keeping the same shell.
+    final screen = _moduleScreenFor(target);
+    if (screen != null) {
+      Navigator.of(context).pushReplacement(_shellRoute(target, screen));
+      return;
+    }
+
+    // A tab that lives inside the dashboard: return to the dashboard route
+    // itself (never pop past it) and switch its tab.
+    final dashboard = _teacherDashboardRoute;
+    if (dashboard != null) {
+      Navigator.of(context).popUntil((route) => route == dashboard);
+      _dashboardNavigate?.call(target);
+    } else {
+      Navigator.of(context).pop();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TeacherShell(
+      current: page,
+      onSelect: (p) => _select(context, p),
+      onLogout: () => _performLogout(context),
+      child: child,
+    );
+  }
+}
+
+// =============================================================
+// APP SHELL
+// =============================================================
+
+class TeacherShell extends StatefulWidget {
+  const TeacherShell({
+    super.key,
+    required this.current,
+    required this.onSelect,
+    required this.onLogout,
+    required this.child,
+    this.desktopHeader,
+    this.mobileActions = const [],
+  });
+
+  final TeacherPage current;
+  final ValueChanged<TeacherPage> onSelect;
+  final VoidCallback onLogout;
+  final Widget child;
+
+  /// Optional bar shown above the content on desktop (dashboard only).
+  final Widget? desktopHeader;
+
+  /// Optional actions on the right of the mobile top bar.
+  final List<Widget> mobileActions;
+
+  @override
+  State<TeacherShell> createState() => _TeacherShellState();
+}
+
+class _TeacherShellState extends State<TeacherShell> {
+  bool _drawerOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _TeacherIdentity.load().then((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _openDrawer() => setState(() => _drawerOpen = true);
+
+  void _closeDrawer() {
+    if (_drawerOpen) setState(() => _drawerOpen = false);
+  }
+
+  void _select(TeacherPage page) {
+    _closeDrawer(); // always close after navigating
+    widget.onSelect(page);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth;
+
+        // ---------- Desktop ----------
+        if (w >= _kDesktop) {
+          return Scaffold(
+            backgroundColor: CmColors.bg,
+            body: Row(
+              children: [
+                ValueListenableBuilder<bool>(
+                  valueListenable: _sidebarCollapsed,
+                  builder: (context, collapsed, _) {
+                    return AnimatedContainer(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      width: collapsed ? _kSidebarRail : _kSidebarWide,
+                      child: _Sidebar(
+                        current: widget.current,
+                        onSelect: _select,
+                        onLogout: widget.onLogout,
+                        userName: _TeacherIdentity.displayName,
+                        userEmail: _TeacherIdentity.email,
+                        // When the page has its own header, the toggle lives there.
+                        collapsible: widget.desktopHeader == null,
+                        collapsed: collapsed,
+                        onToggle: () => _sidebarCollapsed.value = !collapsed,
+                      ),
+                    );
+                  },
+                ),
+                Expanded(
+                  child: Column(
+                    children: [
+                      if (widget.desktopHeader != null) widget.desktopHeader!,
+                      Expanded(child: widget.child),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        // ---------- Tablet / phone ----------
+        final isMobile = w < _kTablet;
+        final bottomIndex = _bottomPages.indexOf(widget.current);
+
+        // The drawer sits above the whole Scaffold so it also covers the
+        // bottom navigation bar.
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: Scaffold(
+                backgroundColor: CmColors.bg,
+                body: Column(
+                  children: [
+                    _MobileTopBar(
+                      onMenu: _openDrawer,
+                      actions: widget.mobileActions,
+                    ),
+                    Expanded(child: widget.child),
+                  ],
+                ),
+                bottomNavigationBar: isMobile
+                    ? NavigationBar(
+                        backgroundColor: Colors.white,
+                        indicatorColor:
+                            _Pal.sidebar.withValues(alpha: 0.10),
+                        selectedIndex: bottomIndex == -1 ? 4 : bottomIndex,
+                        onDestinationSelected: (i) {
+                          if (i == 4) {
+                            _openDrawer();
+                          } else {
+                            _select(_bottomPages[i]);
+                          }
+                        },
+                        destinations: [
+                          for (final p in _bottomPages)
+                            NavigationDestination(
+                              icon: Icon(p.icon, color: CmColors.slate),
+                              selectedIcon: Icon(p.icon, color: _Pal.sidebar),
+                              label: p == TeacherPage.dashboard
+                                  ? 'Home'
+                                  : p.label,
+                            ),
+                          const NavigationDestination(
+                            icon: Icon(Icons.more_horiz, color: CmColors.slate),
+                            selectedIcon:
+                                Icon(Icons.more_horiz, color: _Pal.sidebar),
+                            label: 'More',
+                          ),
+                        ],
+                      )
+                    : null,
+              ),
+            ),
+            if (_drawerOpen) _buildDrawer(w),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildDrawer(double screenWidth) {
+    final drawerWidth = math.min(300.0, screenWidth * 0.85);
+
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): _closeDrawer,
+      },
+      child: Focus(
+        autofocus: true,
+        child: TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0, end: 1),
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          builder: (context, t, child) {
+            return Stack(
+              children: [
+                // Dimmed backdrop — tap to close.
+                Positioned.fill(
+                  child: Semantics(
+                    button: true,
+                    label: 'Close navigation menu',
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: _closeDrawer,
+                      child: ColoredBox(
+                        color: Colors.black.withValues(alpha: 0.5 * t),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 0,
+                  bottom: 0,
+                  left: -drawerWidth * (1 - t),
+                  width: drawerWidth,
+                  child: child!,
+                ),
+              ],
+            );
+          },
+          child: Semantics(
+            scopesRoute: true,
+            explicitChildNodes: true,
+            namesRoute: true,
+            label: 'Navigation drawer',
+            child: Material(
+              color: _Pal.sidebar,
+              elevation: 16,
+              child: SafeArea(
+                child: _Sidebar(
+                  current: widget.current,
+                  onSelect: _select,
+                  onLogout: () {
+                    _closeDrawer();
+                    widget.onLogout();
+                  },
+                  userName: _TeacherIdentity.displayName,
+                  userEmail: _TeacherIdentity.email,
+                  onClose: _closeDrawer,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================
+// MOBILE TOP BAR
+// =============================================================
+
+class _MobileTopBar extends StatelessWidget {
+  const _MobileTopBar({required this.onMenu, required this.actions});
+
+  final VoidCallback onMenu;
+  final List<Widget> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: _Pal.sidebar,
+      child: SafeArea(
+        bottom: false,
+        child: SizedBox(
+          height: 64,
+          child: Row(
+            children: [
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: 'Open navigation menu',
+                icon: const Icon(Icons.menu, color: _Pal.sidebarFg),
+                onPressed: onMenu,
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Image.asset(
+                    'assets/transparent_logo1.png',
+                    height: 44,
+                    fit: BoxFit.contain,
+                    alignment: Alignment.centerLeft,
+                    cacheHeight: 132,
+                    errorBuilder: (context, error, stackTrace) => const Text(
+                      'CheckMate',
+                      style: TextStyle(
+                        color: _Pal.sidebarFg,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 18,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              ...actions,
+              const SizedBox(width: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================
+// SIDEBAR
+// =============================================================
+
+class _Sidebar extends StatelessWidget {
+  const _Sidebar({
+    required this.current,
+    required this.onSelect,
+    required this.onLogout,
+    required this.userName,
+    this.userEmail,
+    this.collapsible = false,
+    this.collapsed = false,
+    this.onToggle,
+    this.onClose,
+  });
+
+  final TeacherPage current;
+  final ValueChanged<TeacherPage> onSelect;
+  final VoidCallback onLogout;
+  final String userName;
+  final String? userEmail;
+  final bool collapsible;
+  final bool collapsed;
+  final VoidCallback? onToggle;
+  final VoidCallback? onClose; // non-null => drawer mode
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: _Pal.sidebar,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Hide labels while the width animation is still narrow.
+          final showLabels = constraints.maxWidth > 180;
+
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(12, 16, 12, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _header(showLabels),
+                Divider(color: _Pal.divider, height: 24),
+                Expanded(
+                  child: ListView(
+                    children: [
+                      for (final p in TeacherPage.values)
+                        _SidebarItem(
+                          icon: p.icon,
+                          label: p.label,
+                          active: p == current,
+                          showLabel: showLabels,
+                          onTap: () => onSelect(p),
+                        ),
+                    ],
+                  ),
+                ),
+                Divider(color: _Pal.divider, height: 20),
+                _userCard(context, showLabels),
+                const SizedBox(height: 4),
+                _SidebarItem(
+                  icon: Icons.logout,
+                  label: 'Log out',
+                  active: false,
+                  showLabel: showLabels,
+                  onTap: onLogout,
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _userCard(BuildContext context, bool showLabels) {
+    final avatar = CircleAvatar(
+      radius: 16,
+      backgroundColor: _Pal.sidebarActive,
+      child: Text(
+        _TeacherIdentity.initials(userName),
+        style: const TextStyle(
+          color: _Pal.sidebarFg,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+
+    final email = userEmail;
+
+    final content = InkWell(
+      borderRadius: BorderRadius.circular(12),
+      hoverColor: _Pal.sidebarActive,
+      highlightColor: _Pal.sidebarActive,
+      splashColor: _Pal.sidebarActive,
+      onTap: () => _soon(context, 'Profile'),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+        child: Row(
+          mainAxisAlignment:
+              showLabels ? MainAxisAlignment.start : MainAxisAlignment.center,
+          children: [
+            avatar,
+            if (showLabels) ...[
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      userName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _Pal.sidebarFg,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (email != null && email.isNotEmpty)
+                      Text(
+                        email,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: _Pal.sidebarFg.withValues(alpha: 0.7),
+                          fontSize: 12,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+
+    return Material(
+      color: Colors.transparent,
+      child: showLabels
+          ? content
+          : Tooltip(message: 'Profile — $userName', child: content),
+    );
+  }
+
+  Widget _header(bool showLabels) {
+    final toggle = collapsible
+        ? IconButton(
+            tooltip: collapsed ? 'Expand sidebar' : 'Collapse sidebar',
+            icon: Icon(
+              collapsed
+                  ? Icons.keyboard_double_arrow_right
+                  : Icons.keyboard_double_arrow_left,
+              color: _Pal.sidebarFg,
+            ),
+            onPressed: onToggle,
+          )
+        : null;
+
+    final close = onClose != null
+        ? IconButton(
+            tooltip: 'Close navigation menu',
+            icon: const Icon(Icons.close, color: _Pal.sidebarFg),
+            onPressed: onClose,
+          )
+        : null;
+
+    if (!showLabels) {
+      // Icon-only rail: circular logo (+ toggle when this page has none).
+      return Column(
+        children: [
+          Image.asset(
+            'assets/logo_circle.png',
+            width: 52,
+            height: 52,
+            fit: BoxFit.contain,
+            errorBuilder: (context, error, stackTrace) => const Icon(
+              Icons.fact_check_rounded,
+              color: _Pal.sidebarFg,
+              size: 32,
+            ),
+          ),
+          if (toggle != null) ...[const SizedBox(height: 8), toggle],
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: SizedBox(
+                height: 60,
+                child: Image.asset(
+                  'assets/dashboard_logo.png',
+                  fit: BoxFit.contain,
+                  alignment: Alignment.centerLeft,
+                  cacheWidth: 600,
+                  errorBuilder: (context, error, stackTrace) => const Row(
+                    children: [
+                      Icon(Icons.fact_check_rounded, color: _Pal.sidebarFg),
+                      SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          'CheckMate',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: _Pal.sidebarFg,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            ?toggle,
+            ?close,
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: _Pal.sidebarActive,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: const Text(
+            'TEACHER PORTAL',
+            style: TextStyle(
+              color: _Pal.sidebarFg,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SidebarItem extends StatelessWidget {
+  const _SidebarItem({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.showLabel,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool active;
+  final bool showLabel;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final item = Material(
+      color: active ? _Pal.sidebarActive : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        hoverColor: _Pal.sidebarActive,
+        highlightColor: _Pal.sidebarActive,
+        splashColor: _Pal.sidebarActive,
+        onTap: onTap,
+        child: SizedBox(
+          height: 44,
+          child: Row(
+            mainAxisAlignment: showLabel
+                ? MainAxisAlignment.start
+                : MainAxisAlignment.center,
+            children: [
+              if (showLabel) const SizedBox(width: 12),
+              Icon(icon, color: _Pal.sidebarFg, size: 21),
+              if (showLabel) ...[
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: _Pal.sidebarFg,
+                      fontSize: 14.5,
+                      fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Semantics(
+        button: true,
+        selected: active,
+        label: label,
+        excludeSemantics: true,
+        child: showLabel ? item : Tooltip(message: label, child: item),
+      ),
+    );
+  }
+}
+
+// =============================================================
+// SCREEN (dashboard home + in-dashboard tabs)
 // =============================================================
 
 class TeacherDashboard extends StatefulWidget {
@@ -107,8 +922,8 @@ class TeacherDashboard extends StatefulWidget {
 }
 
 class _TeacherDashboardState extends State<TeacherDashboard> {
-  final _scaffoldKey = GlobalKey<ScaffoldState>();
   TeacherPage _page = TeacherPage.dashboard;
+  Route<dynamic>? _route;
 
   bool _loading = true;
   String? _error;
@@ -118,16 +933,42 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
   @override
   void initState() {
     super.initState();
+    _TeacherIdentity.fallbackName = widget.teacherName;
+    _dashboardNavigate = _goTo;
     _loadData();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _route = ModalRoute.of(context);
+    _teacherDashboardRoute = _route;
+  }
+
+  @override
+  void dispose() {
+    if (_teacherDashboardRoute == _route) _teacherDashboardRoute = null;
+    if (_dashboardNavigate == _goTo) _dashboardNavigate = null;
+    super.dispose();
+  }
+
+  /// Called by a module screen's shell to land on a dashboard tab.
+  void _goTo(TeacherPage page) {
+    if (!mounted) return;
+    setState(() => _page = page);
   }
 
   // The backend must return only this teacher's classes/exams.
   // Nothing here filters by teacher on the client.
-  Future<void> _loadData() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  Future<void> _loadData({bool silent = false}) async {
+    if (!mounted) return;
+    // A silent refresh keeps the current content on screen (no spinner flash).
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
 
     try {
       final token = await AuthStorage.getToken();
@@ -202,6 +1043,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
       });
     } catch (e) {
       if (!mounted) return;
+      if (silent) return; // keep showing the last good data
       setState(() {
         _error = e.toString().replaceFirst('Exception: ', '');
         _loading = false;
@@ -209,51 +1051,18 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     }
   }
 
-  static const _bottomPages = [
-    TeacherPage.dashboard,
-    TeacherPage.classes,
-    TeacherPage.exams,
-    TeacherPage.scans,
-  ];
 
-  Future<void> _logout() async {
-    await AuthStorage.deleteToken();
-    if (!mounted) return;
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
-      (route) => false,
-    );
-  }
+  Future<void> _logout() => _performLogout(context);
 
-  /// Teacher-facing module screens (same screens the admin flow used):
-  ///  - Exams: create exam -> ExamBuilderScreen (sections/questions,
-  ///    answer-sheet preview + PDF print/download).
-  ///  - Scans: AnswerSheetInputScreen -> camera/upload -> OMR -> scoring.
-  Widget? _moduleScreenFor(TeacherPage page) {
-    switch (page) {
-      case TeacherPage.exams:
-        return const ExamsScreen();
-      case TeacherPage.scans:
-        return const AnswerSheetInputScreen();
-      default:
-        return null;
-    }
-  }
-
-  Future<void> _select(TeacherPage page, {bool closeDrawer = false}) async {
-    if (closeDrawer) Navigator.pop(context);
-
-    // These module screens have their own full-screen Scaffold/AppBar, so
-    // they are opened as routes instead of being embedded in the body.
+  Future<void> _select(TeacherPage page) async {
+    // Exams / Scans have their own full-screen Scaffold/AppBar, so they are
+    // opened as routes — wrapped in the same shell so the sidebar (and its
+    // collapse state) stays consistent.
     final screen = _moduleScreenFor(page);
     if (screen != null) {
-      await Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => screen),
-      );
+      await Navigator.push(context, _shellRoute(page, screen));
       // Refresh exams/statuses after creating, building or scanning.
-      if (mounted) _loadData();
+      if (mounted) _loadData(silent: true);
       return;
     }
 
@@ -264,7 +1073,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     if (_page == TeacherPage.dashboard) {
       return _DashboardContent(
         teacherName: widget.teacherName,
-        onNavigate: (p) => _select(p),
+        onNavigate: _select,
         loading: _loading,
         error: _error,
         onRetry: _loadData,
@@ -277,262 +1086,13 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (context, constraints) {
-      final w = constraints.maxWidth;
-
-      // ---------- Desktop ----------
-      if (w >= _kDesktop) {
-        return Scaffold(
-          backgroundColor: CmColors.bg,
-          body: Row(
-            children: [
-              SizedBox(
-                width: 250,
-                child: _Sidebar(
-                  current: _page,
-                  onSelect: (p) => _select(p),
-                  onLogout: _logout,
-                ),
-              ),
-              Expanded(
-                child: Column(
-                  children: [
-                    _DesktopTopBar(
-                      teacherName: widget.teacherName,
-                      onLogout: _logout,
-                    ),
-                    Expanded(child: _body()),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      }
-
-      // ---------- Tablet / Mobile ----------
-      final isMobile = w < _kTablet;
-      final bottomIndex = _bottomPages.indexOf(_page);
-
-      return Scaffold(
-        key: _scaffoldKey,
-        backgroundColor: CmColors.bg,
-        appBar: AppBar(
-          backgroundColor: CmColors.navy,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          leading: IconButton(
-            tooltip: 'Menu',
-            icon: const Icon(Icons.menu),
-            onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-          ),
-          titleSpacing: 4,
-          // transparent_logo1.png replaces the title text (mobile/tablet).
-          title: Image.asset(
-            'assets/transparent_logo1.png',
-            height: 48,
-            fit: BoxFit.contain,
-            alignment: Alignment.centerLeft,
-            cacheHeight: 144,
-            errorBuilder: (context, error, stackTrace) {
-              debugPrint('APP BAR LOGO ERROR: $error');
-              return const Text(
-                'CheckMate',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              );
-            },
-          ),
-          actions: [
-            const _NotificationBell(onDark: true),
-            Padding(
-              padding: const EdgeInsets.only(right: 12, left: 4),
-              child: _ProfileMenu(
-                name: widget.teacherName,
-                onLogout: _logout,
-                showName: false,
-              ),
-            ),
-          ],
-        ),
-        drawer: Drawer(
-          backgroundColor: CmColors.navy,
-          child: SafeArea(
-            child: _Sidebar(
-              current: _page,
-              onSelect: (p) => _select(p, closeDrawer: true),
-              onLogout: _logout,
-            ),
-          ),
-        ),
-        body: _body(),
-        bottomNavigationBar: isMobile
-            ? NavigationBar(
-                backgroundColor: Colors.white,
-                indicatorColor: CmColors.navy.withValues(alpha: 0.10),
-                selectedIndex: bottomIndex == -1 ? 4 : bottomIndex,
-                onDestinationSelected: (i) {
-                  if (i == 4) {
-                    _scaffoldKey.currentState?.openDrawer();
-                  } else {
-                    _select(_bottomPages[i]);
-                  }
-                },
-                destinations: [
-                  for (final p in _bottomPages)
-                    NavigationDestination(
-                      icon: Icon(p.icon, color: CmColors.slate),
-                      selectedIcon: Icon(p.icon, color: CmColors.navy),
-                      label: p == TeacherPage.dashboard ? 'Home' : p.label,
-                    ),
-                  const NavigationDestination(
-                    icon: Icon(Icons.more_horiz, color: CmColors.slate),
-                    selectedIcon: Icon(Icons.more_horiz, color: CmColors.navy),
-                    label: 'More',
-                  ),
-                ],
-              )
-            : null,
-      );
-    });
-  }
-}
-
-// =============================================================
-// SIDEBAR
-// =============================================================
-
-class _Sidebar extends StatelessWidget {
-  const _Sidebar({
-    required this.current,
-    required this.onSelect,
-    required this.onLogout,
-  });
-
-  final TeacherPage current;
-  final ValueChanged<TeacherPage> onSelect;
-  final VoidCallback onLogout;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: CmColors.navy,
-      padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Transparent logo with a white wordmark, made for the navy sidebar.
-          // (dashboard_logo_light.png is the black-wordmark version for
-          // white backgrounds.)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-            child: Image.asset(
-              'assets/dashboard_logo.png',
-              width: double.infinity,
-              fit: BoxFit.contain,
-              cacheWidth: 600,
-              errorBuilder: (context, error, stackTrace) => const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.fact_check_rounded, color: Colors.white),
-                  SizedBox(width: 8),
-                  Text('CheckMate',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800)),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 32),
-          Expanded(
-            child: ListView(
-              children: [
-                for (final p in TeacherPage.values)
-                  _SidebarItem(
-                    icon: p.icon,
-                    label: p.label,
-                    active: p == current,
-                    onTap: () => onSelect(p),
-                  ),
-              ],
-            ),
-          ),
-          const Divider(color: Colors.white24, height: 24),
-          _SidebarItem(
-            icon: Icons.person_outline,
-            label: 'Profile',
-            active: false,
-            onTap: () => _soon(context, 'Profile'),
-          ),
-          _SidebarItem(
-            icon: Icons.logout,
-            label: 'Log out',
-            active: false,
-            onTap: onLogout,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SidebarItem extends StatelessWidget {
-  const _SidebarItem({
-    required this.icon,
-    required this.label,
-    required this.active,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool active;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final fg = active ? Colors.white : Colors.white70;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Material(
-        color: active ? Colors.white.withValues(alpha: 0.10) : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          child: Container(
-            height: 48,
-            padding: const EdgeInsets.only(right: 12),
-            child: Row(
-              children: [
-                // Active-state indicator bar
-                Container(
-                  width: 4,
-                  height: 24,
-                  margin: const EdgeInsets.only(right: 12),
-                  decoration: BoxDecoration(
-                    color: active ? Colors.white : Colors.transparent,
-                    borderRadius: const BorderRadius.horizontal(
-                      right: Radius.circular(4),
-                    ),
-                  ),
-                ),
-                Icon(icon, color: fg, size: 22),
-                const SizedBox(width: 12),
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: fg,
-                    fontSize: 15,
-                    fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+    return TeacherShell(
+      current: _page,
+      onSelect: _select,
+      onLogout: _logout,
+      desktopHeader: const _DesktopTopBar(),
+      mobileActions: const [_NotificationBell(onDark: true)],
+      child: _body(),
     );
   }
 }
@@ -542,49 +1102,69 @@ class _SidebarItem extends StatelessWidget {
 // =============================================================
 
 class _DesktopTopBar extends StatelessWidget {
-  const _DesktopTopBar({required this.teacherName, required this.onLogout});
-
-  final String teacherName;
-  final VoidCallback onLogout;
+  const _DesktopTopBar();
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 72,
-      padding: const EdgeInsets.symmetric(horizontal: 32),
+      height: 64,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: const BoxDecoration(
         color: Colors.white,
         border: Border(bottom: BorderSide(color: CmColors.line)),
       ),
       child: Row(
         children: [
+          ValueListenableBuilder<bool>(
+            valueListenable: _sidebarCollapsed,
+            builder: (context, collapsed, _) {
+              return IconButton(
+                tooltip: collapsed ? 'Expand sidebar' : 'Collapse sidebar',
+                icon: Icon(
+                  collapsed ? Icons.chevron_right : Icons.chevron_left,
+                  color: CmColors.slate,
+                ),
+                onPressed: () => _sidebarCollapsed.value = !collapsed,
+              );
+            },
+          ),
+          const SizedBox(width: 8),
           Expanded(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 380),
-              child: TextField(
-                decoration: InputDecoration(
-                  hintText: 'Search classes, exams, students',
-                  prefixIcon:
-                      const Icon(Icons.search, color: CmColors.slate),
-                  isDense: true,
-                  filled: true,
-                  fillColor: CmColors.bg,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: CmColors.line),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: CmColors.line),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 480),
+                child: TextField(
+                  style: const TextStyle(color: CmColors.navy),
+                  decoration: InputDecoration(
+                    hintText: 'Search classes, exams, students',
+                    hintStyle:
+                        const TextStyle(color: CmColors.slate, fontSize: 14),
+                    prefixIcon:
+                        const Icon(Icons.search, color: CmColors.slate),
+                    isDense: true,
+                    filled: true,
+                    fillColor: CmColors.bg,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: CmColors.line),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: CmColors.line),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide:
+                          const BorderSide(color: _Pal.sidebar, width: 1.5),
+                    ),
                   ),
                 ),
               ),
             ),
           ),
-          const Spacer(),
           const _NotificationBell(),
           const SizedBox(width: 8),
-          _ProfileMenu(name: teacherName, onLogout: onLogout),
         ],
       ),
     );
@@ -603,8 +1183,10 @@ class _NotificationBell extends StatelessWidget {
       icon: Stack(
         clipBehavior: Clip.none,
         children: [
-          Icon(Icons.notifications_none,
-              color: onDark ? Colors.white : CmColors.navy),
+          Icon(
+            Icons.notifications_none,
+            color: onDark ? _Pal.sidebarFg : CmColors.navy,
+          ),
           Positioned(
             right: -1,
             top: -1,
@@ -612,64 +1194,15 @@ class _NotificationBell extends StatelessWidget {
               width: 9,
               height: 9,
               decoration: BoxDecoration(
-                color: CmColors.amber,
+                color: _Pal.notifDot,
                 shape: BoxShape.circle,
                 border: Border.all(
-                    color: onDark ? CmColors.navy : Colors.white, width: 1.5),
+                  color: onDark ? _Pal.sidebar : Colors.white,
+                  width: 1.5,
+                ),
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ProfileMenu extends StatelessWidget {
-  const _ProfileMenu({
-    required this.name,
-    required this.onLogout,
-    this.showName = true,
-  });
-
-  final String name;
-  final VoidCallback onLogout;
-  final bool showName;
-
-  @override
-  Widget build(BuildContext context) {
-    final initial = name.isNotEmpty ? name[0].toUpperCase() : 'T';
-    return PopupMenuButton<String>(
-      tooltip: 'Account',
-      offset: const Offset(0, 44),
-      onSelected: (v) {
-        if (v == 'logout') {
-          onLogout();
-        } else {
-          _soon(context, 'Profile');
-        }
-      },
-      itemBuilder: (_) => const [
-        PopupMenuItem(value: 'profile', child: Text('Profile')),
-        PopupMenuItem(value: 'logout', child: Text('Log out')),
-      ],
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: CmColors.slate,
-            child: Text(initial,
-                style: const TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.w700)),
-          ),
-          if (showName) ...[
-            const SizedBox(width: 10),
-            Text(name,
-                style: const TextStyle(
-                    color: CmColors.navy, fontWeight: FontWeight.w600)),
-            const Icon(Icons.keyboard_arrow_down, color: CmColors.slate),
-          ],
         ],
       ),
     );
@@ -703,12 +1236,6 @@ class _PlaceholderPage extends StatelessWidget {
       ),
     );
   }
-}
-
-void _soon(BuildContext context, String what) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text('$what is coming soon.')),
-  );
 }
 
 // =============================================================
