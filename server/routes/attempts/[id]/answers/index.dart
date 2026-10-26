@@ -1,6 +1,7 @@
 import 'package:dart_frog/dart_frog.dart';
 
 import 'package:server/answers/answer_service.dart';
+import 'package:server/auth/exam_access.dart';
 
 Future<Response> onRequest(
   RequestContext context,
@@ -27,6 +28,9 @@ Future<Response> onRequest(
       },
     );
   }
+
+  final denied = await ExamAccess.guardAttempt(context, attemptId);
+  if (denied != null) return denied;
 
   try {
     final body = await context.request.json();

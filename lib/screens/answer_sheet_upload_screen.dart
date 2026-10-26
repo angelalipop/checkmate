@@ -484,7 +484,7 @@ class _AnswerSheetUploadScreenState
                                                       value.trim().isEmpty ? 'Unanswered' : value.trim()),
                                                 )
                                               : DropdownButtonFormField<String>(
-                                                  value: options.contains(edits['$sectionIndex:${answer.questionNumber}'])
+                                                  initialValue: options.contains(edits['$sectionIndex:${answer.questionNumber}'])
                                                       ? edits['$sectionIndex:${answer.questionNumber}']
                                                       : edits['$sectionIndex:${answer.questionNumber}'] == 'Unanswered'
                                                           ? 'Unanswered'
@@ -504,8 +504,10 @@ class _AnswerSheetUploadScreenState
                                                     child: Text(value),
                                                   )).toList(),
                                                   onChanged: (value) {
-                                                    if (value != null) refresh(() => edits[
+                                                    if (value != null) {
+                                                      refresh(() => edits[
                                                         '$sectionIndex:${answer.questionNumber}'] = value);
+                                                    }
                                                   },
                                                 ),
                                         ),

@@ -1,6 +1,7 @@
 import 'package:dart_frog/dart_frog.dart';
 
 import 'package:server/attempts/attempt_service.dart';
+import 'package:server/auth/exam_access.dart';
 
 Future<Response> onRequest(RequestContext context) async {
   if (context.request.method == HttpMethod.get) {
@@ -21,6 +22,12 @@ Future<Response> onRequest(RequestContext context) async {
 }
 
 Future<Response> _listAttempts(RequestContext context) async {
+  final actor = ExamActor.fromContext(context);
+
+  if (actor == null) {
+    return ExamAccess.deny(403, 'Teacher or administrator access required.');
+  }
+
   try {
     final examId = int.tryParse(
       context.request.uri.queryParameters['exam_id'] ?? '',
@@ -30,9 +37,11 @@ Future<Response> _listAttempts(RequestContext context) async {
       context.request.uri.queryParameters['student_id'] ?? '',
     );
 
+    // Teachers only receive attempts on exams of their own classes.
     final attempts = await AttemptService.list(
       examId: examId,
       studentId: studentId,
+      teacherId: actor.isAdmin ? null : actor.id,
     );
 
     return Response.json(
@@ -83,6 +92,10 @@ Future<Response> _createAttempt(RequestContext context) async {
         },
       );
     }
+
+    // A teacher can only start attempts on exams of their own classes.
+    final denied = await ExamAccess.guardExam(context, examId);
+    if (denied != null) return denied;
 
     final attempt = await AttemptService.create(
       examId: examId,

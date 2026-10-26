@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:dart_frog/dart_frog.dart';
 
+import 'package:server/auth/exam_access.dart';
 import 'package:server/exam_sections/exam_section_service.dart';
 
 const allowedQuestionTypes = {
@@ -27,6 +28,9 @@ Future<Response> onRequest(RequestContext context) async {
     }
 
     try {
+      final denied = await ExamAccess.guardExam(context, examId);
+      if (denied != null) return denied;
+
       final sections = await ExamSectionService.getByExam(
         examId,
       );
@@ -139,6 +143,9 @@ Future<Response> onRequest(RequestContext context) async {
           },
         );
       }
+
+      final denied = await ExamAccess.guardExam(context, examId);
+      if (denied != null) return denied;
 
       final section = await ExamSectionService.create(
         examId: examId,

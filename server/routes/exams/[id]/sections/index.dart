@@ -1,5 +1,6 @@
 import 'package:dart_frog/dart_frog.dart';
 
+import 'package:server/auth/exam_access.dart';
 import 'package:server/exams/exam_section_service.dart';
 
 Future<Response> onRequest(
@@ -17,6 +18,9 @@ Future<Response> onRequest(
       },
     );
   }
+
+  final denied = await ExamAccess.guardExam(context, examId);
+  if (denied != null) return denied;
 
   if (context.request.method == HttpMethod.get) {
     try {

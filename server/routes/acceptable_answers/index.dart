@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dart_frog/dart_frog.dart';
 
 import 'package:server/acceptable_answers/acceptable_answer_service.dart';
+import 'package:server/auth/exam_access.dart';
 
 Future<Response> onRequest(RequestContext context) async {
   if (context.request.method == HttpMethod.get) {
@@ -21,6 +22,9 @@ Future<Response> onRequest(RequestContext context) async {
     }
 
     try {
+      final denied = await ExamAccess.guardQuestion(context, questionId);
+      if (denied != null) return denied;
+
       final answers =
           await AcceptableAnswerService.getByQuestion(
         questionId,
@@ -86,6 +90,9 @@ Future<Response> onRequest(RequestContext context) async {
           },
         );
       }
+
+      final denied = await ExamAccess.guardQuestion(context, questionId);
+      if (denied != null) return denied;
 
       final acceptableAnswer =
           await AcceptableAnswerService.create(

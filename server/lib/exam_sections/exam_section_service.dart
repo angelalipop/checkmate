@@ -129,7 +129,8 @@ class ExamSectionService {
     required String role,
   }) async {
     final result = await Database.pool.execute(
-      Sql.named('''DELETE FROM exam_sections AS s
+      Sql.named('''
+DELETE FROM exam_sections AS s
           USING exams AS e, classes AS c
           WHERE s.id = @id AND e.id = s.exam_id AND c.id = e.class_id
             AND (@role = 'admin' OR (@role = 'teacher' AND c.teacher_id = @user_id))
@@ -139,5 +140,63 @@ class ExamSectionService {
       parameters: {'id': id, 'user_id': userId, 'role': role},
     );
     return result.isNotEmpty;
+  }
+
+  /// Renames a section / changes its default points. The question type and
+  /// order are fixed. Same rules as delete: owner (or admin), draft exam,
+  /// no attempts. Returns null when not found or not permitted.
+  static Future<Map<String, dynamic>?> updateDraftSection(
+    int id, {
+    required int userId,
+    required String role,
+    required String name,
+    required num defaultPoints,
+  }) async {
+    if (name.trim().isEmpty) {
+      throw Exception('Section name is required.');
+    }
+
+    if (defaultPoints <= 0) {
+      throw Exception('Default points must be greater than zero.');
+    }
+
+    final result = await Database.pool.execute(
+      Sql.named('''
+        UPDATE exam_sections AS s
+        SET name = @name, default_points = @default_points
+        FROM exams AS e, classes AS c
+        WHERE s.id = @id AND e.id = s.exam_id AND c.id = e.class_id
+          AND (@role = 'admin' OR (@role = 'teacher' AND c.teacher_id = @user_id))
+          AND e.status = 'draft'
+          AND NOT EXISTS (SELECT 1 FROM exam_attempts a WHERE a.exam_id = e.id)
+        RETURNING
+          s.id,
+          s.exam_id,
+          s.name,
+          s.question_type,
+          s.section_order,
+          s.default_points
+      '''),
+      parameters: {
+        'id': id,
+        'user_id': userId,
+        'role': role,
+        'name': name.trim(),
+        'default_points': defaultPoints,
+      },
+    );
+
+    if (result.isEmpty) return null;
+
+    final row = result.first;
+
+    return {
+      'id': row[0],
+      'exam_id': row[1],
+      'name': row[2],
+      'question_type': row[3],
+      'section_order': row[4],
+      'default_points': row[5].toString(),
+    };
   }
 }

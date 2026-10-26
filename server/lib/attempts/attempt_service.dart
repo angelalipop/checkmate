@@ -179,9 +179,12 @@ class AttemptService {
     };
   }
 
+  /// When [teacherId] is given, only attempts on exams of that teacher's
+  /// classes are returned (teacher accounts; admins pass null).
   static Future<List<Map<String, dynamic>>> list({
     int? examId,
     int? studentId,
+    int? teacherId,
   }) async {
     final conditions = <String>[];
     final parameters = <String, dynamic>{};
@@ -194,6 +197,11 @@ class AttemptService {
     if (studentId != null) {
       conditions.add('a.student_id = @student_id');
       parameters['student_id'] = studentId;
+    }
+
+    if (teacherId != null) {
+      conditions.add('c.teacher_id = @teacher_id');
+      parameters['teacher_id'] = teacherId;
     }
 
     final whereClause = conditions.isEmpty
@@ -220,6 +228,7 @@ class AttemptService {
  FROM exam_attempts a
  JOIN exams e ON e.id = a.exam_id
  JOIN students s ON s.id = a.student_id
+ JOIN classes c ON c.id = e.class_id
  $whereClause
  ORDER BY a.created_at DESC
  '''),

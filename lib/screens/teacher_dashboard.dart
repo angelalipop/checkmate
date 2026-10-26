@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import 'answer_sheet_input_screen.dart';
-import 'exams_screen.dart';
+import 'exams_tab.dart';
 import 'login_screen.dart' show CmColors, LoginScreen;
 
 // =============================================================
@@ -226,14 +226,14 @@ class _TeacherIdentity {
 // NAVIGATION HELPERS
 // =============================================================
 
-/// Teacher-facing module screens (same screens the admin flow used):
-///  - Exams: create exam -> ExamBuilderScreen (sections/questions,
-///    answer-sheet preview + PDF print/download).
+/// Teacher-facing module screens:
+///  - Exams: ExamsTab (exam list -> in-place collapsible builder with inline
+///    questions, paper preview popup, PDF print/download).
 ///  - Scans: AnswerSheetInputScreen -> camera/upload -> OMR -> scoring.
 Widget? _moduleScreenFor(TeacherPage page) {
   switch (page) {
     case TeacherPage.exams:
-      return const ExamsScreen();
+      return const ExamsTab();
     case TeacherPage.scans:
       return const AnswerSheetInputScreen();
     default:
@@ -298,10 +298,16 @@ class _ModuleShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The Exams tab uses the same top bar (sidebar toggle, search, bell) as
+    // the dashboard. Scans keeps its own screen header.
+    final hasHeader = page == TeacherPage.exams;
     return TeacherShell(
       current: page,
       onSelect: (p) => _select(context, p),
       onLogout: () => _performLogout(context),
+      desktopHeader: hasHeader ? const _DesktopTopBar() : null,
+      mobileActions:
+          hasHeader ? const [_NotificationBell(onDark: true)] : const [],
       child: child,
     );
   }

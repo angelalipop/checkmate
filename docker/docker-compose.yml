@@ -30,6 +30,7 @@ services:
       DB_USER: checkmate
       DB_PASSWORD: checkmate_dev_password
       ACADEMIC_DELETE_MODE: soft
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be configured}
       
     ports:
       - "8080:8080"

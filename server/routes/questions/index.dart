@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:dart_frog/dart_frog.dart';
+import 'package:server/auth/exam_access.dart';
 import 'package:server/questions/question_service.dart';
 
 Future<Response> onRequest(RequestContext context) async {
@@ -33,6 +34,9 @@ Future<Response> _getQuestions(RequestContext context) async {
   }
 
   try {
+    final denied = await ExamAccess.guardSection(context, sectionId);
+    if (denied != null) return denied;
+
     final questions = await QuestionService.getBySection(sectionId);
 
     return Response.json(
@@ -86,6 +90,9 @@ Future<Response> _createQuestion(RequestContext context) async {
         body: {'message': 'Invalid question data'},
       );
     }
+
+    final denied = await ExamAccess.guardSection(context, sectionId);
+    if (denied != null) return denied;
 
     final question = await QuestionService.create(
       sectionId: sectionId,

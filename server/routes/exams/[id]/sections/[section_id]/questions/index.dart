@@ -1,5 +1,6 @@
 import 'package:dart_frog/dart_frog.dart';
 
+import 'package:server/auth/exam_access.dart';
 import 'package:server/exams/question_service.dart';
 
 Future<Response> onRequest(
@@ -21,6 +22,16 @@ Future<Response> onRequest(
       },
     );
   }
+
+  // Teachers may only use exams and sections of their own classes.
+  final deniedExam = await ExamAccess.guardExam(context, examId);
+  if (deniedExam != null) return deniedExam;
+
+  final deniedSection = await ExamAccess.guardSection(
+    context,
+    parsedSectionId,
+  );
+  if (deniedSection != null) return deniedSection;
 
   // GET: Retrieve all questions belonging to this section.
   if (context.request.method == HttpMethod.get) {

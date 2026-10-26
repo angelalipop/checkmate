@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
@@ -6,7 +7,7 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../services/api_service.dart';
+import '../services/academic_api_service.dart';
 import '../services/auth_storage.dart';
 import '../services/student_import_service.dart';
 import 'login_screen.dart' show CmColors;
@@ -24,8 +25,8 @@ const Color _ok = Color(0xFF2F8F72);
 class ImportStudentsScreen extends StatefulWidget {
   const ImportStudentsScreen({super.key, this.isTeacher = false});
 
-  /// Teacher: class is auto-assigned to the logged-in teacher (no Teacher
-  /// field). Admin: must pick the teacher who owns the created classes.
+  /// Teachers can create classes under their signed-in account.
+  /// Admins import into existing classes, preserving their assigned teachers.
   final bool isTeacher;
 
   @override
@@ -45,11 +46,15 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
 
   // Common info
   List<Map<String, dynamic>> _subjects = [];
-  List<Map<String, dynamic>> _teachers = [];
+  Map<String, dynamic>? _selectedSubject;
   int? _subjectId;
-  int? _teacherId;
+  Timer? _subjectSearchTimer;
+  int _subjectRequest = 0;
+  String _subjectQuery = '';
+  bool _loadingSubjects = true;
+  static const _semesters = ['1st Semester', '2nd Semester'];
   String _schoolYear = AcademicOptions.currentSchoolYear();
-  String _semester = AcademicOptions.semesters.first;
+  String _semester = _semesters.first;
   String? _lookupError;
 
   bool _checking = false;
@@ -64,23 +69,71 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
     _loadLookups();
   }
 
-  Future<void> _loadLookups() async {
+  @override
+  void dispose() {
+    _subjectSearchTimer?.cancel();
+    _subjectRequest++;
+    super.dispose();
+  }
+
+  static int? _subjectIdOf(Map<String, dynamic> subject) =>
+      int.tryParse(subject['id']?.toString() ?? '');
+
+  static String _catalogLabel(Map<String, dynamic> subject) {
+    final code = subject['code']?.toString().trim() ?? '';
+    final name = subject['name']?.toString().trim() ?? 'Unnamed Subject';
+    return code.isEmpty ? name : '$code - $name';
+  }
+
+  List<Map<String, dynamic>> get _subjectOptions {
+    final byId = <int, Map<String, dynamic>>{};
+    for (final subject in _subjects) {
+      final id = _subjectIdOf(subject);
+      if (id != null) byId[id] = subject;
+    }
+    // Keep the selected subject valid when a search returns other matches.
+    final selected = _selectedSubject;
+    if (selected != null && _subjectId != null) {
+      byId.putIfAbsent(_subjectId!, () => selected);
+    }
+    return byId.values.toList()
+      ..sort((a, b) => _catalogLabel(a).compareTo(_catalogLabel(b)));
+  }
+
+  void _searchSubjects(String query) {
+    _subjectSearchTimer?.cancel();
+    _subjectRequest++;
+    setState(() {
+      _subjectQuery = query.trim();
+      _loadingSubjects = true;
+      _lookupError = null;
+    });
+    _subjectSearchTimer = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) _loadLookups(_subjectQuery);
+    });
+  }
+
+  Future<void> _loadLookups([String query = '']) async {
+    final request = ++_subjectRequest;
+    setState(() {
+      _loadingSubjects = true;
+      _lookupError = null;
+    });
     try {
       final token = await AuthStorage.getToken();
       if (token == null || token.isEmpty) {
         throw Exception('Authentication token not found.');
       }
-      final subjects = await ApiService.getSubjects(token);
-      final teachers =
-          widget.isTeacher ? <Map<String, dynamic>>[] : await ApiService.getTeachers(token);
-      if (!mounted) return;
+      final subjects = await AcademicApi.searchCatalog(token, query);
+      if (!mounted || request != _subjectRequest) return;
       setState(() {
         _subjects = subjects;
-        _teachers = teachers;
+        _loadingSubjects = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || request != _subjectRequest) return;
       setState(() {
+        _loadingSubjects = false;
         _lookupError = e.toString().replaceFirst('Exception: ', '');
       });
     }
@@ -200,10 +253,6 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
       _snack('Please select a subject.');
       return;
     }
-    if (!widget.isTeacher && _teacherId == null) {
-      _snack('Please select a teacher.');
-      return;
-    }
 
     setState(() => _checking = true);
 
@@ -223,6 +272,17 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
 
       if (!mounted) return;
       setState(() => _checking = false);
+
+      // The existing backend requires a teacher when creating a class.
+      // Check every section before writing any students.
+      if (!widget.isTeacher &&
+          plan.sections.any((s) =>
+              s.toAdd.isNotEmpty && s.existingClassId == null)) {
+        _snack('An assigned class is needed for each section, subject, '
+            'school year, and semester. Ask the teacher to create the '
+            'missing class, then retry the import.');
+        return;
+      }
 
       // Duplicates already in the system.
       final dupes = plan.duplicates;
@@ -268,7 +328,9 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
         subjectId: _subjectId!,
         schoolYear: _schoolYear,
         semester: _semester,
-        teacherId: widget.isTeacher ? null : _teacherId,
+        // Existing classes keep their teacher. For new teacher classes,
+        // the backend uses the authenticated teacher.
+        teacherId: null,
         onProgress: (done, total) {
           if (!mounted) return;
           setState(() {
@@ -477,12 +539,8 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
   // ---------- Helpers ----------
 
   String _subjectLabel(int? id) {
-    for (final s in _subjects) {
-      if (int.tryParse(s['id'].toString()) == id) {
-        final name = s['name']?.toString() ?? 'Subject';
-        final code = s['code']?.toString() ?? '';
-        return code.isEmpty ? name : '$code - $name';
-      }
+    for (final subject in _subjectOptions) {
+      if (_subjectIdOf(subject) == id) return _catalogLabel(subject);
     }
     return 'Subject';
   }
@@ -975,7 +1033,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
             ),
             const SizedBox(height: 4),
             const Text(
-              'A class is created for each section using these details.',
+              'Students are added to each section’s subject class using these details.',
               style: TextStyle(color: CmColors.slate, fontSize: 13),
             ),
             const SizedBox(height: 16),
@@ -986,44 +1044,58 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
               ),
               const SizedBox(height: 12),
             ],
+            TextField(
+              enabled: !_busy,
+              decoration: _dec('Search Academic Management subjects',
+                  Icons.search).copyWith(
+                hintText: 'Enter a course code or course name',
+              ),
+              onChanged: _searchSubjects,
+            ),
+            const SizedBox(height: 14),
+            if (_loadingSubjects) ...[
+              const LinearProgressIndicator(color: CmColors.navy),
+              const SizedBox(height: 12),
+            ],
             DropdownButtonFormField<int>(
               initialValue: _subjectId,
               isExpanded: true,
               decoration: _dec('Subject', Icons.menu_book_outlined),
-              items: _subjects.map((s) {
-                final id = int.parse(s['id'].toString());
-                final name = s['name']?.toString() ?? 'Unnamed Subject';
-                final code = s['code']?.toString() ?? '';
+              hint: Text(_loadingSubjects
+                  ? 'Loading subjects…'
+                  : _subjects.isEmpty
+                      ? 'No subjects found. Try searching by code or name.'
+                      : 'Select subject'),
+              items: _subjectOptions.map((subject) {
                 return DropdownMenuItem<int>(
-                  value: id,
+                  value: _subjectIdOf(subject)!,
                   child: Text(
-                    code.isEmpty ? name : '$code - $name',
+                    _catalogLabel(subject),
                     overflow: TextOverflow.ellipsis,
                   ),
                 );
               }).toList(),
-              onChanged: _busy ? null : (v) => setState(() => _subjectId = v),
+              onChanged: _busy || _loadingSubjects || _lookupError != null
+                  ? null
+                  : (value) => setState(() {
+                        _selectedSubject = value == null
+                            ? null
+                            : _subjectOptions.firstWhere(
+                                (subject) => _subjectIdOf(subject) == value);
+                        _subjectId = value;
+                      }),
             ),
-            if (!widget.isTeacher) ...[
-              const SizedBox(height: 14),
-              DropdownButtonFormField<int>(
-                initialValue: _teacherId,
-                isExpanded: true,
-                decoration: _dec('Teacher', Icons.person_outline),
-                items: _teachers.map((t) {
-                  final id = int.parse(t['id'].toString());
-                  return DropdownMenuItem<int>(
-                    value: id,
-                    child: Text(
-                      t['name']?.toString() ?? 'Unnamed Teacher',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  );
-                }).toList(),
-                onChanged:
-                    _busy ? null : (v) => setState(() => _teacherId = v),
+            if (_lookupError != null)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _busy || _loadingSubjects
+                      ? null
+                      : () => _loadLookups(_subjectQuery),
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry loading subjects'),
+                ),
               ),
-            ],
             const SizedBox(height: 14),
             DropdownButtonFormField<String>(
               initialValue: _schoolYear,
@@ -1039,7 +1111,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
             DropdownButtonFormField<String>(
               initialValue: _semester,
               decoration: _dec('Semester', Icons.calendar_month_outlined),
-              items: AcademicOptions.semesters
+              items: _semesters
                   .map((s) => DropdownMenuItem<String>(value: s, child: Text(s)))
                   .toList(),
               onChanged: _busy

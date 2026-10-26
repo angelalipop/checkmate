@@ -1,11 +1,19 @@
+import 'dart:io';
 import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
 
+/// A service for generating and verifying JWT tokens.
 class JwtService {
-  static const _secret = String.fromEnvironment(
-    'JWT_SECRET',
-    defaultValue: 'checkmate-dev-jwt-secret-change-this',
-  );
+  static String get _secret {
+    final secret = Platform.environment['JWT_SECRET'];
 
+    if (secret == null || secret.trim().isEmpty) {
+      throw StateError('JWT_SECRET is not configured.');
+    }
+
+    return secret;
+  }
+
+/// Generates a JWT token for the given user information.
   static String generateToken({
     required int userId,
     required String email,
@@ -26,6 +34,7 @@ class JwtService {
     );
   }
 
+/// Verifies the given JWT token and returns the payload as a map.
   static Map<String, dynamic> verifyToken(String token) {
     final jwt = JWT.verify(
       token,

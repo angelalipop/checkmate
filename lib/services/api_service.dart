@@ -489,6 +489,100 @@ class ApiService {
   }
 
   // =========================
+  // UPDATE EXAM / SECTION / QUESTION
+  // =========================
+
+  static Future<Map<String, dynamic>> updateExam({
+    required String token,
+    required int examId,
+    required int classId,
+    required String title,
+    String? description,
+    String? instructions,
+  }) async {
+    final response = await http.patch(
+      Uri.parse('$baseUrl/exams/$examId'),
+      headers: _authHeaders(token),
+      body: jsonEncode({
+        'class_id': classId,
+        'title': title,
+        'description': description,
+        'instructions': instructions,
+      }),
+    );
+
+    final data = _decodeBody(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(data['message']?.toString() ?? 'Failed to update exam.');
+    }
+
+    final exam = data['exam'];
+
+    return exam is Map ? Map<String, dynamic>.from(exam) : data;
+  }
+
+  static Future<Map<String, dynamic>> updateExamSection({
+    required String token,
+    required int sectionId,
+    required String name,
+    required num defaultPoints,
+  }) async {
+    final response = await http.patch(
+      Uri.parse('$baseUrl/exam_sections/$sectionId'),
+      headers: _authHeaders(token),
+      body: jsonEncode({
+        'name': name,
+        'default_points': defaultPoints,
+      }),
+    );
+
+    final data = _decodeBody(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        data['message']?.toString() ?? 'Failed to update section.',
+      );
+    }
+
+    final section = data['section'];
+
+    return section is Map ? Map<String, dynamic>.from(section) : data;
+  }
+
+  static Future<Map<String, dynamic>> updateQuestion({
+    required String token,
+    required int questionId,
+    required String questionText,
+    required num points,
+    dynamic choices,
+    String? correctAnswer,
+  }) async {
+    final response = await http.patch(
+      Uri.parse('$baseUrl/questions/$questionId'),
+      headers: _authHeaders(token),
+      body: jsonEncode({
+        'question_text': questionText,
+        'points': points,
+        'choices': choices,
+        'correct_answer': correctAnswer,
+      }),
+    );
+
+    final data = _decodeBody(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        data['message']?.toString() ?? 'Failed to update question.',
+      );
+    }
+
+    final question = data['question'];
+
+    return question is Map ? Map<String, dynamic>.from(question) : data;
+  }
+
+  // =========================
   // GET EXAM SECTIONS
   // =========================
 

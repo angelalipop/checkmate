@@ -1,8 +1,15 @@
 import 'package:dart_frog/dart_frog.dart';
 
+import 'package:server/auth/exam_access.dart';
 import 'package:server/students/student_service.dart';
 
 Future<Response> onRequest(RequestContext context) async {
+  final actor = ExamActor.fromContext(context);
+
+  if (actor == null) {
+    return ExamAccess.deny(403, 'Teacher or administrator access required.');
+  }
+
   try {
     switch (context.request.method) {
       case HttpMethod.get:
@@ -26,8 +33,10 @@ Future<Response> onRequest(RequestContext context) async {
           );
         }
 
+        // Teachers only receive students of their own classes.
         final students = await StudentService.getAll(
           classId: classId,
+          teacherId: actor.isAdmin ? null : actor.id,
         );
 
         return Response.json(
@@ -108,6 +117,10 @@ Future<Response> onRequest(RequestContext context) async {
             },
           );
         }
+
+        // A teacher can only add students to a class assigned to them.
+        final denied = await ExamAccess.guardClass(context, classId);
+        if (denied != null) return denied;
 
         final student = await StudentService.create(
           classId: classId,

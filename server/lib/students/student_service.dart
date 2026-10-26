@@ -3,8 +3,11 @@ import 'package:postgres/postgres.dart';
 import 'package:server/database.dart';
 
 class StudentService {
+  /// When [teacherId] is given, only students of that teacher's classes are
+  /// returned (teacher accounts; admins pass null).
   static Future<List<Map<String, dynamic>>> getAll({
     int? classId,
+    int? teacherId,
   }) async {
     final result = await Database.pool.execute(
       Sql.named('''
@@ -26,10 +29,15 @@ class StudentService {
           @class_id::bigint IS NULL
           OR s.class_id = @class_id
         )
+        AND (
+          @teacher_id::bigint IS NULL
+          OR c.teacher_id = @teacher_id
+        )
         ORDER BY s.last_name, s.first_name
       '''),
       parameters: {
         'class_id': classId,
+        'teacher_id': teacherId,
       },
     );
 

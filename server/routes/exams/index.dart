@@ -1,8 +1,21 @@
 import 'package:dart_frog/dart_frog.dart';
 
+import 'package:server/auth/exam_access.dart';
 import 'package:server/exams/exam_service.dart';
 
 Future<Response> onRequest(RequestContext context) async {
+  final actor = ExamActor.fromContext(context);
+
+  if (actor == null) {
+    return Response.json(
+      statusCode: 403,
+      body: {
+        'status': 'error',
+        'message': 'Teacher or administrator access required.',
+      },
+    );
+  }
+
   try {
     switch (context.request.method) {
       case HttpMethod.get:
@@ -26,8 +39,11 @@ Future<Response> onRequest(RequestContext context) async {
           );
         }
 
+        // Teachers only receive exams of their own classes. The id comes
+        // from the verified token, never from the request.
         final exams = await ExamService.getAll(
           classId: classId,
+          teacherId: actor.isAdmin ? null : actor.id,
         );
 
         return Response.json(
@@ -103,6 +119,10 @@ Future<Response> onRequest(RequestContext context) async {
             },
           );
         }
+
+        // A teacher can only create exams for classes assigned to them.
+        final denied = await ExamAccess.guardClass(context, classId);
+        if (denied != null) return denied;
 
         final exam = await ExamService.create(
           classId: classId,

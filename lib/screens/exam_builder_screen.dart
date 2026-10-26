@@ -270,7 +270,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                   ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
-                    value: questionType,
+                    initialValue: questionType,
                     decoration: const InputDecoration(
                       labelText: 'Question Type',
                       border: OutlineInputBorder(),
@@ -292,8 +292,9 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                     onChanged: saving
                         ? null
                         : (value) {
-                            if (value != null)
+                            if (value != null) {
                               updateDialog(() => questionType = value);
+                            }
                           },
                   ),
                   const SizedBox(height: 16),
@@ -347,8 +348,9 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                         });
                         try {
                           final token = await AuthStorage.getToken();
-                          if (token == null || token.isEmpty)
+                          if (token == null || token.isEmpty) {
                             throw Exception('Please log in again.');
+                          }
                           await ApiService.createExamSection(
                             token: token,
                             examId: widget.examId,
@@ -357,8 +359,9 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                             sectionOrder: nextOrder,
                             defaultPoints: points,
                           );
-                          if (dialogContext.mounted)
+                          if (dialogContext.mounted) {
                             Navigator.pop(dialogContext, true);
+                          }
                         } catch (e) {
                           updateDialog(() {
                             saving = false;

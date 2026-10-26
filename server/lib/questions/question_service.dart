@@ -128,7 +128,8 @@ class QuestionService {
     required String role,
   }) async {
     final result = await Database.pool.execute(
-      Sql.named('''DELETE FROM questions AS q
+      Sql.named('''
+DELETE FROM questions AS q
           USING exam_sections AS s, exams AS e, classes AS c
           WHERE q.id = @id AND s.id = q.section_id AND e.id = s.exam_id AND c.id = e.class_id
             AND (@role = 'admin' OR (@role = 'teacher' AND c.teacher_id = @user_id))
@@ -138,5 +139,77 @@ class QuestionService {
       parameters: {'id': id, 'user_id': userId, 'role': role},
     );
     return result.isNotEmpty;
+  }
+
+  /// Edits a question's text, points, choices and correct answer.
+  /// Same rules as delete: owner (or admin), draft exam, no attempts.
+  /// Returns null when not found or not permitted.
+  static Future<Map<String, dynamic>?> updateDraftQuestion(
+    int id, {
+    required int userId,
+    required String role,
+    required String questionText,
+    required num points,
+    dynamic choices,
+    String? correctAnswer,
+  }) async {
+    if (questionText.trim().isEmpty) {
+      throw Exception('Question text is required.');
+    }
+
+    if (points < 0) {
+      throw Exception('Question points cannot be negative.');
+    }
+
+    final result = await Database.pool.execute(
+      Sql.named('''
+        UPDATE questions AS q
+        SET
+          question_text = @question_text,
+          points = @points,
+          choices = @choices,
+          correct_answer = @correct_answer
+        FROM exam_sections AS s, exams AS e, classes AS c
+        WHERE q.id = @id AND s.id = q.section_id AND e.id = s.exam_id AND c.id = e.class_id
+          AND (@role = 'admin' OR (@role = 'teacher' AND c.teacher_id = @user_id))
+          AND e.status = 'draft'
+          AND NOT EXISTS (SELECT 1 FROM exam_attempts a WHERE a.exam_id = e.id)
+        RETURNING
+          q.id,
+          q.section_id,
+          q.question_number,
+          q.question_text,
+          q.points,
+          q.choices,
+          q.correct_answer,
+          q.created_at
+      '''),
+      parameters: {
+        'id': id,
+        'user_id': userId,
+        'role': role,
+        'question_text': questionText.trim(),
+        'points': points,
+        'choices': choices == null ? null : jsonEncode(choices),
+        'correct_answer': (correctAnswer?.trim().isEmpty ?? true)
+            ? null
+            : correctAnswer!.trim(),
+      },
+    );
+
+    if (result.isEmpty) return null;
+
+    final row = result.first;
+
+    return {
+      'id': row[0],
+      'section_id': row[1],
+      'question_number': row[2],
+      'question_text': row[3],
+      'points': row[4].toString(),
+      'choices': row[5],
+      'correct_answer': row[6],
+      'created_at': row[7].toString(),
+    };
   }
 }
