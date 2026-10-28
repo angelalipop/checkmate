@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../services/academic_api_service.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import 'login_screen.dart' show CmColors;
@@ -70,6 +71,8 @@ class _Sec {
     this.schoolYear = '',
     this.semester = '',
     this.yearLevel,
+    this.programCode = '',
+    this.programLevel = '',
   });
 
   final String section;
@@ -77,20 +80,32 @@ class _Sec {
   final String semester;
   final int? yearLevel;
 
+  /// Program / strand the section belongs to (from the Sections catalog).
+  final String programCode;
+  final String programLevel;
+
   String get key => '${section.toLowerCase()}|$schoolYear|$semester';
 }
 
-/// A subject plus the sections the teacher teaches it in.
+/// A subject plus the sections the teacher teaches it in (across programs).
+/// [subjectId] is the subjects row classes use; it can be null for a subject
+/// just picked from Academic Management ([academicSubjectId]) that has no
+/// such row yet. The server settles it when the assignment is saved.
 class _SubjectAssignment {
   _SubjectAssignment({
-    required this.subjectId,
+    this.subjectId,
+    this.academicSubjectId,
     required this.subjectName,
     Map<String, _Sec>? sections,
   }) : sections = sections ?? <String, _Sec>{};
 
-  final int subjectId;
+  final int? subjectId;
+  final int? academicSubjectId;
   final String subjectName;
   final Map<String, _Sec> sections;
+
+  String get key =>
+      subjectId != null ? 's$subjectId' : 'a$academicSubjectId';
 }
 
 List<_SubjectAssignment> _tAssignments(Map<String, dynamic> t) {
@@ -106,6 +121,8 @@ List<_SubjectAssignment> _tAssignments(Map<String, dynamic> t) {
 
     final item = _SubjectAssignment(
       subjectId: subjectId,
+      academicSubjectId:
+          int.tryParse(a['academic_subject_id']?.toString() ?? ''),
       subjectName: (a['subject_name'] ?? 'Subject').toString(),
     );
 
@@ -119,6 +136,8 @@ List<_SubjectAssignment> _tAssignments(Map<String, dynamic> t) {
           schoolYear: (c['school_year'] ?? '').toString(),
           semester: (c['semester'] ?? '').toString(),
           yearLevel: int.tryParse(c['year_level']?.toString() ?? ''),
+          programCode: (c['program_code'] ?? '').toString(),
+          programLevel: (c['program_level'] ?? '').toString(),
         );
 
         if (sec.section.isNotEmpty) item.sections[sec.key] = sec;
@@ -138,7 +157,9 @@ List<Map<String, dynamic>> _assignmentPayload(
       for (final a in list)
         for (final s in a.sections.values)
           {
-            'subject_id': a.subjectId,
+            if (a.subjectId != null) 'subject_id': a.subjectId,
+            if (a.academicSubjectId != null)
+              'academic_subject_id': a.academicSubjectId,
             'section': s.section,
             'school_year': s.schoolYear,
             'semester': s.semester,
@@ -147,7 +168,7 @@ List<Map<String, dynamic>> _assignmentPayload(
 
 Set<String> _assignmentKeys(List<_SubjectAssignment> list) => {
       for (final a in list)
-        for (final s in a.sections.values) '${a.subjectId}|${s.key}',
+        for (final s in a.sections.values) '${a.key}|${s.key}',
     };
 
 bool _assignmentsChanged(
@@ -166,7 +187,8 @@ String _assignmentSearchText(Map<String, dynamic> t) => [
       ],
     ].join(' ').toLowerCase();
 
-String _yearLabel(int? y) {
+String _yearLabel(int? y, {bool shs = false}) {
+  if (shs && y != null) return 'Grade ${y + 10}';
   switch (y) {
     case null:
       return 'Other';
@@ -1761,6 +1783,8 @@ class _AssignmentEditor extends StatefulWidget {
     this.enabled = true,
   });
 
+  /// Kept for the existing call sites. Subjects now come from Academic
+  /// Management, per program.
   final List<Map<String, dynamic>> subjects;
   final List<_SubjectAssignment> initial;
 
@@ -1774,16 +1798,38 @@ class _AssignmentEditor extends StatefulWidget {
 }
 
 class _AssignmentEditorState extends State<_AssignmentEditor> {
-  late final Map<int, _SubjectAssignment> _draft = {
+  // Everything the teacher teaches, across all programs. The filters below
+  // only narrow what can be picked next; they never change this set and
+  // never touch the teacher's home department.
+  late final Map<String, _SubjectAssignment> _draft = {
     for (final a in widget.initial)
-      a.subjectId: _SubjectAssignment(
+      a.key: _SubjectAssignment(
         subjectId: a.subjectId,
+        academicSubjectId: a.academicSubjectId,
         subjectName: a.subjectName,
         sections: {...a.sections},
       ),
   };
 
+  // Filters: Department -> Program/Strand -> Subject -> Sections.
+  List<Map<String, dynamic>> _programs = [];
+  bool _loadingPrograms = true;
+  String? _programsError;
+  String? _filterDepartment;
+  int? _programId;
+
+  /// Year level chosen before the subject (the curriculum year it is taught).
+  int? _yearLevel;
+
+  List<Map<String, dynamic>> _programSubjects = [];
+  bool _loadingSubjects = false;
+  String? _subjectsError;
+
+  /// academic_subjects.id of the chosen subject.
   int? _subjectId;
+
+  /// School year of a finalized elective (null for a regular subject).
+  String? _subjectSchoolYear;
   int _dropdownResets = 0;
   List<Map<String, dynamic>> _options = [];
   final Set<String> _staged = {};
@@ -1791,16 +1837,124 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
   String? _optionsError;
   int _requestSeq = 0;
 
+  @override
+  void initState() {
+    super.initState();
+    _loadPrograms();
+  }
+
   /// The full set to save (call [commitStaged] first).
   List<_SubjectAssignment> get assignments => _draft.values.toList();
 
-  String _subjectName(int id) {
-    for (final s in widget.subjects) {
-      if (int.tryParse(s['id']?.toString() ?? '') == id) {
-        return (s['name'] ?? 'Subject').toString();
+  static int? _int(Object? v) => int.tryParse(v?.toString() ?? '');
+
+  Future<String> _token() async {
+    final token = await AuthStorage.getToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Your session has expired. Please log in again.');
+    }
+    return token;
+  }
+
+  // ----- programs / departments (Academic Management) -----
+
+  Future<void> _loadPrograms() async {
+    setState(() {
+      _loadingPrograms = true;
+      _programsError = null;
+    });
+
+    try {
+      final programs = await AcademicApi.programs(await _token());
+      if (!mounted) return;
+      setState(() {
+        _programs = programs;
+        _loadingPrograms = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _programsError = _clean(e);
+        _loadingPrograms = false;
+      });
+    }
+  }
+
+  String _departmentOf(Map<String, dynamic> p) {
+    if (p['level'] == 'shs') return 'Senior High School';
+    final d = (p['department'] ?? '').toString().trim();
+    return d.isEmpty ? 'College' : d;
+  }
+
+  List<String> get _departments => {
+        for (final p in _programs) _departmentOf(p),
+      }.toList()
+        ..sort((a, b) {
+          if (a == b) return 0;
+          if (a == 'Senior High School') return 1;
+          if (b == 'Senior High School') return -1;
+          return a.compareTo(b);
+        });
+
+  List<Map<String, dynamic>> get _departmentPrograms => _programs
+      .where((p) => _departmentOf(p) == _filterDepartment)
+      .toList()
+    ..sort((a, b) =>
+        (a['code'] ?? '').toString().compareTo((b['code'] ?? '').toString()));
+
+  Map<String, dynamic>? get _program {
+    for (final p in _programs) {
+      if (_int(p['id']) == _programId) return p;
+    }
+    return null;
+  }
+
+  bool get _programIsShs => _program?['level'] == 'shs';
+
+  /// Year levels of the chosen program that have subjects.
+  List<int> get _years => {
+        for (final s in _programSubjects)
+          if (_int(s['year_level']) != null) _int(s['year_level'])!,
+      }.toList()
+        ..sort();
+
+  /// Subjects taught in the chosen year level (one entry per subject).
+  List<Map<String, dynamic>> get _yearSubjects {
+    final seen = <String>{};
+    return [
+      for (final s in _programSubjects)
+        if (_int(s['year_level']) == _yearLevel &&
+            _int(s['id']) != null &&
+            seen.add(_rowKey(s)))
+          s,
+    ];
+  }
+
+  /// A subject row is its subject + the school year its elective was
+  /// finalized for (empty for a regular subject).
+  String _rowKey(Map<String, dynamic> s) =>
+      '${_int(s['id'])}|${(s['school_year'] ?? '').toString()}';
+
+  Map<String, dynamic>? get _subject {
+    for (final s in _yearSubjects) {
+      if (_int(s['id']) == _subjectId &&
+          (s['school_year'] ?? '').toString() == (_subjectSchoolYear ?? '')) {
+        return s;
       }
     }
-    return 'Subject';
+    return null;
+  }
+
+  String _termLabel(int? term) =>
+      term == 1 ? '1st Sem' : (term == 2 ? '2nd Sem' : (term == null ? '' : 'Term $term'));
+
+  /// Draft key of the chosen subject: its subjects row when it has one (so it
+  /// merges with what the teacher already teaches), else the academic id.
+  String? get _subjectDraftKey {
+    final s = _subject;
+    if (s == null) return null;
+    final legacy = _int(s['legacy_subject_id']);
+    return legacy != null ? 's$legacy' : 'a${_int(s['id'])}';
   }
 
   String _optKey(Map<String, dynamic> o) =>
@@ -1814,28 +1968,144 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
   }
 
   bool get _stagedChanged {
-    final id = _subjectId;
-    if (id == null) return false;
-    final current = _draft[id]?.sections.keys.toSet() ?? <String>{};
+    final key = _subjectDraftKey;
+    if (key == null) return false;
+    final current = _draft[key]?.sections.keys.toSet() ?? <String>{};
     return current.length != _staged.length || !current.containsAll(_staged);
   }
 
-  Future<void> _pickSubject(int? id) async {
-    setState(() {
-      _subjectId = id;
-      _options = [];
-      _optionsError = null;
-      _staged
-        ..clear()
-        ..addAll(
-          id == null ? const <String>[] : (_draft[id]?.sections.keys ?? []),
-        );
-    });
-
-    if (id != null) await _loadOptions(id);
+  void _clearPick() {
+    _requestSeq++;
+    _yearLevel = null;
+    _subjectId = null;
+    _subjectSchoolYear = null;
+    _programSubjects = [];
+    _subjectsError = null;
+    _loadingSubjects = false;
+    _options = [];
+    _optionsError = null;
+    _loadingOptions = false;
+    _staged.clear();
+    _dropdownResets++;
   }
 
-  Future<void> _loadOptions(int id) async {
+  // Changing a filter resets only the unsaved picks below it.
+  void _pickDepartment(String? value) {
+    setState(() {
+      _filterDepartment = value;
+      _programId = null;
+      _clearPick();
+    });
+  }
+
+  Future<void> _pickProgram(int? id) async {
+    setState(() {
+      _programId = id;
+      _clearPick();
+    });
+    if (id != null) await _loadSubjects(id);
+  }
+
+  Future<void> _loadSubjects(int programId) async {
+    final seq = ++_requestSeq;
+    setState(() {
+      _loadingSubjects = true;
+      _subjectsError = null;
+    });
+
+    try {
+      final rows = await ApiService.getProgramSubjects(
+        await _token(),
+        programId,
+      );
+      if (!mounted || seq != _requestSeq) return;
+      setState(() {
+        _programSubjects = rows;
+        _loadingSubjects = false;
+      });
+    } catch (e) {
+      if (!mounted || seq != _requestSeq) return;
+      setState(() {
+        _subjectsError = _clean(e);
+        _loadingSubjects = false;
+      });
+    }
+  }
+
+  // Changing the year level resets the unsaved subject and section picks.
+  void _pickYear(int? year) {
+    setState(() {
+      _requestSeq++;
+      _yearLevel = year;
+      _subjectId = null;
+      _subjectSchoolYear = null;
+      _options = [];
+      _optionsError = null;
+      _loadingOptions = false;
+      _staged.clear();
+      _dropdownResets++;
+    });
+  }
+
+  Future<void> _showFinalizeElectiveDialog(String name) {
+    return showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Elective not finalized'),
+        content: Text(
+          '"$name" is an elective slot and no elective has been finalized '
+          'for it yet.\n\nOpen Academic Management, go to the Subjects tab '
+          'and finalize an elective for this slot and school year. Then come '
+          'back here to assign it.',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: FilledButton.styleFrom(backgroundColor: CmColors.navy),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickSubject(String? rowKey) async {
+    Map<String, dynamic>? row;
+    if (rowKey != null) {
+      for (final s in _yearSubjects) {
+        if (_rowKey(s) == rowKey) row = s;
+      }
+    }
+
+    // An elective slot with nothing finalized cannot be assigned yet.
+    if (row != null && row['needs_finalization'] == true) {
+      setState(() => _dropdownResets++);
+      await _showFinalizeElectiveDialog((row['name'] ?? 'This subject').toString());
+      return;
+    }
+
+    final id = row == null ? null : _int(row['id']);
+    final sy = (row?['school_year'] ?? '').toString();
+
+    setState(() {
+      _requestSeq++;
+      _subjectId = id;
+      _subjectSchoolYear = sy.isEmpty ? null : sy;
+      _options = [];
+      _optionsError = null;
+      _staged.clear();
+      final key = _subjectDraftKey;
+      if (key != null) _staged.addAll(_draft[key]?.sections.keys ?? []);
+    });
+
+    if (id != null) await _loadOptions();
+  }
+
+  Future<void> _loadOptions() async {
+    final subjectId = _subjectId;
+    final programId = _programId;
+    if (subjectId == null || programId == null) return;
+
     final seq = ++_requestSeq;
 
     setState(() {
@@ -1844,13 +2114,16 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
     });
 
     try {
-      final token = await AuthStorage.getToken();
-
-      if (token == null || token.isEmpty) {
-        throw Exception('Your session has expired. Please log in again.');
-      }
-
-      final rows = await ApiService.getTeachingOptions(token, id);
+      final rows = await ApiService.getProgramTeachingOptions(
+        await _token(),
+        academicSubjectId: subjectId,
+        programId: programId,
+        // Only the sections of the year and semester the subject is taught.
+        yearLevel: _yearLevel,
+        term: _int(_subject?['term']),
+        // A finalized elective only applies to its school year's sections.
+        schoolYear: _subjectSchoolYear,
+      );
 
       if (!mounted || seq != _requestSeq) return;
 
@@ -1870,40 +2143,49 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
 
   void _commit() {
     final id = _subjectId;
-    if (id == null) return;
+    final subject = _subject;
+    final key = _subjectDraftKey;
+    if (id == null || subject == null || key == null) return;
 
-    final existing = _draft[id];
+    final existing = _draft[key];
 
     if (_staged.isEmpty) {
-      _draft.remove(id);
+      _draft.remove(key);
     } else {
       final sections = <String, _Sec>{};
 
       for (final o in _options) {
-        final key = _optKey(o);
-        if (!_staged.contains(key)) continue;
+        final secKey = _optKey(o);
+        if (!_staged.contains(secKey)) continue;
 
-        sections[key] = _Sec(
+        sections[secKey] = _Sec(
           section: (o['section'] ?? '').toString(),
           schoolYear: (o['school_year'] ?? '').toString(),
           semester: (o['semester'] ?? '').toString(),
           yearLevel: int.tryParse(o['year_level']?.toString() ?? ''),
+          programCode: (o['program_code'] ?? '').toString(),
+          programLevel: (o['program_level'] ?? '').toString(),
         );
       }
 
-      for (final key in _staged) {
-        final prev = existing?.sections[key];
-        if (prev != null) sections.putIfAbsent(key, () => prev);
+      // Sections of other programs stay staged but are not listed here:
+      // keep them exactly as they were saved.
+      for (final secKey in _staged) {
+        final prev = existing?.sections[secKey];
+        if (prev != null) sections.putIfAbsent(secKey, () => prev);
       }
 
-      _draft[id] = _SubjectAssignment(
-        subjectId: id,
-        subjectName: _subjectName(id),
+      _draft[key] = _SubjectAssignment(
+        subjectId: _int(subject['legacy_subject_id']),
+        academicSubjectId: id,
+        subjectName: (subject['name'] ?? existing?.subjectName ?? 'Subject')
+            .toString(),
         sections: sections,
       );
     }
 
     _subjectId = null;
+    _subjectSchoolYear = null;
     _options = [];
     _staged.clear();
     _dropdownResets++;
@@ -1914,70 +2196,234 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
     if (_subjectId != null && _stagedChanged) setState(_commit);
   }
 
-  void _remove(int subjectId, String key) {
+  void _remove(String draftKey, String sectionKey) {
     setState(() {
-      final a = _draft[subjectId];
+      final a = _draft[draftKey];
       if (a == null) return;
 
-      a.sections.remove(key);
-      if (a.sections.isEmpty) _draft.remove(subjectId);
-      if (_subjectId == subjectId) _staged.remove(key);
+      a.sections.remove(sectionKey);
+      if (a.sections.isEmpty) _draft.remove(draftKey);
+      if (_subjectDraftKey == draftKey) _staged.remove(sectionKey);
     });
   }
+
+  BoxDecoration get _cardDecoration => BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: CmColors.line),
+      );
 
   @override
   Widget build(BuildContext context) {
     final enabled = widget.enabled;
 
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: CmColors.line),
-      ),
-      child: Column(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _labeled('Assignment Department', _departmentFilter(enabled)),
+        if (_filterDepartment != null) ...[
+          const SizedBox(height: 14),
+          _labeled('Program / Strand', _programFilter(enabled)),
+        ],
+        const SizedBox(height: 14),
+        if (_programId != null)
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: _cardDecoration,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Section Assignments',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: CmColors.navy,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _subjectArea(enabled),
+                if (_subjectId != null) ...[
+                  const SizedBox(height: 14),
+                  _sectionsArea(enabled),
+                ],
+                const SizedBox(height: 14),
+                _assignedList(enabled),
+              ],
+            ),
+          )
+        else if (_draft.isNotEmpty)
+          // Saved assignments stay visible whatever the filters are.
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: _cardDecoration,
+            child: _assignedList(enabled),
+          )
+        else
+          const Text(
+            'Choose a department and a program or strand to assign '
+            'sections.',
+            style: TextStyle(fontSize: 12.5, color: CmColors.slate),
+          ),
+      ],
+    );
+  }
+
+  Widget _departmentFilter(bool enabled) {
+    if (_loadingPrograms) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        child: SizedBox(
+          width: 22,
+          height: 22,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    }
+
+    if (_programsError != null) {
+      return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Section Assignments',
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-              color: CmColors.navy,
-            ),
+          Text(_programsError!, style: const TextStyle(color: _dangerRed)),
+          TextButton(onPressed: _loadPrograms, child: const Text('Retry')),
+        ],
+      );
+    }
+
+    return DropdownButtonFormField<String>(
+      key: ValueKey('dept-$_dropdownResets-$_filterDepartment'),
+      initialValue: _filterDepartment,
+      isExpanded: true,
+      decoration: _fieldDecoration(),
+      hint: const Text('Choose a department'),
+      items: [
+        for (final d in _departments)
+          DropdownMenuItem<String>(
+            value: d,
+            child: Text(d, overflow: TextOverflow.ellipsis),
           ),
-          const SizedBox(height: 12),
+      ],
+      onChanged: enabled ? _pickDepartment : null,
+    );
+  }
+
+  Widget _programFilter(bool enabled) {
+    return DropdownButtonFormField<int>(
+      key: ValueKey('program-$_filterDepartment-$_programId'),
+      initialValue: _programId,
+      isExpanded: true,
+      decoration: _fieldDecoration(),
+      hint: const Text('Choose a program or strand'),
+      items: [
+        for (final p in _departmentPrograms)
+          if (_int(p['id']) != null)
+            DropdownMenuItem<int>(
+              value: _int(p['id']),
+              child: Text(
+                '${p['code'] ?? ''} - ${p['name'] ?? ''}',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+      ],
+      onChanged: enabled ? _pickProgram : null,
+    );
+  }
+
+  Widget _subjectArea(bool enabled) {
+    if (_loadingSubjects) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    if (_subjectsError != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(_subjectsError!, style: const TextStyle(color: _dangerRed)),
+          TextButton(
+            onPressed: () => _loadSubjects(_programId!),
+            child: const Text('Retry'),
+          ),
+        ],
+      );
+    }
+
+    if (_programSubjects.isEmpty) {
+      return const Text(
+        'This program has no published curriculum subjects yet. Add them in '
+        'Academic Management first.',
+        style: TextStyle(color: CmColors.slate),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _labeled(
+          'Year Level',
+          DropdownButtonFormField<int>(
+            key: ValueKey('year-$_programId-$_dropdownResets-$_yearLevel'),
+            initialValue: _yearLevel,
+            isExpanded: true,
+            decoration: _fieldDecoration(),
+            hint: const Text('Choose a year level'),
+            items: [
+              for (final y in _years)
+                DropdownMenuItem<int>(
+                  value: y,
+                  child: Text(_yearLabel(y, shs: _programIsShs)),
+                ),
+            ],
+            onChanged: enabled ? _pickYear : null,
+          ),
+        ),
+        if (_yearLevel != null) ...[
+          const SizedBox(height: 14),
           _labeled(
             'Subject',
-            DropdownButtonFormField<int>(
-              key: ValueKey('subject-$_dropdownResets-$_subjectId'),
-              initialValue: _subjectId,
+            DropdownButtonFormField<String>(
+              key: ValueKey(
+                'subject-$_programId-$_yearLevel-$_dropdownResets-$_subjectId',
+              ),
+              initialValue: _subjectId == null
+                  ? null
+                  : '$_subjectId|${_subjectSchoolYear ?? ''}',
               isExpanded: true,
               decoration: _fieldDecoration(),
               hint: const Text('Choose a subject'),
               items: [
-                for (final s in widget.subjects)
-                  if (int.tryParse(s['id']?.toString() ?? '') != null)
-                    DropdownMenuItem<int>(
-                      value: int.parse(s['id'].toString()),
-                      child: Text(
-                        (s['name'] ?? '').toString(),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                for (final s in _yearSubjects)
+                  DropdownMenuItem<String>(
+                    value: _rowKey(s),
+                    child: Text(
+                      [
+                        (s['code'] ?? '').toString().isEmpty
+                            ? (s['name'] ?? '').toString()
+                            : '${s['name']} (${s['code']})',
+                        _termLabel(_int(s['term'])),
+                        if ((s['school_year'] ?? '').toString().isNotEmpty)
+                          (s['school_year']).toString(),
+                        if (s['needs_finalization'] == true)
+                          'not finalized yet',
+                      ].where((p) => p.isNotEmpty).join(' · '),
+                      overflow: TextOverflow.ellipsis,
                     ),
+                  ),
               ],
               onChanged: enabled ? _pickSubject : null,
             ),
           ),
-          if (_subjectId != null) ...[
-            const SizedBox(height: 14),
-            _sectionsArea(enabled),
-          ],
-          const SizedBox(height: 14),
-          _assignedList(enabled),
         ],
-      ),
+      ],
     );
   }
 
@@ -2001,7 +2447,7 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
         children: [
           Text(_optionsError!, style: const TextStyle(color: _dangerRed)),
           TextButton(
-            onPressed: () => _loadOptions(_subjectId!),
+            onPressed: _loadOptions,
             child: const Text('Retry'),
           ),
         ],
@@ -2010,7 +2456,8 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
 
     if (_options.isEmpty) {
       return const Text(
-        'No sections exist yet. Add sections in Classes first.',
+        'No sections exist for this year level and semester yet. Add them '
+        'in the Sections screen first.',
         style: TextStyle(color: CmColors.slate),
       );
     }
@@ -2048,7 +2495,7 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
               Padding(
                 padding: const EdgeInsets.only(top: 10, bottom: 2),
                 child: Text(
-                  _yearLabel(y),
+                  _yearLabel(y, shs: _programIsShs),
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -2080,7 +2527,7 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
                   enabled && _stagedChanged ? () => setState(_commit) : null,
               icon: const Icon(Icons.add, size: 18),
               label: Text(
-                _draft.containsKey(_subjectId)
+                _draft.containsKey(_subjectDraftKey)
                     ? 'Update assignment'
                     : 'Add assignment',
               ),
@@ -2125,12 +2572,104 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
     );
   }
 
+  /// Every saved + staged assignment, whatever the current filters are,
+  /// grouped Program/Strand -> Subject -> Sections.
   Widget _assignedList(bool enabled) {
     if (_draft.isEmpty) {
       return const Text(
         'No assignments yet. Choose a subject, tick its sections, then '
         'press "Add assignment".',
         style: TextStyle(fontSize: 12.5, color: CmColors.slate),
+      );
+    }
+
+    // (program label, subject assignment, that program's sections)
+    final rows = <(String, _SubjectAssignment, List<MapEntry<String, _Sec>>)>[];
+    for (final a in _draft.values) {
+      final byProgram = <String, List<MapEntry<String, _Sec>>>{};
+      for (final e in a.sections.entries) {
+        final label =
+            e.value.programCode.isEmpty ? 'Other' : e.value.programCode;
+        byProgram.putIfAbsent(label, () => []).add(e);
+      }
+      for (final p in byProgram.entries) {
+        rows.add((p.key, a, p.value));
+      }
+    }
+    rows.sort((x, y) {
+      if (x.$1 == 'Other' && y.$1 != 'Other') return 1;
+      if (y.$1 == 'Other' && x.$1 != 'Other') return -1;
+      final byProgram = x.$1.compareTo(y.$1);
+      return byProgram != 0
+          ? byProgram
+          : x.$2.subjectName.compareTo(y.$2.subjectName);
+    });
+
+    final children = <Widget>[];
+    String? lastProgram;
+    for (final (program, a, entries) in rows) {
+      if (program != lastProgram) {
+        lastProgram = program;
+        children.add(
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 6),
+            child: Text(
+              program,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: CmColors.slate,
+              ),
+            ),
+          ),
+        );
+      }
+
+      entries.sort((x, y) {
+        final byYear = (x.value.yearLevel ?? 99).compareTo(y.value.yearLevel ?? 99);
+        return byYear != 0 ? byYear : x.value.section.compareTo(y.value.section);
+      });
+
+      children.add(
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF1F5F9),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                a.subjectName,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: CmColors.navy,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  for (final e in entries)
+                    InputChip(
+                      label: Text(e.value.section),
+                      labelStyle: const TextStyle(fontSize: 12.5),
+                      backgroundColor: Colors.white,
+                      side: const BorderSide(color: CmColors.line),
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      onDeleted:
+                          enabled ? () => _remove(a.key, e.key) : null,
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
       );
     }
 
@@ -2146,53 +2685,7 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
           ),
         ),
         const SizedBox(height: 8),
-        for (final a in _draft.values)
-          Container(
-            width: double.infinity,
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF1F5F9),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  a.subjectName,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: CmColors.navy,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: [
-                    for (final e in (a.sections.entries.toList()
-                      ..sort((x, y) {
-                        final byYear = (x.value.yearLevel ?? 99)
-                            .compareTo(y.value.yearLevel ?? 99);
-                        return byYear != 0
-                            ? byYear
-                            : x.value.section.compareTo(y.value.section);
-                      })))
-                      InputChip(
-                        label: Text(e.value.section),
-                        labelStyle: const TextStyle(fontSize: 12.5),
-                        backgroundColor: Colors.white,
-                        side: const BorderSide(color: CmColors.line),
-                        visualDensity: VisualDensity.compact,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        onDeleted:
-                            enabled ? () => _remove(a.subjectId, e.key) : null,
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
+        ...children,
       ],
     );
   }

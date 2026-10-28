@@ -117,4 +117,59 @@ class StudentService {
       'created_at': row[6].toString(),
     };
   }
+
+  /// Updates a student's email. Same ownership rule as the rest of the app:
+  /// the class owner (teacher) or an admin. Returns null when the student is
+  /// not found or the user may not edit it.
+  static Future<Map<String, dynamic>?> updateEmail(
+    int id, {
+    required int userId,
+    required String role,
+    String? email,
+  }) async {
+    final cleaned = email?.trim();
+
+    if (cleaned != null && cleaned.isNotEmpty && !cleaned.contains('@')) {
+      throw Exception('Enter a valid email address.');
+    }
+
+    final result = await Database.pool.execute(
+      Sql.named('''
+        UPDATE students AS s
+        SET email = @email
+        FROM classes AS c
+        WHERE s.id = @id
+          AND c.id = s.class_id
+          AND (@role = 'admin' OR (@role = 'teacher' AND c.teacher_id = @user_id))
+        RETURNING
+          s.id,
+          s.class_id,
+          s.student_number,
+          s.first_name,
+          s.last_name,
+          s.email,
+          s.created_at
+      '''),
+      parameters: {
+        'id': id,
+        'user_id': userId,
+        'role': role,
+        'email': (cleaned == null || cleaned.isEmpty) ? null : cleaned,
+      },
+    );
+
+    if (result.isEmpty) return null;
+
+    final row = result.first;
+
+    return {
+      'id': row[0],
+      'class_id': row[1],
+      'student_number': row[2],
+      'first_name': row[3],
+      'last_name': row[4],
+      'email': row[5],
+      'created_at': row[6].toString(),
+    };
+  }
 }

@@ -1,9 +1,10 @@
 -- CheckMate: Academic Management (combined migration)
--- File: 006_academic_module.sql
+-- File: 003_academic_module.sql
 --
--- This is the old 006, 007, 008 and 009 joined together, in the same order and
--- with the same SQL. Each part keeps its own BEGIN/COMMIT, so the result is
--- identical to running the four files one after another.
+-- PARTS 1 to 4 are the old 006, 007, 008 and 009 joined together, in the same
+-- order and with the same SQL. PART 5 links teaching subjects to Academic
+-- Management subjects. PART 6 is the section catalog (it was the separate
+-- server/sql/create_sections.sql). Each part keeps its own BEGIN/COMMIT.
 --
 -- Run it once, after 001_initial_schema.sql and 002_teacher_module.sql.
 -- It can be run again without errors, but a second run would put back any
@@ -13,15 +14,16 @@
 
 
 -- ============================================================
--- PART 1 of 4: tables, indexes and integrity guards (was 006_academic_management.sql)
+-- PART 1 of 6: tables, indexes and integrity guards (was 006_academic_management.sql)
 -- ============================================================
 
 -- CheckMate: Academic Management (programs, curricula, curriculum subjects, electives)
 -- Migration: 006_academic_management.sql
 --
--- Adds NEW tables only. The existing "subjects", "classes", "students" and
--- "exams" tables are not touched, so Teachers, Students, Classes and Exams
--- keep working exactly as before.
+-- Parts 1 to 4 add NEW tables only. The existing "subjects", "classes",
+-- "students" and "exams" tables are not touched by them, so Teachers,
+-- Students, Classes and Exams keep working exactly as before. (PART 5 adds
+-- one optional column to "subjects"; PART 6 adds the "sections" table.)
 --
 -- Deletion: every table carries is_deleted / deleted_at / deleted_by so the
 -- backend can run in "soft" delete mode. Whether the API soft-deletes or
@@ -255,7 +257,7 @@ COMMIT;
 
 
 -- ============================================================
--- PART 2 of 4: STI programs, curricula, subjects and electives (was 007_academic_seed.sql)
+-- PART 2 of 6: STI programs, curricula, subjects and electives (was 007_academic_seed.sql)
 -- ============================================================
 
 -- CheckMate: Academic Management seed data
@@ -954,7 +956,7 @@ COMMIT;
 
 
 -- ============================================================
--- PART 3 of 4: department names (was 008_academic_departments.sql)
+-- PART 3 of 6: department names (was 008_academic_departments.sql)
 -- ============================================================
 
 -- CheckMate: Academic Management department names
@@ -984,7 +986,7 @@ COMMIT;
 
 
 -- ============================================================
--- PART 4 of 4: required hours per curriculum subject (was 009_curriculum_subject_hours.sql)
+-- PART 4 of 6: required hours per curriculum subject (was 009_curriculum_subject_hours.sql)
 -- ============================================================
 
 -- CheckMate: required hours belong to the curriculum, not the shared subject
@@ -1011,5 +1013,49 @@ WHERE a.id = cs.subject_id
   AND a.hours IS NOT NULL;
 
 ALTER TABLE curriculum_subjects ENABLE TRIGGER trg_curriculum_subjects_locked;
+
+COMMIT;
+
+-- ============================================================
+-- PART 5 of 6: link teaching subjects to Academic Management subjects
+-- (Section Assignments pick subjects from Academic Management; the server
+-- links an existing subjects row or creates one the first time a subject is
+-- assigned.) Idempotent: safe to run more than once.
+-- ============================================================
+
+BEGIN;
+
+ALTER TABLE subjects
+    ADD COLUMN IF NOT EXISTS academic_subject_id BIGINT
+        REFERENCES academic_subjects(id) ON DELETE SET NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_subjects_academic_subject
+    ON subjects (academic_subject_id)
+    WHERE academic_subject_id IS NOT NULL;
+
+COMMIT;
+
+-- ============================================================
+-- PART 6 of 6: section catalog (was server/sql/create_sections.sql)
+-- ============================================================
+
+-- Section catalog: one row per section (e.g. BSIT11D, ABM11-A) per
+-- school year and semester. Programs / strands live in academic_programs.
+-- Idempotent: safe to run more than once.
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS sections (
+  id          SERIAL PRIMARY KEY,
+  program_id  INT NOT NULL REFERENCES academic_programs(id),
+  name        VARCHAR(40) NOT NULL,
+  year_level  INT NOT NULL CHECK (year_level BETWEEN 1 AND 4),
+  school_year VARCHAR(9) NOT NULL,
+  semester    INT NOT NULL CHECK (semester IN (1, 2)),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (school_year, semester, name)
+);
+
+CREATE INDEX IF NOT EXISTS sections_program_idx ON sections (program_id);
 
 COMMIT;

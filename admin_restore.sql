@@ -1,0 +1,1 @@
+INSERT INTO users (name,email,password_hash,role,username,is_active,must_change_password) VALUES ('CheckMate Admin','admin.01@checkmate.com','$2a$10$KR03DBBaBjA2apX6gzdXsuriqizezYZT9WA/ongw.O9X.opLibClu','admin','admin',TRUE,FALSE);

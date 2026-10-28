@@ -232,7 +232,7 @@ class _Field extends StatelessWidget {
 }
 
 class _Spin extends StatelessWidget {
-  const _Spin({this.color = Colors.white});
+  const _Spin() : color = Colors.white;
   final Color color;
 
   @override
@@ -408,11 +408,6 @@ Future<bool> _confirm(
     builder: (c) => _CmDialog(
       title: title,
       maxWidth: 400,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: Text(message,
-            style: const TextStyle(fontSize: 13.5, color: _Brand.ink)),
-      ),
       actions: [
         OutlinedButton(
             style: _outlineStyle,
@@ -423,6 +418,11 @@ Future<bool> _confirm(
             onPressed: () => Navigator.pop(c, true),
             child: Text(action)),
       ],
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Text(message,
+            style: const TextStyle(fontSize: 13.5, color: _Brand.ink)),
+      ),
     ),
   );
   return r == true;
@@ -475,7 +475,7 @@ Future<bool?> _showExamDetailsDialog(
             final d = descC.text.trim();
             final i = instC.text.trim();
             if (editing) {
-              final examId = _id(exam?['id']);
+              final examId = _id(exam['id']);
               if (examId == null) throw Exception('Invalid exam ID.');
               await ApiService.updateExam(
                 token: token,
@@ -770,6 +770,12 @@ class _ExamsTabState extends State<ExamsTab> {
         builder: (c) => _CmDialog(
           title: 'PDF Upload — Coming Next',
           maxWidth: 420,
+          actions: [
+            FilledButton(
+                style: _primaryStyle,
+                onPressed: () => Navigator.pop(c),
+                child: const Text('OK')),
+          ],
           child: const Padding(
             padding: EdgeInsets.only(bottom: 12),
             child: Text(
@@ -779,12 +785,6 @@ class _ExamsTabState extends State<ExamsTab> {
               style: TextStyle(fontSize: 13.5, color: _Brand.ink),
             ),
           ),
-          actions: [
-            FilledButton(
-                style: _primaryStyle,
-                onPressed: () => Navigator.pop(c),
-                child: const Text('OK')),
-          ],
         ),
       );
     }
@@ -1254,7 +1254,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     final editing = section != null;
     final nameC = TextEditingController(text: section?['name']?.toString() ?? '');
     final ptsC = TextEditingController(
-        text: editing ? _trim(_num(section?['default_points'])) : '1');
+        text: editing ? _trim(_num(section['default_points'])) : '1');
     var type = section?['question_type']?.toString() ?? 'multiple_choice';
     if (!_kTypes.contains(type)) type = 'multiple_choice';
     bool saving = false;
@@ -1285,7 +1285,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
             try {
               final token = await _token();
               if (editing) {
-                final sectionId = _id(section?['id']);
+                final sectionId = _id(section['id']);
                 if (sectionId == null) throw Exception('Invalid section ID.');
                 await ApiService.updateExamSection(
                   token: token,
@@ -1916,7 +1916,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 ),
               ),
             ),
-            if (expanded && sid != null) ...[
+            if (expanded) ...[
               const Divider(height: 1, color: CmColors.line),
               Padding(
                 padding: const EdgeInsets.all(16),

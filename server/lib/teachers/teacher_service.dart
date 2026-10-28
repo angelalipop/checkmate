@@ -2,7 +2,6 @@ import 'dart:math';
 
 import 'package:postgres/postgres.dart';
 import 'package:server/auth/password.dart';
-import 'package:server/classes/class_service.dart';
 import 'package:server/database.dart';
 import 'package:server/teachers/teacher_exception.dart';
 import 'package:server/teachers/teacher_identity.dart';
@@ -12,19 +11,23 @@ export 'package:server/teachers/teacher_exception.dart';
 /// One Subject + Section the teacher teaches.
 class AssignmentInput {
   AssignmentInput({
-    required this.subjectId,
     required this.section,
+    this.subjectId,
+    this.academicSubjectId,
     this.schoolYear = '',
     this.semester = '',
   });
 
-  final int subjectId;
+  /// The subject row classes use (subjects.id). May be null when the admin
+  /// picked a subject straight from Academic Management that has no such row
+  /// yet; [academicSubjectId] is then resolved to one on save.
+  final int? subjectId;
+
+  /// academic_subjects.id, the Academic Management subject.
+  final int? academicSubjectId;
   final String section;
   final String schoolYear;
   final String semester;
-
-  String get key =>
-      '$subjectId|${section.toLowerCase()}|$schoolYear|$semester';
 }
 
 class TeacherService {
@@ -46,9 +49,11 @@ class TeacherService {
       }
 
       final subjectId = int.tryParse(item['subject_id']?.toString() ?? '');
+      final academicSubjectId =
+          int.tryParse(item['academic_subject_id']?.toString() ?? '');
       final section = item['section']?.toString().trim() ?? '';
 
-      if (subjectId == null) {
+      if (subjectId == null && academicSubjectId == null) {
         throw TeacherException('Each assignment needs a subject.');
       }
 
@@ -59,6 +64,7 @@ class TeacherService {
       out.add(
         AssignmentInput(
           subjectId: subjectId,
+          academicSubjectId: academicSubjectId,
           section: section,
           schoolYear: item['school_year']?.toString().trim() ?? '',
           semester: item['semester']?.toString().trim() ?? '',
@@ -127,6 +133,172 @@ class TeacherService {
     }
   }
 
+  /// The subjects row (what classes point at) for an Academic Management
+  /// subject. An existing row is reused (already linked, else the same code,
+  /// else the same name); a row is created only when none exists, so no
+  /// duplicate subject is made. With [create] false nothing is written.
+  static Future<int?> _legacySubjectFor(
+    Session session,
+    int academicSubjectId, {
+    required bool create,
+  }) async {
+    final acad = await session.execute(
+      Sql.named('''
+        SELECT code, name FROM academic_subjects
+        WHERE id = @id AND is_deleted = FALSE
+      '''),
+      parameters: {'id': academicSubjectId},
+    );
+
+    if (acad.isEmpty) {
+      throw TeacherException('The selected subject does not exist.');
+    }
+
+    final code = acad.first[0] as String?;
+    final name = acad.first[1]! as String;
+
+    final found = await session.execute(
+      Sql.named('''
+        SELECT id FROM subjects
+        WHERE academic_subject_id = @a
+           OR (
+             academic_subject_id IS NULL
+             AND (
+               (@code::text IS NOT NULL AND LOWER(code) = LOWER(@code::text))
+               OR LOWER(name) = LOWER(@name)
+             )
+           )
+        ORDER BY (academic_subject_id IS NOT NULL) DESC, id
+        LIMIT 1
+      '''),
+      parameters: {'a': academicSubjectId, 'code': code, 'name': name},
+    );
+
+    if (found.isNotEmpty) {
+      final id = found.first[0]! as int;
+      if (create) {
+        await session.execute(
+          Sql.named('''
+            UPDATE subjects SET academic_subject_id = @a
+            WHERE id = @id AND academic_subject_id IS NULL
+          '''),
+          parameters: {'a': academicSubjectId, 'id': id},
+        );
+      }
+      return id;
+    }
+
+    if (!create) return null;
+
+    final inserted = await session.execute(
+      Sql.named('''
+        INSERT INTO subjects (name, code, academic_subject_id)
+        VALUES (@name, @code, @a)
+        RETURNING id
+      '''),
+      parameters: {
+        'name': name.length > 150 ? name.substring(0, 150) : name,
+        'code': code,
+        'a': academicSubjectId,
+      },
+    );
+
+    return inserted.first[0]! as int;
+  }
+
+  /// Subjects of a program's published curriculum with the year level and
+  /// term each is taught in, from Academic Management. An elective slot is
+  /// replaced by the elective finalized for each school year (the row then
+  /// has that 'school_year'); a slot with none yet is returned with
+  /// 'needs_finalization' true so the app can ask for it to be finalized. 'legacy_subject_id' is the
+  /// subjects row classes use for it, when one already exists.
+  static Future<List<Map<String, dynamic>>> getProgramSubjects(
+    int programId,
+  ) async {
+    final result = await Database.pool.execute(
+      Sql.named('''
+        WITH base AS (
+          SELECT cs.id AS slot_id, cs.subject_id, cs.year_level, cs.term,
+                 cs.is_elective_slot
+          FROM curricula c
+          JOIN curriculum_subjects cs
+            ON cs.curriculum_id = c.id AND cs.is_deleted = FALSE
+          WHERE c.program_id = @program_id
+            AND c.is_deleted = FALSE AND c.status = 'published'
+        ),
+        finalized AS (
+          SELECT b.slot_id, ce.subject_id, es.school_year
+          FROM base b
+          JOIN elective_selections es
+            ON es.curriculum_subject_id = b.slot_id AND es.is_deleted = FALSE
+          JOIN curriculum_electives ce
+            ON ce.id = es.elective_id AND ce.is_deleted = FALSE
+          WHERE b.is_elective_slot
+        ),
+        program_subjects AS (
+          -- regular subjects
+          SELECT b.subject_id, b.year_level, b.term,
+                 NULL::varchar AS school_year, FALSE AS needs_finalization
+          FROM base b
+          WHERE NOT b.is_elective_slot
+          UNION ALL
+          -- an elective slot shows the elective finalized for each school year
+          SELECT f.subject_id, b.year_level, b.term,
+                 f.school_year::varchar, FALSE
+          FROM finalized f
+          JOIN base b ON b.slot_id = f.slot_id
+          UNION ALL
+          -- a slot with no finalized elective yet: kept, but flagged
+          SELECT b.subject_id, b.year_level, b.term,
+                 NULL::varchar, TRUE
+          FROM base b
+          WHERE b.is_elective_slot
+            AND NOT EXISTS (
+              SELECT 1 FROM finalized f WHERE f.slot_id = b.slot_id
+            )
+        )
+        SELECT a.id, a.code, a.name, a.units, ls.id, ps.year_level, ps.term,
+               ps.school_year, ps.needs_finalization
+        FROM program_subjects ps
+        JOIN academic_subjects a
+          ON a.id = ps.subject_id AND a.is_deleted = FALSE
+        LEFT JOIN LATERAL (
+          SELECT sub.id
+          FROM subjects sub
+          WHERE sub.academic_subject_id = a.id
+             OR (
+               sub.academic_subject_id IS NULL
+               AND (
+                 (a.code IS NOT NULL AND LOWER(sub.code) = LOWER(a.code))
+                 OR LOWER(sub.name) = LOWER(a.name)
+               )
+             )
+          ORDER BY (sub.academic_subject_id IS NOT NULL) DESC, sub.id
+          LIMIT 1
+        ) ls ON TRUE
+        ORDER BY ps.year_level, ps.term, LOWER(a.name), a.code,
+                 ps.school_year
+      '''),
+      parameters: {'program_id': programId},
+    );
+
+    return result
+        .map(
+          (row) => <String, dynamic>{
+            'id': row[0],
+            'code': row[1],
+            'name': row[2],
+            'units': row[3]?.toString(),
+            'legacy_subject_id': row[4],
+            'year_level': row[5],
+            'term': row[6],
+            'school_year': row[7],
+            'needs_finalization': row[8],
+          },
+        )
+        .toList();
+  }
+
   /// Makes [items] the teacher's COMPLETE set of Subject + Section
   /// assignments, inside the caller's transaction:
   ///   * a Subject + Section already owned by ANOTHER teacher -> 409, and
@@ -144,11 +316,22 @@ class TeacherService {
     final seen = <String>{};
 
     for (final item in items) {
-      if (!seen.add(item.key)) continue;
+      // Settle which subjects row this assignment uses, then de-duplicate
+      // on teacher + subject + section + term.
+      final subjectId = item.subjectId ??
+          (await _legacySubjectFor(
+            session,
+            item.academicSubjectId!,
+            create: true,
+          ))!;
+
+      final dedupeKey = '$subjectId|${item.section.toLowerCase()}|'
+          '${item.schoolYear}|${item.semester}';
+      if (!seen.add(dedupeKey)) continue;
 
       final subject = await session.execute(
         Sql.named('SELECT name FROM subjects WHERE id = @id'),
-        parameters: {'id': item.subjectId},
+        parameters: {'id': subjectId},
       );
 
       if (subject.isEmpty) {
@@ -167,7 +350,7 @@ class TeacherService {
           FOR UPDATE OF c
         '''),
         parameters: {
-          'subject_id': item.subjectId,
+          'subject_id': subjectId,
           'section': item.section,
           'school_year': item.schoolYear,
           'semester': item.semester,
@@ -194,6 +377,37 @@ class TeacherService {
 
         keep.add(classId);
       } else {
+        // A new Subject + Section may only use a section that exists in the
+        // Sections catalog (same name, school year and semester).
+        final catalog = await session.execute(
+          Sql.named('''
+            SELECT s.year_level
+            FROM sections s
+            JOIN academic_programs p
+              ON p.id = s.program_id AND p.is_deleted = FALSE
+            WHERE LOWER(s.name) = LOWER(@section)
+              AND s.school_year = @school_year
+              AND s.semester = @semester
+          '''),
+          parameters: {
+            'section': item.section,
+            'school_year': item.schoolYear,
+            'semester': int.tryParse(
+                  RegExp(r'^\d').firstMatch(item.semester.trim())?.group(0) ??
+                      '',
+                ) ??
+                0,
+          },
+        );
+
+        if (catalog.isEmpty) {
+          throw TeacherException(
+            '${item.section} (${item.schoolYear}, ${item.semester}) is not '
+            'in the Sections catalog. Create it in the Sections screen '
+            'first.',
+          );
+        }
+
         final created = await session.execute(
           Sql.named('''
             INSERT INTO classes (
@@ -208,12 +422,12 @@ class TeacherService {
             RETURNING id
           '''),
           parameters: {
-            'subject_id': item.subjectId,
+            'subject_id': subjectId,
             'teacher_id': teacherId,
             'section': item.section,
             'school_year': item.schoolYear,
             'semester': item.semester,
-            'year_level': ClassService.inferYearLevel(item.section) ?? 0,
+            'year_level': catalog.first[0] ?? 0,
           },
         );
 
@@ -346,9 +560,27 @@ static Future<String> _allocateTeacherId(Session tx) async {
     final classes = await Database.pool.execute(
       Sql.named('''
         SELECT c.id, c.section, c.school_year, c.semester, c.year_level,
-               c.teacher_id, c.subject_id, s.name, s.code
+               c.teacher_id, c.subject_id, s.name, s.code,
+               s.academic_subject_id, pr.program_id, pr.program_code,
+               pr.program_level
         FROM classes c
         JOIN subjects s ON s.id = c.subject_id
+        LEFT JOIN LATERAL (
+          SELECT sec.program_id, p.code AS program_code,
+                 p.level AS program_level
+          FROM sections sec
+          JOIN academic_programs p ON p.id = sec.program_id
+          WHERE LOWER(sec.name) = LOWER(c.section)
+            AND (c.school_year IS NULL OR sec.school_year = c.school_year)
+          ORDER BY (
+                     c.semester IS NOT DISTINCT FROM CASE sec.semester
+                       WHEN 1 THEN '1st Semester'
+                       WHEN 2 THEN '2nd Semester'
+                     END
+                   ) DESC,
+                   sec.school_year DESC, sec.semester DESC
+          LIMIT 1
+        ) pr ON TRUE
         WHERE c.teacher_id IS NOT NULL
         ORDER BY LOWER(s.name), c.year_level NULLS LAST, LOWER(c.section)
       '''),
@@ -368,6 +600,7 @@ static Future<String> _allocateTeacherId(Session tx) async {
           'subject_id': subjectId,
           'subject_name': row[7],
           'subject_code': row[8],
+          'academic_subject_id': row[9],
           'classes': <Map<String, dynamic>>[],
         },
       );
@@ -378,6 +611,9 @@ static Future<String> _allocateTeacherId(Session tx) async {
         'school_year': row[2],
         'semester': row[3],
         'year_level': row[4],
+        'program_id': row[10],
+        'program_code': row[11],
+        'program_level': row[12],
       });
     }
 
@@ -425,36 +661,74 @@ static Future<String> _allocateTeacherId(Session tx) async {
   ///   teacher_id != null  -> already taught by that teacher
   /// The app greys out rows owned by someone other than the teacher being
   /// edited. The server re-checks on save, so this is only a convenience.
+  ///
+  /// Pass [academicSubjectId] (an Academic Management subject) and/or
+  /// [programId] to narrow it to one program's sections, and [yearLevel] /
+  /// [term] to the year and semester the subject is taught in.
   static Future<List<Map<String, dynamic>>> getTeachingOptions(
-    int subjectId,
-  ) async {
+    int? subjectId, {
+    int? academicSubjectId,
+    int? programId,
+    int? yearLevel,
+    int? term,
+    String? schoolYear,
+  }) async {
+    var legacySubjectId = subjectId;
+    if (legacySubjectId == null && academicSubjectId != null) {
+      legacySubjectId = await _legacySubjectFor(
+        Database.pool,
+        academicSubjectId,
+        create: false,
+      );
+    }
+
+    // Options come from the Sections catalog (the `sections` table managed
+    // in the Sections screen), never from free-text class names. Semester is
+    // shown as "1st Semester" / "2nd Semester", the format classes store.
     final result = await Database.pool.execute(
       Sql.named('''
-        WITH sections AS (
-          SELECT DISTINCT ON (
-                   LOWER(section),
-                   COALESCE(school_year, ''),
-                   COALESCE(semester, '')
-                 )
-                 section, school_year, semester, year_level
-          FROM classes
-          ORDER BY LOWER(section),
-                   COALESCE(school_year, ''),
-                   COALESCE(semester, ''),
-                   id
+        WITH catalog AS (
+          SELECT s.name AS section,
+                 s.school_year,
+                 CASE s.semester
+                   WHEN 1 THEN '1st Semester'
+                   WHEN 2 THEN '2nd Semester'
+                   ELSE s.semester::text
+                 END AS semester,
+                 s.year_level,
+                 s.semester AS term_no,
+                 s.program_id,
+                 p.code AS program_code,
+                 p.level AS program_level
+          FROM sections s
+          JOIN academic_programs p
+            ON p.id = s.program_id AND p.is_deleted = FALSE
         )
         SELECT s.section, s.school_year, s.semester, s.year_level,
-               c.id, c.teacher_id, u.name
-        FROM sections s
+               c.id, c.teacher_id, u.name,
+               s.program_code, s.program_level, s.program_id
+        FROM catalog s
         LEFT JOIN classes c
                ON c.subject_id = @subject_id
               AND LOWER(c.section) = LOWER(s.section)
-              AND COALESCE(c.school_year, '') = COALESCE(s.school_year, '')
-              AND COALESCE(c.semester, '') = COALESCE(s.semester, '')
+              AND COALESCE(c.school_year, '') = s.school_year
+              AND COALESCE(c.semester, '') = s.semester
         LEFT JOIN users u ON u.id = c.teacher_id
-        ORDER BY s.year_level NULLS LAST, LOWER(s.section)
+        WHERE (@program_id::bigint IS NULL OR s.program_id = @program_id)
+          AND (@year_level::int IS NULL OR s.year_level = @year_level)
+          AND (@term::int IS NULL OR s.term_no = @term)
+          AND (@school_year::text IS NULL OR s.school_year = @school_year::text)
+        ORDER BY s.program_level, s.program_code, s.year_level,
+                 LOWER(s.section)
       '''),
-      parameters: {'subject_id': subjectId},
+      parameters: {
+        // -1 matches no class: the subject has no classes yet.
+        'subject_id': legacySubjectId ?? -1,
+        'program_id': programId,
+        'year_level': yearLevel,
+        'term': term,
+        'school_year': schoolYear,
+      },
     );
 
     return result.map((row) {
@@ -466,6 +740,9 @@ static Future<String> _allocateTeacherId(Session tx) async {
         'class_id': row[4],
         'teacher_id': row[5],
         'teacher_name': row[6],
+        'program_code': row[7],
+        'program_level': row[8],
+        'program_id': row[9],
       };
     }).toList();
   }

@@ -23,11 +23,29 @@ const Color _ok = Color(0xFF2F8F72);
 /// Returns `true` from Navigator.pop when data changed, so the caller
 /// can refresh.
 class ImportStudentsScreen extends StatefulWidget {
-  const ImportStudentsScreen({super.key, this.isTeacher = false});
+  const ImportStudentsScreen({
+    super.key,
+    this.isTeacher = false,
+    this.assignedSections,
+    this.initialSection,
+    this.initialClass,
+  });
 
   /// Teachers can create classes under their signed-in account.
   /// Admins import into existing classes, preserving their assigned teachers.
   final bool isTeacher;
+
+  /// Section names assigned to the logged-in teacher. When given, a file is
+  /// rejected if any row belongs to a section outside this list.
+  final List<String>? assignedSections;
+
+  /// Section the import was opened from (an empty section's button), shown
+  /// on the first step.
+  final String? initialSection;
+
+  /// That section's class, when it has exactly one: its subject, school year
+  /// and semester are preselected in the review step.
+  final Map<String, dynamic>? initialClass;
 
   @override
   State<ImportStudentsScreen> createState() => _ImportStudentsScreenState();
@@ -66,7 +84,41 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
   @override
   void initState() {
     super.initState();
+    _applyInitialClass();
     _loadLookups();
+  }
+
+  void _applyInitialClass() {
+    final c = widget.initialClass;
+    if (c == null) return;
+
+    final subject = c['subject'];
+    if (subject is Map) {
+      final id = int.tryParse(subject['id']?.toString() ?? '');
+      if (id != null) {
+        _subjectId = id;
+        _selectedSubject = Map<String, dynamic>.from(subject);
+      }
+    }
+
+    final schoolYear = c['school_year']?.toString().trim() ?? '';
+    if (schoolYear.isNotEmpty) _schoolYear = schoolYear;
+
+    final semester = c['semester']?.toString().trim() ?? '';
+    if (_semesters.contains(semester)) _semester = semester;
+  }
+
+  static String _sectionKey(String name) =>
+      name.toUpperCase().replaceAll(RegExp(r'[\s-]+'), '');
+
+  /// Sections in the file that are not assigned to the logged-in teacher.
+  List<String> _unassignedSections(ParsedStudentFile parsed) {
+    final allowed = widget.assignedSections;
+    if (allowed == null) return const [];
+    final ok = allowed.map(_sectionKey).toSet();
+    return parsed.bySection.keys
+        .where((name) => !ok.contains(_sectionKey(name)))
+        .toList();
   }
 
   @override
@@ -254,6 +306,48 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
       return;
     }
 
+    // Students can only be added to the teacher's own sections.
+    final unassigned = _unassignedSections(parsed);
+    if (unassigned.isNotEmpty) {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: _dialogShape,
+          title: const Text('Section not assigned to you'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'You can only import students into sections assigned to '
+                'you. These sections in the file are not:',
+              ),
+              const SizedBox(height: 10),
+              for (final name in unassigned.take(8))
+                Text('• $name',
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
+              if (unassigned.length > 8)
+                Text('…and ${unassigned.length - 8} more'),
+              const SizedBox(height: 10),
+              const Text(
+                'Correct the Section column in your file, then choose it '
+                'again.',
+                style: TextStyle(fontSize: 13, color: CmColors.slate),
+              ),
+            ],
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: FilledButton.styleFrom(backgroundColor: CmColors.navy),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     setState(() => _checking = true);
 
     try {
@@ -278,9 +372,9 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
       if (!widget.isTeacher &&
           plan.sections.any((s) =>
               s.toAdd.isNotEmpty && s.existingClassId == null)) {
-        _snack('An assigned class is needed for each section, subject, '
-            'school year, and semester. Ask the teacher to create the '
-            'missing class, then retry the import.');
+        _snack('This subject and section is not assigned to you for that '
+            'school year and semester. Ask an administrator to assign it '
+            'to you, then retry the import.');
         return;
       }
 
@@ -664,6 +758,31 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
       children: [
         if (_errorTitle != null) ...[
           _errorCard(),
+          const SizedBox(height: 16),
+        ],
+        if (widget.initialSection != null) ...[
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: CmColors.line),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.class_outlined, color: CmColors.slate),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Adding students to ${widget.initialSection}. Each '
+                    'student goes to the section in the file’s Section '
+                    'column, which must be assigned to you.',
+                    style: const TextStyle(color: CmColors.slate, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: 16),
         ],
         Card(

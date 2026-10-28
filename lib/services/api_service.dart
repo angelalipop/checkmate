@@ -947,6 +947,71 @@ class ApiService {
     return sections.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
+  /// Sections of ONE program for an Academic Management subject, with the
+  /// teacher who already teaches each (admin only).
+  /// Rows: {section, school_year, semester, year_level, program_id,
+  ///        program_code, program_level, class_id, teacher_id, teacher_name}
+  static Future<List<Map<String, dynamic>>> getProgramTeachingOptions(
+    String token, {
+    required int academicSubjectId,
+    required int programId,
+    int? yearLevel,
+    int? term,
+    String? schoolYear,
+  }) async {
+    final response = await http.get(
+      Uri.parse(
+        '$baseUrl/teaching-options'
+        '?academic_subject_id=$academicSubjectId&program_id=$programId'
+        '${yearLevel != null ? '&year_level=$yearLevel' : ''}'
+        '${term != null ? '&term=$term' : ''}'
+        '${schoolYear != null ? '&school_year=${Uri.encodeQueryComponent(schoolYear)}' : ''}',
+      ),
+      headers: _authHeaders(token),
+    );
+
+    final data = _decodeBody(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(data['message']?.toString() ?? 'Failed to load sections');
+    }
+
+    final sections = data['sections'];
+
+    if (sections is! List) {
+      return [];
+    }
+
+    return sections.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  /// Subjects of a program's published curriculum (Academic Management).
+  /// Rows: {id, code, name, units, legacy_subject_id, year_level, term,
+  ///        school_year (finalized elective only), needs_finalization}
+  static Future<List<Map<String, dynamic>>> getProgramSubjects(
+    String token,
+    int programId,
+  ) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/teaching-options/subjects?program_id=$programId'),
+      headers: _authHeaders(token),
+    );
+
+    final data = _decodeBody(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(data['message']?.toString() ?? 'Failed to load subjects');
+    }
+
+    final subjects = data['subjects'];
+
+    if (subjects is! List) {
+      return [];
+    }
+
+    return subjects.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
   /// Returns the newly generated temporary password (shown once by the UI).
   static Future<String> resetTeacherPassword({
     required String token,

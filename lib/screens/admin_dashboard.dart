@@ -8,9 +8,7 @@ import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import 'academic_management_screen.dart';
 import 'sections_screen.dart';
-import 'exams_screen.dart';
 import 'login_screen.dart' show CmColors, LoginScreen;
-import 'students_screen.dart';
 import 'teachers_admin_screen.dart';
 
 // =============================================================
@@ -140,8 +138,6 @@ enum AdminPage {
   dashboard('Dashboard', Icons.space_dashboard_outlined),
   teachers('Teachers', Icons.people_outline),
   classes('Sections', Icons.menu_book_outlined),
-  students('Students', Icons.school_outlined),
-  exams('Exams', Icons.assignment_outlined),
   academic('Academic Management', Icons.account_balance_outlined);
 
   const AdminPage(this.label, this.icon);
@@ -154,8 +150,6 @@ const List<AdminPage> _navPages = [
   AdminPage.dashboard,
   AdminPage.teachers,
   AdminPage.classes,
-  AdminPage.students,
-  AdminPage.exams,
   AdminPage.academic,
 ];
 
@@ -163,10 +157,6 @@ Widget? _screenFor(AdminPage page) {
   switch (page) {
     case AdminPage.classes:
       return const SectionsScreen();
-    case AdminPage.students:
-      return const StudentsScreen();
-    case AdminPage.exams:
-      return const ExamsScreen();
     case AdminPage.teachers:
       return const TeachersScreen();
     case AdminPage.academic:
@@ -1202,9 +1192,6 @@ class _DashboardContent extends StatelessWidget {
     const modules = [
       AdminPage.teachers,
       AdminPage.classes,
-      AdminPage.students,
-
-      AdminPage.exams,
       AdminPage.academic,
     ];
     final gridWidth = w;

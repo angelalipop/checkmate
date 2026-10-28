@@ -1,5 +1,6 @@
 -- CheckMate: Academic Management database integrity test
--- Run AFTER migrations 006, 007, 008, and 009 (expects the original seed data):
+-- Run AFTER 001_initial_schema.sql, 002_teacher_module.sql and
+-- 003_academic_module.sql (expects the original seed data):
 --   docker exec -i <postgres-container> psql -U checkmate -d checkmate -v ON_ERROR_STOP=1 < db/tests/academic_integrity_test.sql
 -- Everything runs inside a transaction that is rolled back, so no data changes.
 -- Any failed check stops the script with a message starting with "FAIL".
@@ -60,7 +61,7 @@ SELECT pg_temp.check_eq('BSA subjects', (SELECT COUNT(*) FROM curriculum_subject
 SELECT pg_temp.check_eq('STEM subjects', (SELECT COUNT(*) FROM curriculum_subjects WHERE curriculum_id = pg_temp.cid('STEM') AND is_deleted = FALSE), 33);
 SELECT pg_temp.check_eq('ABM subjects', (SELECT COUNT(*) FROM curriculum_subjects WHERE curriculum_id = pg_temp.cid('ABM') AND is_deleted = FALSE), 33);
 
-SELECT pg_temp.check_eq('every SHS subject has its required hours (needs migration 009)',
+SELECT pg_temp.check_eq('every SHS subject has its required hours (PART 4 of 003_academic_module.sql)',
     (SELECT COUNT(*) FROM curriculum_subjects cs JOIN curricula c ON c.id = cs.curriculum_id
        JOIN academic_programs p ON p.id = c.program_id
       WHERE p.level = 'shs' AND cs.is_deleted = FALSE AND cs.hours IS NULL), 0);
@@ -208,6 +209,37 @@ SELECT pg_temp.check_eq('classes.subject_id still references subjects',
     (SELECT COUNT(*) FROM information_schema.table_constraints tc
        JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name
       WHERE tc.table_name = 'classes' AND tc.constraint_type = 'FOREIGN KEY' AND ccu.table_name = 'subjects'), 1);
+
+-- ---------- section catalog (PART 6) ----------
+SELECT pg_temp.check_eq('sections table exists',
+    (SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'sections'), 1);
+SELECT pg_temp.must_fail('a section needs a real program',
+    $$INSERT INTO sections (program_id, name, year_level, school_year, semester) VALUES (-1, 'X11A', 1, '2026-2027', 1)$$);
+SELECT pg_temp.must_fail('malformed section semester',
+    $$INSERT INTO sections (program_id, name, year_level, school_year, semester) SELECT id, 'X11B', 1, '2026-2027', 3 FROM academic_programs LIMIT 1$$);
+
+-- ---------- teaching subjects link to Academic Management (PART 5) ----------
+SELECT pg_temp.check_eq('subjects.academic_subject_id exists',
+    (SELECT COUNT(*) FROM information_schema.columns
+      WHERE table_name = 'subjects' AND column_name = 'academic_subject_id'), 1);
+
+DO $$
+DECLARE
+    a BIGINT;
+BEGIN
+    -- any Academic Management subject that no teaching subject uses yet
+    SELECT id INTO a FROM academic_subjects x
+     WHERE x.is_deleted = FALSE
+       AND NOT EXISTS (SELECT 1 FROM subjects s WHERE s.academic_subject_id = x.id)
+     ORDER BY id LIMIT 1;
+
+    INSERT INTO subjects (name, code, academic_subject_id) VALUES ('Link test A', 'LT-A', a);
+    PERFORM pg_temp.check_eq('a teaching subject can link to an academic subject',
+        (SELECT COUNT(*) FROM subjects WHERE academic_subject_id = a), 1);
+    PERFORM pg_temp.must_fail('two teaching subjects cannot link to the same academic subject',
+        format('INSERT INTO subjects (name, code, academic_subject_id) VALUES (''Link test B'', ''LT-B'', %s)', a));
+END;
+$$;
 
 ROLLBACK;
 \echo 'All Academic Management integrity checks passed (nothing was saved).'

@@ -9,6 +9,7 @@ import '../services/auth_storage.dart';
 import 'answer_sheet_input_screen.dart';
 import 'exams_tab.dart';
 import 'login_screen.dart' show CmColors, LoginScreen;
+import 'students_screen.dart';
 
 // =============================================================
 // CheckMate — Teacher app shell + Dashboard home
@@ -74,6 +75,7 @@ void Function(TeacherPage page)? _dashboardNavigate;
 enum TeacherPage {
   dashboard('Dashboard', Icons.space_dashboard_outlined),
   classes('My Classes', Icons.class_outlined),
+  students('Students', Icons.school_outlined),
   exams('Exams', Icons.assignment_outlined),
   scans('Scans', Icons.document_scanner_outlined),
   results('Results', Icons.fact_check_outlined),
@@ -230,8 +232,12 @@ class _TeacherIdentity {
 ///  - Exams: ExamsTab (exam list -> in-place collapsible builder with inline
 ///    questions, paper preview popup, PDF print/download).
 ///  - Scans: AnswerSheetInputScreen -> camera/upload -> OMR -> scoring.
+///  - Students: StudentsScreen (moved here from the admin dashboard; the
+///    server only returns students of the teacher's own classes).
 Widget? _moduleScreenFor(TeacherPage page) {
   switch (page) {
+    case TeacherPage.students:
+      return const StudentsScreen();
     case TeacherPage.exams:
       return const ExamsTab();
     case TeacherPage.scans:

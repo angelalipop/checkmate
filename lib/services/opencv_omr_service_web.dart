@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import 'auth_storage.dart';
+
 export 'opencv_omr_models.dart';
 import 'opencv_omr_models.dart';
 
@@ -20,12 +22,19 @@ class OpenCVOMRService {
   }) async {
     final uri = Uri.parse('$apiBaseUrl/omr/process');
 
+    // The OMR endpoint requires a signed-in teacher or admin.
+    final token = await AuthStorage.getToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Your session has expired. Please log in again.');
+    }
+
     http.Response response;
     try {
       response = await http.post(
         uri,
-        headers: const <String, String>{
+        headers: <String, String>{
           'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
         },
         body: jsonEncode(<String, dynamic>{
           'imageBase64': base64Encode(correctedImageBytes),
@@ -55,6 +64,7 @@ class OpenCVOMRService {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception(
         body['error']?.toString() ??
+            body['message']?.toString() ??
             'OMR backend failed with HTTP ${response.statusCode}.',
       );
     }
