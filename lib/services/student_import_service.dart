@@ -41,6 +41,24 @@ class AcademicOptions {
 // Only what the student import needs: read the first non-empty sheet as
 // text, and write a header-only template.
 
+/// Cell styles available to [XlsxIO.writeGrid].
+class XlsxStyle {
+  static const plain = 0;
+  static const header = 1; // white bold on navy
+  static const label = 2; // bold on grey
+  static const input = 3; // yellow fill-in box (text)
+  static const textColumn = 4; // text format, keeps leading zeros
+  static const noteTitle = 5; // bold
+  static const note = 6; // small grey italic
+}
+
+/// One cell for [XlsxIO.writeGrid].
+class XlsxCell {
+  const XlsxCell(this.text, [this.style = XlsxStyle.plain]);
+  final String text;
+  final int style;
+}
+
 class XlsxIO {
   static String _colLetters(String ref) =>
       ref.replaceAll(RegExp(r'[^A-Za-z]'), '').toUpperCase();
@@ -66,7 +84,7 @@ class XlsxIO {
       .map((c) => c.innerText)
       .join();
 
-  /// Text of a shared-string <si> (plain or rich text, ignoring phonetics).
+  /// Text of a shared-string `<si>` (plain or rich text, ignoring phonetics).
   static String _siText(XmlElement si) {
     final b = StringBuffer();
     for (final c in si.children.whereType<XmlElement>()) {
@@ -209,6 +227,147 @@ class XlsxIO {
       .replaceAll('<', '&lt;')
       .replaceAll('>', '&gt;');
 
+  static String _escAttr(String s) =>
+      _esc(s).replaceAll('"', '&quot;');
+
+  static const _stylesXml =
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+      '<fonts count="4">'
+      '<font><sz val="11"/><name val="Calibri"/></font>'
+      '<font><b/><sz val="11"/><name val="Calibri"/></font>'
+      '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>'
+      '<font><i/><sz val="10"/><color rgb="FF475569"/><name val="Calibri"/></font>'
+      '</fonts>'
+      '<fills count="5">'
+      '<fill><patternFill patternType="none"/></fill>'
+      '<fill><patternFill patternType="gray125"/></fill>'
+      '<fill><patternFill patternType="solid"><fgColor rgb="FF1E293B"/><bgColor indexed="64"/></patternFill></fill>'
+      '<fill><patternFill patternType="solid"><fgColor rgb="FFFEF9C3"/><bgColor indexed="64"/></patternFill></fill>'
+      '<fill><patternFill patternType="solid"><fgColor rgb="FFE2E8F0"/><bgColor indexed="64"/></patternFill></fill>'
+      '</fills>'
+      '<borders count="2">'
+      '<border><left/><right/><top/><bottom/><diagonal/></border>'
+      '<border>'
+      '<left style="thin"><color rgb="FFCBD5E1"/></left>'
+      '<right style="thin"><color rgb="FFCBD5E1"/></right>'
+      '<top style="thin"><color rgb="FFCBD5E1"/></top>'
+      '<bottom style="thin"><color rgb="FFCBD5E1"/></bottom>'
+      '<diagonal/></border>'
+      '</borders>'
+      '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+      '<cellXfs count="7">'
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+      '<xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>'
+      '<xf numFmtId="0" fontId="1" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>'
+      '<xf numFmtId="49" fontId="0" fillId="3" borderId="1" xfId="0" applyNumberFormat="1" applyFill="1" applyBorder="1"/>'
+      '<xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
+      '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+      '<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+      '</cellXfs>'
+      '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+      '</styleSheet>';
+
+  /// Builds a styled single-sheet workbook from a grid of cells.
+  /// [rows] is row-major (null = empty cell). [columnStyles] maps a 0-based
+  /// column to an [XlsxStyle] applied to the whole column (e.g. text format).
+  /// When [listCell] is given, that cell gets a drop-down of [listValues].
+  static List<int> writeGrid({
+    required String sheetName,
+    required List<List<XlsxCell?>> rows,
+    List<double> widths = const [],
+    Map<int, int> columnStyles = const {},
+    String? listCell,
+    List<String> listValues = const [],
+    String listMessage = 'Pick a value from the list.',
+  }) {
+    const ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+    const relNs = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+    const pkgRel = 'http://schemas.openxmlformats.org/package/2006/relationships';
+
+    final cols = StringBuffer();
+    if (widths.isNotEmpty) {
+      cols.write('<cols>');
+      for (var i = 0; i < widths.length; i++) {
+        final style = columnStyles[i];
+        cols.write('<col min="${i + 1}" max="${i + 1}" '
+            'width="${widths[i]}" customWidth="1"'
+            '${style == null ? '' : ' style="$style"'}/>');
+      }
+      cols.write('</cols>');
+    }
+
+    final data = StringBuffer();
+    for (var r = 0; r < rows.length; r++) {
+      final cells = StringBuffer();
+      for (var c = 0; c < rows[r].length; c++) {
+        final cell = rows[r][c];
+        if (cell == null) continue;
+        final ref = '${String.fromCharCode(65 + c)}${r + 1}';
+        if (cell.text.isEmpty) {
+          cells.write('<c r="$ref" s="${cell.style}"/>');
+        } else {
+          cells.write('<c r="$ref" s="${cell.style}" t="inlineStr"><is>'
+              '<t xml:space="preserve">${_esc(cell.text)}</t></is></c>');
+        }
+      }
+      data.write('<row r="${r + 1}">$cells</row>');
+    }
+
+    final validation = listCell == null || listValues.isEmpty
+        ? ''
+        : '<dataValidations count="1">'
+            '<dataValidation type="list" allowBlank="1" showErrorMessage="1" '
+            'errorStyle="stop" errorTitle="Not in the list" '
+            'error="${_escAttr(listMessage)}" sqref="$listCell">'
+            '<formula1>"${_esc(listValues.join(','))}"</formula1>'
+            '</dataValidation></dataValidations>';
+
+    final parts = <String, String>{
+      '[Content_Types].xml':
+          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+              '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+              '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+              '<Default Extension="xml" ContentType="application/xml"/>'
+              '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+              '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+              '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+              '</Types>',
+      '_rels/.rels':
+          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+              '<Relationships xmlns="$pkgRel">'
+              '<Relationship Id="rId1" Type="$relNs/officeDocument" Target="xl/workbook.xml"/>'
+              '</Relationships>',
+      'xl/workbook.xml':
+          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+              '<workbook xmlns="$ns" xmlns:r="$relNs">'
+              '<sheets><sheet name="${_escAttr(sheetName)}" sheetId="1" r:id="rId1"/></sheets>'
+              '</workbook>',
+      'xl/_rels/workbook.xml.rels':
+          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+              '<Relationships xmlns="$pkgRel">'
+              '<Relationship Id="rId1" Type="$relNs/worksheet" Target="worksheets/sheet1.xml"/>'
+              '<Relationship Id="rId2" Type="$relNs/styles" Target="styles.xml"/>'
+              '</Relationships>',
+      'xl/styles.xml': _stylesXml,
+      'xl/worksheets/sheet1.xml':
+          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+              '<worksheet xmlns="$ns">$cols'
+              '<sheetData>$data</sheetData>$validation</worksheet>',
+    };
+
+    final archive = Archive();
+    parts.forEach((name, content) {
+      archive.addFile(ArchiveFile.bytes(name, utf8.encode(content)));
+    });
+
+    final dynamic encoded = ZipEncoder().encode(archive);
+    if (encoded == null) {
+      throw StateError('Could not create the Excel file.');
+    }
+    return List<int>.from(encoded as List<int>);
+  }
+
   /// Builds a single-sheet workbook. [widths] are column widths in characters.
   static List<int> write({
     required String sheetName,
@@ -319,10 +478,24 @@ class ImportFileException implements Exception {
 }
 
 class ParsedStudentFile {
-  ParsedStudentFile(this.rows, this.issues);
+  ParsedStudentFile(this.rows, this.issues, {this.subject, this.fileSection});
 
   final List<ImportRow> rows; // valid rows only
   final List<ImportIssue> issues; // rows that will be skipped
+
+  /// Subject (full name) written above the table in the sheet, if any.
+  final String? subject;
+
+  /// Section written above the table in the sheet, if any.
+  final String? fileSection;
+
+  /// Same file details with different rows (e.g. sections renamed).
+  ParsedStudentFile withRows(List<ImportRow> newRows) => ParsedStudentFile(
+        newRows,
+        issues,
+        subject: subject,
+        fileSection: fileSection,
+      );
 
   Map<String, List<ImportRow>> get bySection {
     final map = <String, List<ImportRow>>{};
@@ -384,6 +557,10 @@ class StudentImportService {
   static const _sectionAliases = {
     'section', 'class', 'classsection', 'sectionclass',
   };
+  static const _subjectAliases = {
+    'subject', 'subjectname', 'subjecttitle', 'course', 'coursename',
+    'coursetitle',
+  };
   static const _emailAliases = {
     'email', 'emailaddress', 'studentemail', 'emailadd',
   };
@@ -413,16 +590,45 @@ class StudentImportService {
       throw ImportFileException('The spreadsheet is empty.');
     }
 
-    // Header = first row that has any non-empty cell.
+    // Header = first row with a Student No. or Name column title. Rows above
+    // it may hold the Section / Subject details. Falls back to the first
+    // non-empty row so the "missing columns" message still works.
     var headerIndex = -1;
+    var firstNonEmpty = -1;
     for (var i = 0; i < rows.length; i++) {
-      if (rows[i].any((c) => c.isNotEmpty)) {
+      if (firstNonEmpty == -1 && rows[i].any((c) => c.isNotEmpty)) {
+        firstNonEmpty = i;
+      }
+      final isHeader = rows[i].any((c) {
+        final h = _norm(c);
+        return _numberAliases.contains(h) || _nameAliases.contains(h);
+      });
+      if (isHeader) {
         headerIndex = i;
         break;
       }
     }
+    if (headerIndex == -1) headerIndex = firstNonEmpty;
     if (headerIndex == -1) {
       throw ImportFileException('The spreadsheet is empty.');
+    }
+
+    // Section / Subject written above the table ("Section | BSIT31A").
+    // The value is the cell right next to its label.
+    var fileSection = '';
+    var fileSubject = '';
+    for (var i = 0; i < headerIndex; i++) {
+      final r = rows[i];
+      for (var c = 0; c + 1 < r.length; c++) {
+        final label = _norm(r[c]);
+        final value = r[c + 1].replaceAll(RegExp(r'\s+'), ' ').trim();
+        if (value.isEmpty) continue;
+        if (fileSection.isEmpty && _sectionAliases.contains(label)) {
+          fileSection = value;
+        } else if (fileSubject.isEmpty && _subjectAliases.contains(label)) {
+          fileSubject = value;
+        }
+      }
     }
 
     int numCol = -1, nameCol = -1, secCol = -1, emailCol = -1;
@@ -438,7 +644,7 @@ class StudentImportService {
     final missing = <String>[
       if (numCol == -1) 'Student No.',
       if (nameCol == -1) 'Name',
-      if (secCol == -1) 'Section',
+      if (secCol == -1 && fileSection.isEmpty) 'Section',
     ];
     if (missing.isNotEmpty) {
       throw ImportFileException(
@@ -460,11 +666,13 @@ class StudentImportService {
 
       final number = at(row, numCol);
       final name = at(row, nameCol).replaceAll(RegExp(r'\s+'), ' ').trim();
-      final section = at(row, secCol);
+      // A Section column wins; otherwise the Section at the top of the sheet.
+      final ownSection = secCol == -1 ? '' : at(row, secCol);
+      final section = ownSection.isEmpty ? fileSection : ownSection;
       final email = emailCol == -1 ? '' : at(row, emailCol);
 
       // Fully blank row: ignore silently (not a record).
-      if (number.isEmpty && name.isEmpty && section.isEmpty && email.isEmpty) {
+      if (number.isEmpty && name.isEmpty && ownSection.isEmpty && email.isEmpty) {
         continue;
       }
 
@@ -525,7 +733,12 @@ class StudentImportService {
       );
     }
 
-    return ParsedStudentFile(valid, issues);
+    return ParsedStudentFile(
+      valid,
+      issues,
+      subject: fileSubject.isEmpty ? null : fileSubject,
+      fileSection: fileSection.isEmpty ? null : fileSection,
+    );
   }
 
   static const _surnameParticles = {
@@ -563,11 +776,91 @@ class StudentImportService {
 
   // ---------- Template ----------
 
-  static List<int> buildTemplate() => XlsxIO.write(
-        sheetName: 'Students',
-        header: const ['Student No.', 'Name', 'Section', 'Email'],
-        widths: const [18, 30, 16, 32],
-      );
+  /// "Section Subject.xlsx", e.g. "BSIT31A Professional Issues in IT.xlsx".
+  /// Falls back to a generic name until both are known.
+  static String templateFileName({String? section, String? subject}) {
+    String clean(String? v) => (v ?? '')
+        .replaceAll(RegExp(r'[\\/:*?"<>|]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    final sec = clean(section);
+    final sub = clean(subject);
+    if (sec.isEmpty || sub.isEmpty) return 'CheckMate_Student_Template.xlsx';
+    return '$sec $sub.xlsx';
+  }
+
+  static const _templateNotes = [
+    'HOW TO FILL THIS FILE',
+    '1. Section: exact class name, e.g. BSIT31A or ABM11-A (use the drop-down if shown).',
+    '2. Subject: type the FULL subject name, not the code, e.g. Professional Issues in IT.',
+    '3. Student No.: one per row. Keep leading zeros (this column is already Text).',
+    '4. Name: LAST NAME, FIRST NAME MIDDLE NAME, e.g. DELA CRUZ, JUAN SANTOS.',
+    '5. One file per subject. The same students may appear in other subject files.',
+    '6. Email is optional. Do not add columns, merged cells or extra sheets.',
+    '7. Save as Section + Subject, e.g. BSIT31A Professional Issues in IT.xlsx',
+  ];
+
+  /// Template layout: Section and Subject on top, student table below, short
+  /// instructions on the right. [section] / [subject] pre-fill the top cells;
+  /// [sections] (the teacher's own) become a drop-down on the Section cell.
+  static List<int> buildTemplate({
+    String? section,
+    String? subject,
+    List<String> sections = const [],
+  }) {
+    XlsxCell? note(int i) => i < _templateNotes.length
+        ? XlsxCell(_templateNotes[i],
+            i == 0 ? XlsxStyle.noteTitle : XlsxStyle.note)
+        : null;
+
+    const label = XlsxStyle.label;
+    const head = XlsxStyle.header;
+    final rows = <List<XlsxCell?>>[
+      [
+        const XlsxCell('Section', label),
+        XlsxCell(section ?? '', XlsxStyle.input),
+        null,
+        null,
+        note(0),
+      ],
+      [
+        const XlsxCell('Subject', label),
+        XlsxCell(subject ?? '', XlsxStyle.input),
+        null,
+        null,
+        note(1),
+      ],
+      [null, null, null, null, note(2)],
+      [
+        const XlsxCell('Student No.', head),
+        const XlsxCell('Name', head),
+        const XlsxCell('Email', head),
+        null,
+        note(3),
+      ],
+      for (var i = 4; i < _templateNotes.length; i++)
+        [null, null, null, null, note(i)],
+    ];
+
+    // A drop-down only works when the whole list fits Excel's 255 characters.
+    final options = {
+      for (final s in sections)
+        if (s.trim().isNotEmpty && !s.contains(',') && !s.contains('"'))
+          s.trim(),
+    }.toList()
+      ..sort();
+    final useList = options.isNotEmpty && options.join(',').length <= 250;
+
+    return XlsxIO.writeGrid(
+      sheetName: 'Students',
+      rows: rows,
+      widths: const [18, 40, 30, 3, 80],
+      columnStyles: const {0: XlsxStyle.textColumn},
+      listCell: useList ? 'B1' : null,
+      listValues: useList ? options : const [],
+      listMessage: 'Pick one of your assigned sections.',
+    );
+  }
 
   // ---------- Matching helpers ----------
 
@@ -575,21 +868,37 @@ class StudentImportService {
 
   static int? _id(Object? v) => int.tryParse(v?.toString() ?? '');
 
-  static int? _classSubjectId(Map<String, dynamic> c) {
+  /// Class subjects (the teaching "subjects" table) and the Academic
+  /// Management catalog use different ids, so ids are not compared directly:
+  /// link id first, then code, then name.
+  static bool _classHasSubject(
+    Map<String, dynamic> c,
+    Map<String, dynamic> catalogSubject,
+  ) {
     final s = c['subject'];
-    if (s is Map && s['id'] != null) return _id(s['id']);
-    return _id(c['subject_id']);
+    if (s is! Map) return false;
+
+    final linked = _id(s['academic_subject_id']);
+    final wanted = _id(catalogSubject['id']);
+    if (linked != null && wanted != null) return linked == wanted;
+
+    final code = _n(s['code']);
+    final wantedCode = _n(catalogSubject['code']);
+    if (code.isNotEmpty && wantedCode.isNotEmpty) return code == wantedCode;
+
+    return _norm(s['name']?.toString() ?? '') ==
+        _norm(catalogSubject['name']?.toString() ?? '');
   }
 
   static Map<String, dynamic>? _findClass(
     List<Map<String, dynamic>> classes, {
-    required int subjectId,
+    required Map<String, dynamic> subject,
     required String section,
     required String schoolYear,
     required String semester,
   }) {
     for (final c in classes) {
-      if (_classSubjectId(c) == subjectId &&
+      if (_classHasSubject(c, subject) &&
           _n(c['section']) == _n(section) &&
           _n(c['school_year']) == _n(schoolYear) &&
           _n(c['semester']) == _n(semester)) {
@@ -606,7 +915,7 @@ class StudentImportService {
   static Future<ImportPlan> buildPlan({
     required String token,
     required ParsedStudentFile parsed,
-    required int subjectId,
+    required Map<String, dynamic> subject,
     required String schoolYear,
     required String semester,
   }) async {
@@ -616,7 +925,7 @@ class StudentImportService {
     for (final entry in parsed.bySection.entries) {
       final match = _findClass(
         classes,
-        subjectId: subjectId,
+        subject: subject,
         section: entry.key,
         schoolYear: schoolYear,
         semester: semester,
@@ -655,6 +964,7 @@ class StudentImportService {
     required String token,
     required ImportPlan plan,
     required int subjectId,
+    required Map<String, dynamic> subject,
     required String schoolYear,
     required String semester,
     int? teacherId,
@@ -687,7 +997,7 @@ class StudentImportService {
           final classes = await ApiService.getClasses(token);
           final created = _findClass(
             classes,
-            subjectId: subjectId,
+            subject: subject,
             section: s.section,
             schoolYear: schoolYear,
             semester: semester,

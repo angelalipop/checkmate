@@ -332,18 +332,53 @@ class AcademicService {
     final term = _textOrNull(q);
     final result = await Database.pool.execute(
       Sql.named('''
-        SELECT id, code, name, units::float8, hours
-        FROM academic_subjects
-        WHERE is_deleted = FALSE
+        SELECT a.id, a.code, a.name, a.units::float8, a.hours,
+               (
+                 SELECT string_agg(
+                          DISTINCT p.code || ':' || cs.year_level::text
+                                   || ':' || cs.term::text,
+                          ','
+                        )
+                 FROM curriculum_subjects cs
+                 JOIN curricula cu
+                   ON cu.id = cs.curriculum_id AND cu.is_deleted = FALSE
+                 JOIN academic_programs p
+                   ON p.id = cu.program_id AND p.is_deleted = FALSE
+                 WHERE cs.subject_id = a.id AND cs.is_deleted = FALSE
+               ) AS placements
+        FROM academic_subjects a
+        WHERE a.is_deleted = FALSE
           AND (@q::text IS NULL
-               OR COALESCE(code, '') ILIKE '%' || @q::text || '%'
-               OR name ILIKE '%' || @q::text || '%')
-        ORDER BY code NULLS LAST, name
+               OR COALESCE(a.code, '') ILIKE '%' || @q::text || '%'
+               OR a.name ILIKE '%' || @q::text || '%')
+        ORDER BY a.code NULLS LAST, a.name
         LIMIT 30
       '''),
       parameters: {'q': term},
     );
-    return result.map(_catalogJson).toList();
+    return result.map((r) {
+      final subject = _catalogJson(r);
+      // Where the curricula place this subject: program, year level, term.
+      // Used by Import Students to pick the semester.
+      subject['placements'] = _placements(r[5]);
+      return subject;
+    }).toList();
+  }
+
+  /// "BSIT:3:1,BSIT:3:2" -> [{program: BSIT, year_level: 3, term: 1}, ...]
+  static List<Map<String, dynamic>> _placements(Object? raw) {
+    final text = raw?.toString() ?? '';
+    if (text.isEmpty) return [];
+    final out = <Map<String, dynamic>>[];
+    for (final part in text.split(',')) {
+      final bits = part.split(':');
+      if (bits.length != 3) continue;
+      final year = int.tryParse(bits[1]);
+      final term = int.tryParse(bits[2]);
+      if (year == null || term == null) continue;
+      out.add({'program': bits[0], 'year_level': year, 'term': term});
+    }
+    return out;
   }
 
   /// Finds a catalog subject by id, code or name, or creates it.

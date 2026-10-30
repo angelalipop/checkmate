@@ -595,7 +595,14 @@ class _Counts {
 }
 
 class ExamsTab extends StatefulWidget {
-  const ExamsTab({super.key});
+  const ExamsTab({super.key, this.initialExamId, this.onExitBuilder});
+
+  /// Opens the builder for this exam straight away (used by My Subjects).
+  final int? initialExamId;
+
+  /// When set, leaving the builder calls this instead of showing the exam
+  /// list (My Subjects uses it to return to the subject page).
+  final VoidCallback? onExitBuilder;
 
   @override
   State<ExamsTab> createState() => _ExamsTabState();
@@ -615,6 +622,7 @@ class _ExamsTabState extends State<ExamsTab> {
   @override
   void initState() {
     super.initState();
+    _openExamId = widget.initialExamId;
     _loadData();
   }
 
@@ -800,6 +808,11 @@ class _ExamsTabState extends State<ExamsTab> {
   }
 
   void _closeBuilder() {
+    final exit = widget.onExitBuilder;
+    if (exit != null) {
+      exit();
+      return;
+    }
     setState(() => _openExamId = null);
     _loadData();
   }

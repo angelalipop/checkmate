@@ -11,7 +11,13 @@ class AttemptService {
       Sql.named('''
  SELECT e.id
  FROM exams e
- JOIN students s ON s.class_id = e.class_id
+ JOIN students s ON (
+   s.class_id = e.class_id
+   OR s.class_id IN (
+     SELECT x.class_id FROM exam_class_assignments x
+     WHERE x.exam_id = e.id
+   )
+ )
  WHERE e.id = @exam_id
  AND s.id = @student_id
  '''),

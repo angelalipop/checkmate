@@ -75,6 +75,11 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
   String _semester = _semesters.first;
   String? _lookupError;
 
+  // Details read from the Excel file
+  bool _matchingSubject = false;
+  String? _subjectNotFound; // subject named in the file with no catalog match
+  bool _semesterFromSubject = false;
+
   bool _checking = false;
   int _done = 0;
   int _total = 0;
@@ -92,12 +97,15 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
     final c = widget.initialClass;
     if (c == null) return;
 
+    // A class's subject id belongs to the teaching "subjects" table, not to
+    // the Academic Management catalog the dropdown lists. Only the linked
+    // catalog id may be used; otherwise the subject comes from the file.
     final subject = c['subject'];
     if (subject is Map) {
-      final id = int.tryParse(subject['id']?.toString() ?? '');
+      final id = int.tryParse(subject['academic_subject_id']?.toString() ?? '');
       if (id != null) {
         _subjectId = id;
-        _selectedSubject = Map<String, dynamic>.from(subject);
+        _selectedSubject = {...Map<String, dynamic>.from(subject), 'id': id};
       }
     }
 
@@ -119,6 +127,171 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
     return parsed.bySection.keys
         .where((name) => !ok.contains(_sectionKey(name)))
         .toList();
+  }
+
+  static String _normText(String s) =>
+      s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+
+  /// "1", "1st", "1st Semester", "First Semester" -> "1st Semester".
+  /// Null when it is not 1st/2nd (e.g. Summer) or unknown.
+  static String? _semesterLabel(Object? value) {
+    final text = value?.toString().trim().toLowerCase() ?? '';
+    if (text.startsWith('1') || text.startsWith('first')) return _semesters[0];
+    if (text.startsWith('2') || text.startsWith('second')) return _semesters[1];
+    return null;
+  }
+
+  /// Semester of a subject according to the Academic Management curricula.
+  /// [section] (e.g. BSIT31A) narrows it to the right program and year level.
+  /// Null when the curricula place the subject in more than one term.
+  static String? _subjectSemester(
+    Map<String, dynamic> subject, {
+    String? section,
+  }) {
+    final raw = subject['placements'];
+    var places = raw is List
+        ? raw.whereType<Map>().map((p) => Map<String, dynamic>.from(p)).toList()
+        : <Map<String, dynamic>>[];
+
+    if (places.isNotEmpty && section != null && section.trim().isNotEmpty) {
+      final key = _sectionKey(section);
+      final byProgram = places
+          .where((p) => key.startsWith((p['program'] ?? '').toString().toUpperCase()))
+          .toList();
+      if (byProgram.isNotEmpty) {
+        places = byProgram;
+        final longest = places
+            .map((p) => (p['program'] ?? '').toString().length)
+            .reduce((x, y) => x > y ? x : y);
+        final rest = key.substring(longest);
+        final year = rest.isEmpty ? null : int.tryParse(rest[0]);
+        if (year != null) {
+          final byYear = places
+              .where((p) => int.tryParse('${p['year_level']}') == year)
+              .toList();
+          if (byYear.isNotEmpty) places = byYear;
+        }
+      }
+    }
+
+    final terms = <int>{
+      for (final p in places)
+        if (int.tryParse('${p['term']}') != null) int.parse('${p['term']}'),
+    };
+    if (terms.length == 1 && (terms.first == 1 || terms.first == 2)) {
+      return _semesters[terms.first - 1];
+    }
+    // Older servers may send a plain semester field.
+    return _semesterLabel(subject['semester'] ?? subject['term']);
+  }
+
+  /// Section named in the file (top cell, or its first row).
+  static String? _sectionOf(ParsedStudentFile p) =>
+      p.fileSection ?? (p.rows.isEmpty ? null : p.rows.first.section);
+
+  /// Uses what the sheet says: finds its Subject in Academic Management,
+  /// selects it, and sets the Semester from that subject.
+  Future<void> _applyFileDetails(ParsedStudentFile parsed) async {
+    final wanted = parsed.subject?.trim() ?? '';
+    if (wanted.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _matchingSubject = false;
+          _subjectNotFound = null;
+        });
+      }
+      return;
+    }
+
+    setState(() {
+      _matchingSubject = true;
+      _subjectNotFound = null;
+    });
+
+    Map<String, dynamic>? match;
+    try {
+      final token = await AuthStorage.getToken();
+      if (token == null || token.isEmpty) {
+        throw Exception('Authentication token not found.');
+      }
+
+      // The label is "CODE - Name"; accept the name, the label or the code.
+      final key = _normText(wanted);
+      bool same(Map<String, dynamic> s) =>
+          _normText(s['name']?.toString() ?? '') == key ||
+          _normText(_catalogLabel(s)) == key ||
+          _normText(s['code']?.toString() ?? '') == key;
+
+      final results = await AcademicApi.searchCatalog(token, wanted);
+      final found = results.where(same).toList();
+      if (found.isNotEmpty) {
+        // Prefer the subject this import was opened from, if it is one.
+        match = found.firstWhere(
+          (s) => _subjectIdOf(s) != null && _subjectIdOf(s) == _subjectId,
+          orElse: () => found.first,
+        );
+      }
+    } catch (_) {
+      match = null;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _matchingSubject = false;
+      final chosen = match;
+      if (chosen == null) {
+        _subjectNotFound = wanted;
+        return;
+      }
+      final id = _subjectIdOf(chosen);
+      _selectedSubject = chosen;
+      _subjectId = id;
+      _subjects = [
+        ..._subjects.where((s) => _subjectIdOf(s) != id),
+        chosen,
+      ];
+      final sem = _subjectSemester(chosen, section: _sectionOf(parsed));
+      if (sem != null) {
+        _semester = sem;
+        _semesterFromSubject = true;
+      }
+    });
+  }
+
+  /// Lets a file say "BSIT3A" (program+year+section) for a class named
+  /// "BSIT31A" (program+year+term+section). The term comes from the selected
+  /// semester. Names that already match are left alone.
+  ParsedStudentFile _resolveSections(ParsedStudentFile parsed) {
+    final allowed = widget.assignedSections;
+    if (allowed == null) return parsed;
+
+    final byKey = {for (final a in allowed) _sectionKey(a): a};
+    final term = _semester.startsWith('2') ? '2' : '1';
+    final short = RegExp(r'^([A-Z]+)(\d)([A-Z]+)$'); // BSIT 3 A
+
+    String resolve(String name) {
+      final key = _sectionKey(name);
+      if (byKey.containsKey(key)) return byKey[key]!;
+      final m = short.firstMatch(key);
+      if (m != null) {
+        final full = '${m[1]}${m[2]}$term${m[3]}'; // BSIT + 3 + 1 + A
+        if (byKey.containsKey(full)) return byKey[full]!;
+      }
+      return name; // unchanged, so it is reported as not assigned
+    }
+
+    return parsed.withRows([
+      for (final r in parsed.rows)
+        ImportRow(
+          rowNumber: r.rowNumber,
+          studentNumber: r.studentNumber,
+          name: r.name,
+          section: resolve(r.section),
+          firstName: r.firstName,
+          lastName: r.lastName,
+          email: r.email,
+        ),
+    ]);
   }
 
   @override
@@ -225,7 +398,10 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
       setState(() {
         _parsed = parsed;
         _stage = _Stage.review;
+        _subjectNotFound = null;
+        _semesterFromSubject = false;
       });
+      await _applyFileDetails(parsed);
     } on ImportFileException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -250,12 +426,22 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
   }
 
   Future<void> _downloadTemplate() async {
-    const fileName = 'CheckMate_Student_Template.xlsx';
+    // Pre-filled when opened from a section's button; named Section + Subject.
+    final section = widget.initialSection?.trim() ?? '';
+    final subjectName = _selectedSubject?['name']?.toString().trim() ?? '';
+    final fileName = StudentImportService.templateFileName(
+      section: section,
+      subject: subjectName,
+    );
     const mime =
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
     try {
-      final bytes = StudentImportService.buildTemplate();
+      final bytes = StudentImportService.buildTemplate(
+        section: section,
+        subject: subjectName,
+        sections: widget.assignedSections ?? const [],
+      );
       final file = XFile.fromData(
         Uint8List.fromList(bytes),
         name: fileName,
@@ -298,8 +484,8 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
   // ---------- Step 2/3: confirm + import ----------
 
   Future<void> _startImport() async {
-    final parsed = _parsed;
-    if (parsed == null) return;
+    if (_parsed == null) return;
+    final parsed = _resolveSections(_parsed!);
 
     if (_subjectId == null) {
       _snack('Please select a subject.');
@@ -359,7 +545,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
       final plan = await StudentImportService.buildPlan(
         token: token,
         parsed: parsed,
-        subjectId: _subjectId!,
+        subject: _selectedSubject!,
         schoolYear: _schoolYear,
         semester: _semester,
       );
@@ -367,14 +553,18 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
       if (!mounted) return;
       setState(() => _checking = false);
 
-      // The existing backend requires a teacher when creating a class.
-      // Check every section before writing any students.
-      if (!widget.isTeacher &&
-          plan.sections.any((s) =>
-              s.toAdd.isNotEmpty && s.existingClassId == null)) {
-        _snack('This subject and section is not assigned to you for that '
-            'school year and semester. Ask an administrator to assign it '
-            'to you, then retry the import.');
+      // Only an administrator can create a class, so students can only be
+      // imported into a class that already exists. Check every section
+      // before writing any students.
+      if (plan.sections.any((s) =>
+          s.toAdd.isNotEmpty && s.existingClassId == null)) {
+        final missing = plan.sections
+            .where((s) => s.toAdd.isNotEmpty && s.existingClassId == null)
+            .map((s) => s.section)
+            .join(', ');
+        _snack('No class found for $missing with this subject, '
+            '$_schoolYear, $_semester. Check the Subject and Semester above, '
+            'or ask an administrator to assign it to you.');
         return;
       }
 
@@ -384,6 +574,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
         final skip = await _showDuplicatesDialog(dupes);
         if (skip != true) return;
       }
+      if (!mounted) return;
 
       if (plan.nothingToDo) {
         await showDialog<void>(
@@ -420,6 +611,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
         token: token,
         plan: plan,
         subjectId: _subjectId!,
+        subject: _selectedSubject!,
         schoolYear: _schoolYear,
         semester: _semester,
         // Existing classes keep their teacher. For new teacher classes,
@@ -653,6 +845,9 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
       _errorTitle = null;
       _errorMessage = null;
       _missingColumns = [];
+      _matchingSubject = false;
+      _subjectNotFound = null;
+      _semesterFromSubject = false;
     });
   }
 
@@ -818,7 +1013,8 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Choose an Excel (.xlsx) file with these columns:',
+                  'Use the template: Section and Subject (full name) on top, '
+                  'then one row per student.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: CmColors.slate),
                 ),
@@ -826,8 +1022,10 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                 _formatPreview(),
                 const SizedBox(height: 8),
                 const Text(
-                  'Student No., Name and Section are required. '
-                  'Email is optional and can be added later.',
+                  'Student No. and Name are required; Email is optional. '
+                  'Save the file as Section + Subject, e.g. '
+                  'BSIT31A Professional Issues in IT.xlsx. '
+                  'One file per subject.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: CmColors.slate, fontSize: 12),
                 ),
@@ -877,11 +1075,17 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
   }
 
   Widget _formatPreview() {
-    Widget cell(String t, {bool head = false}) => Expanded(
+    Widget cell(String t, {bool head = false, bool fill = false, int flex = 1}) =>
+        Expanded(
+          flex: flex,
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
             decoration: BoxDecoration(
-              color: head ? CmColors.navy : Colors.white,
+              color: head
+                  ? CmColors.navy
+                  : fill
+                      ? const Color(0xFFFEF9C3)
+                      : Colors.white,
               border: Border.all(color: CmColors.line),
             ),
             child: Text(
@@ -900,9 +1104,17 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
       child: Column(
         children: [
           Row(children: [
+            cell('Section', head: true),
+            cell('BSIT31A', fill: true, flex: 3),
+          ]),
+          Row(children: [
+            cell('Subject', head: true),
+            cell('Professional Issues in IT', fill: true, flex: 3),
+          ]),
+          const SizedBox(height: 6),
+          Row(children: [
             cell('Student No.', head: true),
             cell('Name', head: true),
-            cell('Section', head: true),
             cell('Email', head: true),
           ]),
         ],
@@ -1012,6 +1224,8 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                   '${sections.length == 1 ? '' : 's'} detected',
                   style: const TextStyle(color: CmColors.slate),
                 ),
+                const SizedBox(height: 10),
+                _fileSubjectRow(parsed.subject),
                 const SizedBox(height: 14),
                 const Divider(height: 1, color: CmColors.line),
                 const SizedBox(height: 10),
@@ -1050,6 +1264,52 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
         ],
         const SizedBox(height: 12),
         _commonInfoCard(),
+      ],
+    );
+  }
+
+  /// What the sheet says its subject is, and whether it was matched.
+  Widget _fileSubjectRow(String? fileSubject) {
+    final String text;
+    final IconData icon;
+    final Color color;
+    if (fileSubject == null) {
+      final current = _selectedSubject;
+      text = current == null
+          ? 'No subject found in the file. Select it below.'
+          : 'No subject in the file. Using ${_catalogLabel(current)}.';
+      icon = Icons.info_outline;
+      color = CmColors.slate;
+    } else if (_matchingSubject) {
+      text = 'Subject: $fileSubject (checking Academic Management…)';
+      icon = Icons.hourglass_empty;
+      color = CmColors.slate;
+    } else if (_subjectNotFound != null) {
+      text = 'Subject "$fileSubject" was not found in Academic Management. '
+          'Select the right one below.';
+      icon = Icons.warning_amber_rounded;
+      color = const Color(0xFF92400E);
+    } else {
+      final matched = _selectedSubject;
+      text = 'Subject: ${matched == null ? fileSubject : _catalogLabel(matched)}';
+      icon = Icons.check_circle_outline;
+      color = _ok;
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: color, size: 20),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+              color: color == CmColors.slate ? CmColors.slate : CmColors.navy,
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -1177,6 +1437,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
               const SizedBox(height: 12),
             ],
             DropdownButtonFormField<int>(
+              key: ValueKey('subject-$_subjectId'),
               initialValue: _subjectId,
               isExpanded: true,
               decoration: _dec('Subject', Icons.menu_book_outlined),
@@ -1202,6 +1463,15 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                             : _subjectOptions.firstWhere(
                                 (subject) => _subjectIdOf(subject) == value);
                         _subjectId = value;
+                        _subjectNotFound = null;
+                        final sem = _selectedSubject == null || _parsed == null
+                            ? null
+                            : _subjectSemester(
+                                _selectedSubject!,
+                                section: _sectionOf(_parsed!),
+                              );
+                        if (sem != null) _semester = sem;
+                        _semesterFromSubject = sem != null;
                       }),
             ),
             if (_lookupError != null)
@@ -1228,14 +1498,23 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
             ),
             const SizedBox(height: 14),
             DropdownButtonFormField<String>(
+              key: ValueKey('semester-$_semester'),
               initialValue: _semester,
-              decoration: _dec('Semester', Icons.calendar_month_outlined),
+              decoration: _dec('Semester', Icons.calendar_month_outlined)
+                  .copyWith(
+                helperText: _semesterFromSubject
+                    ? 'Set from this subject in Academic Management'
+                    : null,
+              ),
               items: _semesters
                   .map((s) => DropdownMenuItem<String>(value: s, child: Text(s)))
                   .toList(),
               onChanged: _busy
                   ? null
-                  : (v) => setState(() => _semester = v ?? _semester),
+                  : (v) => setState(() {
+                        _semester = v ?? _semester;
+                        _semesterFromSubject = false;
+                      }),
             ),
           ],
         ),

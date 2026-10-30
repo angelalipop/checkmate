@@ -50,6 +50,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
   final _searchController = TextEditingController();
   String _query = '';
 
+  final Set<String> _collapsedSectionKeys = <String>{};
+
   bool _loading = true;
   String? _error;
 
@@ -129,13 +131,11 @@ class _StudentsScreenState extends State<StudentsScreen> {
       if (!mounted) return;
 
       setState(() {
-        _error =
-            e.toString().replaceFirst('Exception: ', '');
+        _error = e.toString().replaceFirst('Exception: ', '');
         _loading = false;
       });
     }
   }
-
 
   // =========================
   // INPUT STYLE (shared by the dialogs)
@@ -143,9 +143,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
   InputDecoration _fieldDecoration({String? errorText}) {
     OutlineInputBorder border(Color c, [double w = 1]) => OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: c, width: w),
-        );
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(color: c, width: w),
+    );
 
     return InputDecoration(
       isDense: true,
@@ -182,24 +182,20 @@ class _StudentsScreenState extends State<StudentsScreen> {
   }
 
   ButtonStyle get _primaryButtonStyle => FilledButton.styleFrom(
-        backgroundColor: CmColors.navy,
-        disabledBackgroundColor: const Color(0xFF9AA3B2),
-        disabledForegroundColor: Colors.white,
-        minimumSize: const Size.fromHeight(50),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-      );
+    backgroundColor: CmColors.navy,
+    disabledBackgroundColor: const Color(0xFF9AA3B2),
+    disabledForegroundColor: Colors.white,
+    minimumSize: const Size.fromHeight(50),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+  );
 
   ButtonStyle get _secondaryButtonStyle => OutlinedButton.styleFrom(
-        foregroundColor: CmColors.navy,
-        backgroundColor: CmColors.bg,
-        side: const BorderSide(color: CmColors.line),
-        minimumSize: const Size.fromHeight(50),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-      );
+    foregroundColor: CmColors.navy,
+    backgroundColor: CmColors.bg,
+    side: const BorderSide(color: CmColors.line),
+    minimumSize: const Size.fromHeight(50),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+  );
 
   static final _nameFormatter = FilteringTextInputFormatter.allow(
     RegExp(r"[\p{L} .'’\-]", unicode: true),
@@ -238,8 +234,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
             String? shown(TextEditingController c, String? error) =>
                 c.text.trim().isEmpty ? null : error;
 
-            final numberError =
-                StudentValidation.studentNumber(studentNumberController.text);
+            final numberError = StudentValidation.studentNumber(
+              studentNumberController.text,
+            );
             final lastError = StudentValidation.name(
               lastNameController.text,
               label: 'Last name',
@@ -249,7 +246,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
               label: 'First name',
             );
 
-            final valid = selectedClassId != null &&
+            final valid =
+                selectedClassId != null &&
                 numberError == null &&
                 lastError == null &&
                 firstError == null;
@@ -294,8 +292,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
               } catch (e) {
                 setDialogState(() {
                   saving = false;
-                  dialogError =
-                      e.toString().replaceFirst('Exception: ', '');
+                  dialogError = e.toString().replaceFirst('Exception: ', '');
                 });
               }
             }
@@ -350,7 +347,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
                           onChanged: (_) => setDialogState(() {}),
                           decoration: _fieldDecoration(
                             errorText: shown(
-                                studentNumberController, numberError),
+                              studentNumberController,
+                              numberError,
+                            ),
                           ),
                         ),
                       ),
@@ -408,8 +407,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                           onChanged: saving
                               ? null
                               : (value) => setDialogState(() {
-                                    selectedClassId = value;
-                                  }),
+                                  selectedClassId = value;
+                                }),
                         ),
                       ),
                       if (dialogError != null) ...[
@@ -451,7 +450,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                   : const Text(
                                       'Add Student',
                                       style: TextStyle(
-                                          fontWeight: FontWeight.w700),
+                                        fontWeight: FontWeight.w700,
+                                      ),
                                     ),
                             ),
                           ),
@@ -477,9 +477,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Student added successfully.'),
-        ),
+        const SnackBar(content: Text('Student added successfully.')),
       );
     }
   }
@@ -539,8 +537,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
               } catch (e) {
                 setDialogState(() {
                   saving = false;
-                  dialogError =
-                      e.toString().replaceFirst('Exception: ', '');
+                  dialogError = e.toString().replaceFirst('Exception: ', '');
                 });
               }
             }
@@ -626,8 +623,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
                           Expanded(
                             child: FilledButton(
                               style: _primaryButtonStyle,
-                              onPressed:
-                                  emailError == null && !saving ? save : null,
+                              onPressed: emailError == null && !saving
+                                  ? save
+                                  : null,
                               child: saving
                                   ? const SizedBox(
                                       width: 20,
@@ -640,7 +638,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                   : const Text(
                                       'Save',
                                       style: TextStyle(
-                                          fontWeight: FontWeight.w700),
+                                        fontWeight: FontWeight.w700,
+                                      ),
                                     ),
                             ),
                           ),
@@ -663,9 +662,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Student info updated.')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Student info updated.')));
     }
   }
 
@@ -735,9 +733,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
             isTeacher: widget.isTeacher,
             // Only a teacher's own sections may receive imported students.
             assignedSections: _isTeacher
-                ? {
-                    for (final c in _classes) _text(c['section']),
-                  }.where((name) => name.isNotEmpty).toList()
+                ? {for (final c in _classes) _text(c['section'])}
+                      .where((name) => name.isNotEmpty)
+                      .toList()
                 : null,
             initialSection: target?.name,
             initialClass: target != null && target.classes.length == 1
@@ -756,9 +754,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
             content: Text(
               _isTeacher
                   ? 'No sections are assigned to you yet. Ask an '
-                      'administrator to assign your subjects and sections.'
+                        'administrator to assign your subjects and sections.'
                   : 'Create a class first, or import an Excel list to '
-                      'create classes automatically.',
+                        'create classes automatically.',
             ),
           ),
         );
@@ -863,7 +861,6 @@ class _StudentsScreenState extends State<StudentsScreen> {
     return name.isEmpty ? 'No Section' : name;
   }
 
-
   String _studentSubject(Map<String, dynamic> student) {
     final c = _classFor(student);
     if (c != null && c['subject'] is Map) {
@@ -902,10 +899,10 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
   String _departmentOf(Map<String, dynamic> program) =>
       program['level'] == 'shs'
-          ? 'Senior High School'
-          : (_text(program['department']).isEmpty
-              ? 'College'
-              : _text(program['department']));
+      ? 'Senior High School'
+      : (_text(program['department']).isEmpty
+            ? 'College'
+            : _text(program['department']));
 
   /// "1st Semester" -> 1, "2nd Semester" -> 2, "Summer" -> null.
   static int? _semesterNumber(Object? value) {
@@ -961,7 +958,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
           _text(section['school_year']) != schoolYear) {
         return false;
       }
-      if (semester != null && _semesterNumber(section['semester']) != semester) {
+      if (semester != null &&
+          _semesterNumber(section['semester']) != semester) {
         return false;
       }
       return true;
@@ -975,8 +973,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
       final year = _text(y['school_year']).compareTo(_text(x['school_year']));
       return year != 0
           ? year
-          : (_semesterNumber(y['semester']) ?? 0)
-              .compareTo(_semesterNumber(x['semester']) ?? 0);
+          : (_semesterNumber(y['semester']) ?? 0).compareTo(
+              _semesterNumber(x['semester']) ?? 0,
+            );
     });
     return pool.first;
   }
@@ -1005,7 +1004,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
       final key = catalog != null
           ? 'section:${_id(catalog['id'])}'
           : 'class:${_sectionName(rawName)}|${_text(item['school_year'])}|'
-              '${_semesterNumber(item['semester'])}';
+                '${_semesterNumber(item['semester'])}';
 
       final existing = byKey[key];
       if (existing != null) {
@@ -1033,8 +1032,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
     _assigned = byKey.values.toList()
       ..sort((a, b) {
-        final program =
-            _text(a.program?['code']).compareTo(_text(b.program?['code']));
+        final program = _text(a.program?['code'])
+            .compareTo(_text(b.program?['code']));
         if (program != 0) return program;
         final year = (a.year ?? 0).compareTo(b.year ?? 0);
         return year != 0 ? year : a.name.compareTo(b.name);
@@ -1052,16 +1051,16 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
   // ----- filter choices: only from the teacher's assigned sections -----
 
-  List<String> get _departments => {
+  List<String> get _departments =>
+      {
         for (final s in _assigned)
           if (s.program != null) _departmentOf(s.program!),
-      }.toList()
-        ..sort((a, b) {
-          if (a == b) return 0;
-          if (a == 'Senior High School') return -1;
-          if (b == 'Senior High School') return 1;
-          return a.compareTo(b);
-        });
+      }.toList()..sort((a, b) {
+        if (a == b) return 0;
+        if (a == 'Senior High School') return -1;
+        if (b == 'Senior High School') return 1;
+        return a.compareTo(b);
+      });
 
   List<Map<String, dynamic>> get _departmentPrograms {
     final byId = <int, Map<String, dynamic>>{};
@@ -1091,23 +1090,25 @@ class _StudentsScreenState extends State<StudentsScreen> {
   List<int> get _years => _programId == null
       ? <int>[]
       : (_assigned
-          .where((s) => s.programId == _programId)
-          .map((s) => s.year)
-          .whereType<int>()
-          .toSet()
-          .toList()
-        ..sort());
+            .where((s) => s.programId == _programId)
+            .map((s) => s.year)
+            .whereType<int>()
+            .toSet()
+            .toList()
+          ..sort());
 
   /// Sections for the Section dropdown. Year Level narrows them but is never
   /// required.
   List<_AssignedSection> get _availableSections => _programId == null
       ? <_AssignedSection>[]
       : (_assigned
-          .where((s) =>
-              s.programId == _programId &&
-              (_yearLevel == null || s.year == _yearLevel))
-          .toList()
-        ..sort((a, b) => a.name.compareTo(b.name)));
+            .where(
+              (s) =>
+                  s.programId == _programId &&
+                  (_yearLevel == null || s.year == _yearLevel),
+            )
+            .toList()
+          ..sort((a, b) => a.name.compareTo(b.name)));
 
   String _sectionOption(_AssignedSection section) {
     final duplicates = _availableSections
@@ -1126,15 +1127,15 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
   /// Assigned sections that pass the (optional) filters.
   List<_AssignedSection> get _filteredSections => _assigned.where((s) {
-        if (_department != null &&
-            (s.program == null || _departmentOf(s.program!) != _department)) {
-          return false;
-        }
-        if (_programId != null && s.programId != _programId) return false;
-        if (_yearLevel != null && s.year != _yearLevel) return false;
-        if (_sectionKey != null && s.key != _sectionKey) return false;
-        return true;
-      }).toList();
+    if (_department != null &&
+        (s.program == null || _departmentOf(s.program!) != _department)) {
+      return false;
+    }
+    if (_programId != null && s.programId != _programId) return false;
+    if (_yearLevel != null && s.year != _yearLevel) return false;
+    if (_sectionKey != null && s.key != _sectionKey) return false;
+    return true;
+  }).toList();
 
   Map<String, dynamic>? _classFor(Map<String, dynamic> student) {
     final classId = _studentClassId(student);
@@ -1199,27 +1200,34 @@ class _StudentsScreenState extends State<StudentsScreen> {
       // While searching, only sections with a match are worth showing.
       if (students.isEmpty && _query.isNotEmpty) continue;
       students.sort((a, b) {
-        final last = _text(a['last_name']).toLowerCase()
+        final last = _text(a['last_name'])
+            .toLowerCase()
             .compareTo(_text(b['last_name']).toLowerCase());
         return last != 0 ? last : _fullName(a).compareTo(_fullName(b));
       });
       final year = section.year;
       final shs = section.program?['level'] == 'shs';
-      entries.add(_GroupHeader(
-        section: section.name,
-        subject: [
-          _text(section.program?['code']),
-          if (year != null)
-            (shs
-                ? 'Grade ${year + 10}'
-                : const ['1st Year', '2nd Year', '3rd Year', '4th Year']
-                        .elementAtOrNull(year - 1) ??
-                    'Year $year'),
-          section.schoolYear,
-          if (section.semester != null) 'Semester ${section.semester}',
-        ].where((part) => part.isNotEmpty).join(' · '),
-        count: students.length,
-      ));
+      entries.add(
+        _GroupHeader(
+          section: section.name,
+          subject: [
+            _text(section.program?['code']),
+            if (year != null)
+              (shs
+                  ? 'Grade ${year + 10}'
+                  : const [
+                          '1st Year',
+                          '2nd Year',
+                          '3rd Year',
+                          '4th Year',
+                        ].elementAtOrNull(year - 1) ??
+                        'Year $year'),
+            section.schoolYear,
+            if (section.semester != null) 'Semester ${section.semester}',
+          ].where((part) => part.isNotEmpty).join(' · '),
+          count: students.length,
+        ),
+      );
       if (students.isEmpty) {
         entries.add(_EmptySection(section));
       } else {
@@ -1229,7 +1237,6 @@ class _StudentsScreenState extends State<StudentsScreen> {
     return entries;
   }
 
-
   void _showStudentInfo(Map<String, dynamic> student) {
     final email = student['email']?.toString() ?? '';
     final c = _classFor(student);
@@ -1237,28 +1244,25 @@ class _StudentsScreenState extends State<StudentsScreen> {
     final semester = c?['semester']?.toString() ?? '';
 
     Widget row(IconData icon, String label, String value) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(icon, size: 20, color: CmColors.slate),
-              const SizedBox(width: 12),
-              SizedBox(
-                width: 96,
-                child: Text(
-                  label,
-                  style: const TextStyle(color: CmColors.slate),
-                ),
-              ),
-              Expanded(
-                child: Text(
-                  value.isEmpty ? '—' : value,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: CmColors.slate),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 96,
+            child: Text(label, style: const TextStyle(color: CmColors.slate)),
           ),
-        );
+          Expanded(
+            child: Text(
+              value.isEmpty ? '—' : value,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
 
     showModalBottomSheet<void>(
       context: context,
@@ -1282,13 +1286,22 @@ class _StudentsScreenState extends State<StudentsScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              row(Icons.badge_outlined, 'Student No.',
-                  student['student_number']?.toString() ?? ''),
+              row(
+                Icons.badge_outlined,
+                'Student No.',
+                student['student_number']?.toString() ?? '',
+              ),
               row(Icons.class_outlined, 'Section', _studentSection(student)),
-              row(Icons.menu_book_outlined, 'Subject',
-                  _studentSubject(student)),
-              row(Icons.calendar_month_outlined, 'Term',
-                  [semester, schoolYear].where((e) => e.isNotEmpty).join(' • ')),
+              row(
+                Icons.menu_book_outlined,
+                'Subject',
+                _studentSubject(student),
+              ),
+              row(
+                Icons.calendar_month_outlined,
+                'Term',
+                [semester, schoolYear].where((e) => e.isNotEmpty).join(' • '),
+              ),
               row(Icons.email_outlined, 'Email', email),
               const SizedBox(height: 12),
               SizedBox(
@@ -1324,167 +1337,203 @@ class _StudentsScreenState extends State<StudentsScreen> {
     required List<DropdownMenuItem<T>> items,
     required ValueChanged<T?> onChanged,
     required String identity,
-  }) => _labeled(label, DropdownButtonFormField<T>(
-    key: ValueKey('$identity:$value'),
-    initialValue: value,
-    isExpanded: true,
-    dropdownColor: Colors.white,
-    style: const TextStyle(color: CmColors.navy, fontSize: 14),
-    decoration: _fieldDecoration(),
-    hint: Text(hint, overflow: TextOverflow.ellipsis),
-    items: items,
-    onChanged: _loading || _error != null ? null : onChanged,
-  ));
+  }) => _labeled(
+    label,
+    DropdownButtonFormField<T>(
+      key: ValueKey('$identity:$value'),
+      initialValue: value,
+      isExpanded: true,
+      dropdownColor: Colors.white,
+      style: const TextStyle(color: CmColors.navy, fontSize: 14),
+      decoration: _fieldDecoration(),
+      hint: Text(hint, overflow: TextOverflow.ellipsis),
+      items: items,
+      onChanged: _loading || _error != null ? null : onChanged,
+    ),
+  );
 
-  Widget _filters() => LayoutBuilder(builder: (context, constraints) {
-    final columns = constraints.maxWidth >= 1050 ? 4
-        : constraints.maxWidth >= 600 ? 2 : 1;
-    final width = (constraints.maxWidth - 16 * (columns - 1)) / columns;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        TextField(
-          controller: _searchController,
-          onChanged: (value) => setState(() => _query = value.trim().toLowerCase()),
-          decoration: _fieldDecoration().copyWith(
-            hintText: 'Search students...',
-            prefixIcon: const Icon(Icons.search, color: CmColors.slate),
-            suffixIcon: _query.isEmpty ? null : IconButton(
-              tooltip: 'Clear search', icon: const Icon(Icons.close),
-              onPressed: () => setState(() {
-                _searchController.clear();
-                _query = '';
-              }),
+  Widget _filters() => LayoutBuilder(
+    builder: (context, constraints) {
+      final columns = constraints.maxWidth >= 1050
+          ? 4
+          : constraints.maxWidth >= 600
+          ? 2
+          : 1;
+      final width = (constraints.maxWidth - 16 * (columns - 1)) / columns;
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _searchController,
+              onChanged: (value) =>
+                  setState(() => _query = value.trim().toLowerCase()),
+              decoration: _fieldDecoration().copyWith(
+                hintText: 'Search students...',
+                prefixIcon: const Icon(Icons.search, color: CmColors.slate),
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Clear search',
+                        icon: const Icon(Icons.close),
+                        onPressed: () => setState(() {
+                          _searchController.clear();
+                          _query = '';
+                        }),
+                      ),
+              ),
             ),
-          ),
-        ),
-        const SizedBox(height: 20),
-        Wrap(spacing: 16, runSpacing: 16, children: [
-          SizedBox(width: width, child: _filter<String>(
-            label: 'Department', value: _department,
-            hint: 'All departments', identity: 'department',
-            items: [
-              const DropdownMenuItem<String>(
-                  value: null, child: Text('All departments')),
-              for (final d in _departments)
-                DropdownMenuItem(value: d, child: Text(d, overflow: TextOverflow.ellipsis)),
+            const SizedBox(height: 20),
+            Wrap(
+              spacing: 16,
+              runSpacing: 16,
+              children: [
+                SizedBox(
+                  width: width,
+                  child: _filter<String>(
+                    label: 'Department',
+                    value: _department,
+                    hint: 'All departments',
+                    identity: 'department',
+                    items: [
+                      const DropdownMenuItem<String>(
+                        value: null,
+                        child: Text('All departments'),
+                      ),
+                      for (final d in _departments)
+                        DropdownMenuItem(
+                          value: d,
+                          child: Text(d, overflow: TextOverflow.ellipsis),
+                        ),
+                    ],
+                    onChanged: (value) => setState(() {
+                      _department = value;
+                      _programId = null;
+                      _yearLevel = null;
+                      _sectionKey = null;
+                      _selectedClassId = null;
+                    }),
+                  ),
+                ),
+                if (_department != null)
+                  SizedBox(
+                    width: width,
+                    child: _filter<int>(
+                      label: 'Program / Strand',
+                      value: _programId,
+                      hint: 'All programs / strands',
+                      identity: 'program:$_department',
+                      items: [
+                        const DropdownMenuItem<int>(
+                          value: null,
+                          child: Text('All programs / strands'),
+                        ),
+                        for (final p in _departmentPrograms)
+                          DropdownMenuItem(
+                            value: _id(p['id']),
+                            child: Text(
+                              _text(p['code']),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (value) => setState(() {
+                        _programId = value;
+                        _yearLevel = null;
+                        _sectionKey = null;
+                        _selectedClassId = null;
+                      }),
+                    ),
+                  ),
+                if (_programId != null) ...[
+                  SizedBox(
+                    width: width,
+                    child: _filter<int>(
+                      label: 'Year Level',
+                      value: _yearLevel,
+                      hint: 'All year levels',
+                      identity: 'year:$_programId',
+                      items: [
+                        const DropdownMenuItem<int>(
+                          value: null,
+                          child: Text('All year levels'),
+                        ),
+                        for (final y in _years)
+                          DropdownMenuItem(
+                            value: y,
+                            child: Text(_yearLabel(y)),
+                          ),
+                      ],
+                      onChanged: (value) => setState(() {
+                        _yearLevel = value;
+                        // Keep the chosen section if it is still in this year level.
+                        if (!_availableSections.any(
+                          (s) => s.key == _sectionKey,
+                        )) {
+                          _sectionKey = null;
+                        }
+                        _selectedClassId = null;
+                      }),
+                    ),
+                  ),
+                  SizedBox(
+                    width: width,
+                    child: _filter<String>(
+                      label: 'Section',
+                      value: _sectionKey,
+                      hint: 'All sections',
+                      identity: 'section:$_programId:$_yearLevel',
+                      items: [
+                        const DropdownMenuItem<String>(
+                          value: null,
+                          child: Text('All sections'),
+                        ),
+                        for (final section in _availableSections)
+                          DropdownMenuItem(
+                            value: section.key,
+                            child: Text(
+                              _sectionOption(section),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (value) => setState(() {
+                        _sectionKey = value;
+                        _selectedClassId = null;
+                      }),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            if (_assigned.any((s) => s.program == null)) ...[
+              const SizedBox(height: 12),
+              Text(
+                'Not in the Sections catalog (cannot be filtered by department): '
+                '${_assigned.where((s) => s.program == null).map((s) => s.name).join(', ')}',
+                style: const TextStyle(color: CmColors.amber, fontSize: 12),
+              ),
             ],
-            onChanged: (value) => setState(() {
-              _department = value;
-              _programId = null;
-              _yearLevel = null;
-              _sectionKey = null;
-              _selectedClassId = null;
-            }),
-          )),
-          if (_department != null)
-            SizedBox(width: width, child: _filter<int>(
-              label: 'Program / Strand', value: _programId,
-              hint: 'All programs / strands', identity: 'program:$_department',
-              items: [
-                const DropdownMenuItem<int>(
-                    value: null, child: Text('All programs / strands')),
-                for (final p in _departmentPrograms)
-                  DropdownMenuItem(value: _id(p['id']), child: Text(
-                    _text(p['code']), overflow: TextOverflow.ellipsis)),
-              ],
-              onChanged: (value) => setState(() {
-                _programId = value;
-                _yearLevel = null;
-                _sectionKey = null;
-                _selectedClassId = null;
-              }),
-            )),
-          if (_programId != null) ...[
-            SizedBox(width: width, child: _filter<int>(
-              label: 'Year Level', value: _yearLevel,
-              hint: 'All year levels', identity: 'year:$_programId',
-              items: [
-                const DropdownMenuItem<int>(value: null, child: Text('All year levels')),
-                for (final y in _years) DropdownMenuItem(value: y, child: Text(_yearLabel(y))),
-              ],
-              onChanged: (value) => setState(() {
-                _yearLevel = value;
-                // Keep the chosen section if it is still in this year level.
-                if (!_availableSections.any((s) => s.key == _sectionKey)) {
-                  _sectionKey = null;
-                }
-                _selectedClassId = null;
-              }),
-            )),
-            SizedBox(width: width, child: _filter<String>(
-              label: 'Section', value: _sectionKey,
-              hint: 'All sections', identity: 'section:$_programId:$_yearLevel',
-              items: [
-                const DropdownMenuItem<String>(value: null, child: Text('All sections')),
-                for (final section in _availableSections)
-                  DropdownMenuItem(value: section.key, child: Text(
-                    _sectionOption(section), overflow: TextOverflow.ellipsis)),
-              ],
-              onChanged: (value) => setState(() {
-                _sectionKey = value;
-                _selectedClassId = null;
-              }),
-            )),
           ],
-        ]),
-        if (_assigned.any((s) => s.program == null)) ...[
-          const SizedBox(height: 12),
-          Text(
-            'Not in the Sections catalog (cannot be filtered by department): '
-            '${_assigned.where((s) => s.program == null).map((s) => s.name).join(', ')}',
-            style: const TextStyle(color: CmColors.amber, fontSize: 12),
-          ),
-        ],
-      ]),
-    );
-  });
-
-
-  Widget _emptySectionCard(_AssignedSection section) => Card(
-    elevation: 0,
-    color: Colors.white,
-    margin: const EdgeInsets.only(bottom: 10),
-    shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(18),
-      side: const BorderSide(color: CmColors.line),
-    ),
-    child: Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Icon(Icons.people_outline, size: 36, color: CmColors.slate),
-          const SizedBox(height: 8),
-          Text(
-            'No students in ${section.name} yet.',
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: CmColors.slate, fontSize: 15),
-          ),
-          const SizedBox(height: 14),
-          FilledButton.icon(
-            style: _primaryButtonStyle,
-            onPressed: () => _showAddStudentsSheet(section: section),
-            icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
-            label: Text(
-              'Add students to ${section.name}',
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-          ),
-        ],
-      ),
-    ),
+        ),
+      );
+    },
   );
 
   Widget _emptyMessage(IconData icon, String message) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 64),
-    child: Column(children: [
-      Icon(icon, size: 48, color: CmColors.slate),
-      const SizedBox(height: 16),
-      Text(message, textAlign: TextAlign.center,
-        style: const TextStyle(color: CmColors.slate, fontSize: 16)),
-    ]),
+    child: Column(
+      children: [
+        Icon(icon, size: 48, color: CmColors.slate),
+        const SizedBox(height: 16),
+        Text(
+          message,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: CmColors.slate, fontSize: 16),
+        ),
+      ],
+    ),
   );
 
   @override
@@ -1501,129 +1550,254 @@ class _StudentsScreenState extends State<StudentsScreen> {
     body: RefreshIndicator(onRefresh: _loadData, child: _buildBody()),
   );
 
-  Widget _buildBody() {
-    final entries = _loading || _error != null ? <Object>[] : _buildEntries();
-    return ListView.builder(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 104),
-      itemCount: entries.isEmpty ? 2 : entries.length + 1,
-      itemBuilder: (context, index) {
-        if (index == 0) return _filters();
-        if (_loading) {
-          return const Padding(padding: EdgeInsets.all(64),
-            child: Center(child: CircularProgressIndicator()));
-        }
-        if (_error != null) {
-          return Column(children: [
-            _emptyMessage(Icons.error_outline, _error!),
-            FilledButton(onPressed: _loadData, child: const Text('Retry')),
-          ]);
-        }
-        if (entries.isEmpty) {
-          return _emptyMessage(Icons.people_outline,
-            _assigned.isEmpty
-                ? (_isTeacher
-                    ? 'No sections are assigned to you yet. Ask an '
-                        'administrator to assign your subjects and sections.'
-                    : 'No sections found.')
-                : _query.isNotEmpty ? 'No matching students.'
-                : 'No sections match these filters.');
-        }
-        final entry = entries[index - 1];
+  Widget _studentTile(Map<String, dynamic> student) {
+    final firstName = student['first_name']?.toString() ?? '';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 7),
+      child: Material(
+        color: CmColors.bg,
+        borderRadius: BorderRadius.circular(13),
+        child: ListTile(
+          onTap: () => _showStudentInfo(student),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 2,
+          ),
+          leading: CircleAvatar(
+            radius: 20,
+            backgroundColor: CmColors.navy.withValues(alpha: 0.05),
+            foregroundColor: CmColors.navy,
+            child: Text(
+              firstName.isNotEmpty ? firstName[0].toUpperCase() : '?',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+          title: Text(
+            _fullName(student),
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: CmColors.navy,
+            ),
+          ),
+          subtitle: Text(
+            student['student_number']?.toString() ?? '',
+            style: const TextStyle(fontSize: 12, color: CmColors.slate),
+          ),
+        ),
+      ),
+    );
+  }
 
-        if (entry is _GroupHeader) {
-          return Padding(
-            padding: EdgeInsets.fromLTRB(4, index == 1 ? 4 : 20, 4, 8),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
+  Widget _sectionCard(
+    _GroupHeader header,
+    List<Map<String, dynamic>> students,
+    _AssignedSection? section,
+    String key,
+  ) {
+    final collapsed = _collapsedSectionKeys.contains(key);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      header.section,
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: CmColors.navy,
+                      ),
+                    ),
+                    if (header.subject.isNotEmpty)
                       Text(
-                        entry.section,
+                        header.subject,
                         style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                          color: CmColors.navy,
+                          fontSize: 12,
+                          color: CmColors.slate,
                         ),
                       ),
-                      if (entry.subject.isNotEmpty)
-                        Text(
-                          entry.subject,
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${header.count} student${header.count == 1 ? '' : 's'}',
+                style: const TextStyle(fontSize: 12, color: CmColors.slate),
+              ),
+            ],
+          ),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(17),
+            border: Border.all(color: CmColors.line),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              InkWell(
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(17),
+                ),
+                onTap: () => setState(() {
+                  if (collapsed) {
+                    _collapsedSectionKeys.remove(key);
+                  } else {
+                    _collapsedSectionKeys.add(key);
+                  }
+                }),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 13,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          collapsed ? 'Show students' : 'Hide students',
                           style: const TextStyle(
                             fontSize: 13,
                             color: CmColors.slate,
                           ),
                         ),
+                      ),
+                      Icon(
+                        collapsed
+                            ? Icons.keyboard_arrow_down
+                            : Icons.keyboard_arrow_up,
+                        color: CmColors.slate,
+                        size: 20,
+                      ),
                     ],
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: CmColors.slate.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    '${entry.count} student${entry.count == 1 ? '' : 's'}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: CmColors.slate,
-                    ),
-                  ),
+              ),
+              if (!collapsed) ...[
+                const Divider(height: 1, color: CmColors.line),
+                Padding(
+                  padding: const EdgeInsets.all(11),
+                  child: students.isEmpty
+                      ? Column(
+                          children: [
+                            const SizedBox(height: 14),
+                            const Text(
+                              'No students listed in this section yet.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: CmColors.slate,
+                                fontSize: 13,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: CmColors.navy,
+                              ),
+                              onPressed: section == null
+                                  ? null
+                                  : () =>
+                                        _showAddStudentsSheet(section: section),
+                              icon: const Icon(
+                                Icons.person_add_alt_1_outlined,
+                                size: 18,
+                              ),
+                              label: Text('Add students to ${header.section}'),
+                            ),
+                            const SizedBox(height: 14),
+                          ],
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: students.map(_studentTile).toList(),
+                        ),
                 ),
               ],
-            ),
-          );
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBody() {
+    final entries = _loading || _error != null ? <Object>[] : _buildEntries();
+    final groups = <Widget>[];
+    for (var i = 0; i < entries.length; i++) {
+      final entry = entries[i];
+      if (entry is! _GroupHeader) continue;
+      final students = <Map<String, dynamic>>[];
+      for (
+        var j = i + 1;
+        j < entries.length && entries[j] is! _GroupHeader;
+        j++
+      ) {
+        if (entries[j] is Map<String, dynamic>) {
+          students.add(entries[j] as Map<String, dynamic>);
         }
-
-        if (entry is _EmptySection) return _emptySectionCard(entry.section);
-
-        final student = entry as Map<String, dynamic>;
-        final firstName = student['first_name']?.toString() ?? '';
-
-        return Card(
-          elevation: 0,
-          color: Colors.white,
-          margin: const EdgeInsets.only(bottom: 10),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-            side: const BorderSide(color: CmColors.line),
-          ),
-          child: ListTile(
-            onTap: () => _showStudentInfo(student),
-            minVerticalPadding: 14,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-            ),
-            leading: CircleAvatar(
-              radius: 24,
-              backgroundColor: CmColors.navy.withValues(alpha: 0.07),
-              foregroundColor: CmColors.navy,
-              child: Text(
-                firstName.isNotEmpty ? firstName[0].toUpperCase() : '?',
-                style: const TextStyle(fontWeight: FontWeight.w700),
+      }
+      _AssignedSection? section;
+      for (final candidate in _filteredSections) {
+        if (candidate.name == entry.section) {
+          section = candidate;
+          break;
+        }
+      }
+      final key = section?.key ?? 'display:${entry.section}:$i';
+      groups.add(_sectionCard(entry, students, section, key));
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 900 ? 2 : 1;
+        return ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 104),
+          children: [
+            _filters(),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.all(64),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_error != null) ...[
+              _emptyMessage(Icons.error_outline, _error!),
+              FilledButton(onPressed: _loadData, child: const Text('Retry')),
+            ] else if (groups.isEmpty)
+              _emptyMessage(
+                Icons.people_outline,
+                _assigned.isEmpty
+                    ? (_isTeacher
+                          ? 'No sections are assigned to you yet. Ask an administrator to assign your subjects and sections.'
+                          : 'No sections found.')
+                    : _query.isNotEmpty
+                    ? 'No matching students.'
+                    : 'No sections match these filters.',
+              )
+            else
+              LayoutBuilder(
+                builder: (context, gridConstraints) {
+                  final gap = 16.0;
+                  final width =
+                      (gridConstraints.maxWidth - gap * (columns - 1)) /
+                      columns;
+                  return Wrap(
+                    spacing: gap,
+                    runSpacing: 24,
+                    children: groups
+                        .map((card) => SizedBox(width: width, child: card))
+                        .toList(),
+                  );
+                },
               ),
-            ),
-            title: Text(
-              _fullName(student),
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: CmColors.navy,
-              ),
-            ),
-            subtitle: Text(
-              student['student_number']?.toString() ?? '',
-              style: const TextStyle(color: CmColors.slate),
-            ),
-          ),
+          ],
         );
       },
     );
@@ -1631,7 +1805,11 @@ class _StudentsScreenState extends State<StudentsScreen> {
 }
 
 class _GroupHeader {
-  const _GroupHeader({required this.section, required this.subject, required this.count});
+  const _GroupHeader({
+    required this.section,
+    required this.subject,
+    required this.count,
+  });
   final String section;
   final String subject;
   final int count;

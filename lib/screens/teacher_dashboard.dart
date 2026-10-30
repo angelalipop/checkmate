@@ -9,6 +9,7 @@ import '../services/auth_storage.dart';
 import 'answer_sheet_input_screen.dart';
 import 'exams_tab.dart';
 import 'login_screen.dart' show CmColors, LoginScreen;
+import 'my_subjects_screen.dart';
 import 'students_screen.dart';
 
 // =============================================================
@@ -74,11 +75,10 @@ void Function(TeacherPage page)? _dashboardNavigate;
 
 enum TeacherPage {
   dashboard('Dashboard', Icons.space_dashboard_outlined),
-  classes('My Classes', Icons.class_outlined),
+  subjects('My Subjects', Icons.menu_book_outlined),
   students('Students', Icons.school_outlined),
   exams('Exams', Icons.assignment_outlined),
   scans('Scans', Icons.document_scanner_outlined),
-  results('Results', Icons.fact_check_outlined),
   analytics('Analytics', Icons.insights_outlined),
   reports('Reports', Icons.summarize_outlined);
 
@@ -91,7 +91,7 @@ enum TeacherPage {
 /// drawer).
 const List<TeacherPage> _bottomPages = [
   TeacherPage.dashboard,
-  TeacherPage.classes,
+  TeacherPage.subjects,
   TeacherPage.exams,
   TeacherPage.scans,
 ];
@@ -123,23 +123,6 @@ String _classCode(Map<String, dynamic> c) {
   final code = subject is Map ? subject['code']?.toString() ?? '' : '';
   final section = c['section']?.toString() ?? '';
   return [code, section].where((e) => e.isNotEmpty).join(' - ');
-}
-
-class _ClassInfo {
-  const _ClassInfo({
-    required this.id,
-    required this.subject,
-    required this.section,
-    required this.code,
-    required this.students,
-    required this.recentExam,
-    required this.status,
-  });
-
-  final int? id;
-  final String subject, section, code;
-  final String? recentExam, status;
-  final int students;
 }
 
 class _ExamInfo {
@@ -236,6 +219,8 @@ class _TeacherIdentity {
 ///    server only returns students of the teacher's own classes).
 Widget? _moduleScreenFor(TeacherPage page) {
   switch (page) {
+    case TeacherPage.subjects:
+      return const MySubjectsScreen();
     case TeacherPage.students:
       return const StudentsScreen();
     case TeacherPage.exams:
@@ -306,12 +291,18 @@ class _ModuleShell extends StatelessWidget {
   Widget build(BuildContext context) {
     // The Exams tab uses the same top bar (sidebar toggle, search, bell) as
     // the dashboard. Scans keeps its own screen header.
-    final hasHeader = page == TeacherPage.exams;
+    final isSubjects = page == TeacherPage.subjects;
+    final hasHeader = page == TeacherPage.exams || isSubjects;
     return TeacherShell(
       current: page,
       onSelect: (p) => _select(context, p),
       onLogout: () => _performLogout(context),
-      desktopHeader: hasHeader ? const _DesktopTopBar() : null,
+      desktopHeader: isSubjects
+          ? _DesktopTopBar(
+              hint: 'Search subjects by name or code',
+              onSearchChanged: (v) => mySubjectsSearch.value = v,
+            )
+          : (hasHeader ? const _DesktopTopBar() : null),
       mobileActions:
           hasHeader ? const [_NotificationBell(onDark: true)] : const [],
       child: child,
@@ -939,7 +930,6 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
 
   bool _loading = true;
   String? _error;
-  List<_ClassInfo> _classes = [];
   List<_ExamInfo> _exams = [];
 
   @override
@@ -1021,35 +1011,8 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
         );
       }).toList();
 
-      final classes = rawClasses.map((c) {
-        final subject = c['subject'];
-        final id = int.tryParse(c['id']?.toString() ?? '');
-        final title = c['title'];
-        // Most recent exam for this class (list order from the API).
-        final recent = rawExams.where((e) {
-          final cd = e['class'];
-          final eid = e['class_id']?.toString() ??
-              (cd is Map ? cd['id']?.toString() : null);
-          return eid != null && eid == c['id']?.toString();
-        });
-        return _ClassInfo(
-          id: id,
-          subject: subject is Map
-              ? subject['name']?.toString() ?? 'Subject'
-              : (title?.toString() ?? 'Subject'),
-          section: c['section']?.toString() ?? '',
-          code: _classCode(c),
-          students: counts[c['id']?.toString() ?? ''] ?? 0,
-          recentExam: recent.isEmpty ? null : recent.first['title']?.toString(),
-          status: recent.isEmpty
-              ? null
-              : _prettyStatus(recent.first['status']?.toString()),
-        );
-      }).toList();
-
       if (!mounted) return;
       setState(() {
-        _classes = classes;
         _exams = exams;
         _loading = false;
       });
@@ -1089,7 +1052,6 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
         loading: _loading,
         error: _error,
         onRetry: _loadData,
-        classes: _classes,
         exams: _exams,
       );
     }
@@ -1114,7 +1076,16 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
 // =============================================================
 
 class _DesktopTopBar extends StatelessWidget {
-  const _DesktopTopBar();
+  const _DesktopTopBar({
+    this.hint = 'Search classes, exams, students',
+    this.onSearchChanged,
+  });
+
+  /// Placeholder text of the search field.
+  final String hint;
+
+  /// Called as the teacher types (used by My Subjects to filter as you type).
+  final ValueChanged<String>? onSearchChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1147,9 +1118,10 @@ class _DesktopTopBar extends StatelessWidget {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 480),
                 child: TextField(
+                  onChanged: onSearchChanged,
                   style: const TextStyle(color: CmColors.navy),
                   decoration: InputDecoration(
-                    hintText: 'Search classes, exams, students',
+                    hintText: hint,
                     hintStyle:
                         const TextStyle(color: CmColors.slate, fontSize: 14),
                     prefixIcon:
@@ -1261,7 +1233,6 @@ class _DashboardContent extends StatelessWidget {
     required this.loading,
     required this.error,
     required this.onRetry,
-    required this.classes,
     required this.exams,
   });
 
@@ -1270,7 +1241,6 @@ class _DashboardContent extends StatelessWidget {
   final bool loading;
   final String? error;
   final VoidCallback onRetry;
-  final List<_ClassInfo> classes;
   final List<_ExamInfo> exams;
 
   static const _months = [
@@ -1326,19 +1296,6 @@ class _DashboardContent extends StatelessWidget {
                   const SizedBox(height: 24),
                   _reviewAndAnalytics(context, w),
                   const SizedBox(height: 32),
-                  _sectionHeader('My Classes', 'View all',
-                      () => onNavigate(TeacherPage.classes)),
-                  const SizedBox(height: 12),
-                  if (classes.isEmpty)
-                    const _EmptyPanel(
-                        'No classes assigned yet. Your administrator assigns Class Codes to you.')
-                  else
-                    _grid(
-                      w,
-                      w >= 1000 ? 3 : (w >= _kTablet ? 2 : 1),
-                      [for (final c in classes) _ClassCard(info: c)],
-                    ),
-                  const SizedBox(height: 32),
                   _sectionHeader('Recent Examinations', 'View all',
                       () => onNavigate(TeacherPage.exams)),
                   const SizedBox(height: 12),
@@ -1366,16 +1323,10 @@ class _DashboardContent extends StatelessWidget {
   // ---------- Stats ----------
 
   Widget _stats(double w) {
-    final cols = w >= _kDesktop ? 4 : 2;
+    final cols = w >= _kTablet ? 3 : 2;
     final completed = exams.where((e) => _isDone(e.status)).length;
     final active = exams.length - completed;
     return _grid(w, cols, [
-      _StatCard(
-        icon: Icons.class_outlined,
-        value: '${classes.length}',
-        label: 'My Classes',
-        note: 'Assigned by admin',
-      ),
       _StatCard(
         icon: Icons.assignment_outlined,
         value: '$active',
@@ -1789,97 +1740,6 @@ class _MiniStat extends StatelessWidget {
         Text(label,
             style: const TextStyle(fontSize: 12, color: CmColors.slate)),
       ],
-    );
-  }
-}
-
-class _ClassCard extends StatelessWidget {
-  const _ClassCard({required this.info});
-  final _ClassInfo info;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(info.subject,
-                        style: const TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                            color: CmColors.navy)),
-                    const SizedBox(height: 2),
-                    Text(info.section,
-                        style: const TextStyle(color: CmColors.slate)),
-                  ],
-                ),
-              ),
-              if (info.status != null) _StatusChip(info.status!),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              const Icon(Icons.tag, size: 16, color: CmColors.slate),
-              const SizedBox(width: 6),
-              Text('Class Code: ${info.code}',
-                  style: const TextStyle(
-                      fontSize: 13, color: CmColors.navy)),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              const Icon(Icons.people_outline,
-                  size: 16, color: CmColors.slate),
-              const SizedBox(width: 6),
-              Text('${info.students} students',
-                  style: const TextStyle(
-                      fontSize: 13, color: CmColors.navy)),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              const Icon(Icons.assignment_outlined,
-                  size: 16, color: CmColors.slate),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                    info.recentExam == null
-                        ? 'No exams yet'
-                        : 'Recent: ${info.recentExam}',
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 13, color: CmColors.navy)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            height: 44,
-            child: OutlinedButton(
-              onPressed: () => _soon(context, 'Class details'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: CmColors.navy,
-                side: const BorderSide(color: CmColors.line),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
-              child: const Text('View class',
-                  style: TextStyle(fontWeight: FontWeight.w700)),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

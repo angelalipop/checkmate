@@ -24,7 +24,8 @@ class ClassService {
           c.teacher_id,
           u.name AS teacher_name,
           c.created_at,
-          c.year_level
+          c.year_level,
+          s.academic_subject_id
         FROM classes c
         JOIN subjects s ON s.id = c.subject_id
         LEFT JOIN users u ON u.id = c.teacher_id
@@ -44,6 +45,8 @@ class ClassService {
           'id': row[4],
           'name': row[5],
           'code': row[6],
+          // Link to the Academic Management subject (null if not linked).
+          'academic_subject_id': row[11],
         },
         'teacher': {
           'id': row[7],
