@@ -47,7 +47,11 @@ class _Brand {
 }
 
 const double _kWide = 760;
-const List<String> _kTypes = ['multiple_choice', 'true_false', 'identification'];
+const List<String> _kTypes = [
+  'multiple_choice',
+  'true_false',
+  'identification',
+];
 
 // ---------------------------------------------------------------
 // Helpers
@@ -139,23 +143,23 @@ EdgeInsets _pagePad(double w) {
 // ---------------------------------------------------------------
 
 OutlineInputBorder _ob(Color c, [double w = 1]) => OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: c, width: w),
-    );
+  borderRadius: BorderRadius.circular(8),
+  borderSide: BorderSide(color: c, width: w),
+);
 
 InputDecoration _deco(String hint, {Widget? prefix}) => InputDecoration(
-      hintText: hint,
-      hintStyle: const TextStyle(color: CmColors.slate, fontSize: 13),
-      prefixIcon: prefix,
-      isDense: true,
-      filled: true,
-      fillColor: Colors.white,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      border: _ob(_Brand.mist),
-      enabledBorder: _ob(_Brand.mist),
-      disabledBorder: _ob(_Brand.mist),
-      focusedBorder: _ob(_Brand.ink, 1.5),
-    );
+  hintText: hint,
+  hintStyle: const TextStyle(color: CmColors.slate, fontSize: 13),
+  prefixIcon: prefix,
+  isDense: true,
+  filled: true,
+  fillColor: Colors.white,
+  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+  border: _ob(_Brand.mist),
+  enabledBorder: _ob(_Brand.mist),
+  disabledBorder: _ob(_Brand.mist),
+  focusedBorder: _ob(_Brand.ink, 1.5),
+);
 
 const TextStyle _inputText = TextStyle(fontSize: 13.5, color: _Brand.ink);
 
@@ -218,11 +222,14 @@ class _Field extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label,
-              style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  color: _Brand.ink)),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              color: _Brand.ink,
+            ),
+          ),
           const SizedBox(height: 6),
           child,
         ],
@@ -237,10 +244,10 @@ class _Spin extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-        width: 18,
-        height: 18,
-        child: CircularProgressIndicator(strokeWidth: 2, color: color),
-      );
+    width: 18,
+    height: 18,
+    child: CircularProgressIndicator(strokeWidth: 2, color: color),
+  );
 }
 
 class _ErrorText extends StatelessWidget {
@@ -249,11 +256,15 @@ class _ErrorText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(message,
-            style: TextStyle(
-                fontSize: 12.5, color: Theme.of(context).colorScheme.error)),
-      );
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(
+      message,
+      style: TextStyle(
+        fontSize: 12.5,
+        color: Theme.of(context).colorScheme.error,
+      ),
+    ),
+  );
 }
 
 class _Badge extends StatelessWidget {
@@ -263,19 +274,22 @@ class _Badge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        width: size,
-        height: size,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: CmColors.bg,
-          borderRadius: BorderRadius.circular(7),
-        ),
-        child: Text(text,
-            style: const TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w800,
-                color: _Brand.ink)),
-      );
+    width: size,
+    height: size,
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      color: CmColors.bg,
+      borderRadius: BorderRadius.circular(7),
+    ),
+    child: Text(
+      text,
+      style: const TextStyle(
+        fontSize: 11.5,
+        fontWeight: FontWeight.w800,
+        color: _Brand.ink,
+      ),
+    ),
+  );
 }
 
 class _StatusPill extends StatelessWidget {
@@ -295,9 +309,10 @@ class _StatusPill extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-              width: 6,
-              height: 6,
-              decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+          ),
           const SizedBox(width: 6),
           Text(
             _statusLabel(status),
@@ -353,17 +368,24 @@ class _CmDialog extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(title,
-                            style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                                color: _Brand.ink)),
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: _Brand.ink,
+                          ),
+                        ),
                         if (subtitle != null)
                           Padding(
                             padding: const EdgeInsets.only(top: 2),
-                            child: Text(subtitle!,
-                                style: const TextStyle(
-                                    fontSize: 12, color: CmColors.slate)),
+                            child: Text(
+                              subtitle!,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: CmColors.slate,
+                              ),
+                            ),
                           ),
                       ],
                     ),
@@ -410,18 +432,22 @@ Future<bool> _confirm(
       maxWidth: 400,
       actions: [
         OutlinedButton(
-            style: _outlineStyle,
-            onPressed: () => Navigator.pop(c, false),
-            child: const Text('Cancel')),
+          style: _outlineStyle,
+          onPressed: () => Navigator.pop(c, false),
+          child: const Text('Cancel'),
+        ),
         FilledButton(
-            style: _primaryStyle,
-            onPressed: () => Navigator.pop(c, true),
-            child: Text(action)),
+          style: _primaryStyle,
+          onPressed: () => Navigator.pop(c, true),
+          child: Text(action),
+        ),
       ],
       child: Padding(
         padding: const EdgeInsets.only(bottom: 12),
-        child: Text(message,
-            style: const TextStyle(fontSize: 13.5, color: _Brand.ink)),
+        child: Text(
+          message,
+          style: const TextStyle(fontSize: 13.5, color: _Brand.ink),
+        ),
       ),
     ),
   );
@@ -440,10 +466,12 @@ Future<bool?> _showExamDetailsDialog(
 }) async {
   final editing = exam != null;
   final titleC = TextEditingController(text: exam?['title']?.toString() ?? '');
-  final descC =
-      TextEditingController(text: exam?['description']?.toString() ?? '');
-  final instC =
-      TextEditingController(text: exam?['instructions']?.toString() ?? '');
+  final descC = TextEditingController(
+    text: exam?['description']?.toString() ?? '',
+  );
+  final instC = TextEditingController(
+    text: exam?['instructions']?.toString() ?? '',
+  );
 
   int? classId = initialClassId ?? _examClassId(exam);
   if (classId != null && !classes.any((c) => _id(c['id']) == classId)) {
@@ -506,18 +534,24 @@ Future<bool?> _showExamDetailsDialog(
 
         return _CmDialog(
           title: editing ? 'Edit exam details' : 'Create exam',
-          subtitle: editing ? 'Examination information' : 'New examination · Draft',
+          subtitle: editing
+              ? 'Examination information'
+              : 'New examination · Draft',
           actions: [
             OutlinedButton(
-                style: _outlineStyle,
-                onPressed: saving ? null : () => Navigator.pop(dialogContext, false),
-                child: const Text('Cancel')),
+              style: _outlineStyle,
+              onPressed: saving
+                  ? null
+                  : () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
             FilledButton(
-                style: _primaryStyle,
-                onPressed: saving ? null : save,
-                child: saving
-                    ? const _Spin()
-                    : Text(editing ? 'Save changes' : 'Create exam')),
+              style: _primaryStyle,
+              onPressed: saving ? null : save,
+              child: saving
+                  ? const _Spin()
+                  : Text(editing ? 'Save changes' : 'Create exam'),
+            ),
           ],
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -534,8 +568,10 @@ Future<bool?> _showExamDetailsDialog(
                       if (_id(c['id']) != null)
                         DropdownMenuItem<int>(
                           value: _id(c['id']),
-                          child: Text(_classLabel(c),
-                              overflow: TextOverflow.ellipsis),
+                          child: Text(
+                            _classLabel(c),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                   ],
                   onChanged: saving ? null : (v) => setS(() => classId = v),
@@ -550,6 +586,318 @@ Future<bool?> _showExamDetailsDialog(
                   decoration: _deco('e.g. Computer Programming Midterm'),
                 ),
               ),
+              _Field(
+                'Description',
+                TextField(
+                  controller: descC,
+                  enabled: !saving,
+                  style: _inputText,
+                  decoration: _deco('e.g. Midterm'),
+                ),
+              ),
+              _Field(
+                'Instructions',
+                TextField(
+                  controller: instC,
+                  enabled: !saving,
+                  minLines: 3,
+                  maxLines: 5,
+                  style: _inputText,
+                  decoration: _deco('Enter examination instructions'),
+                ),
+              ),
+              if (error != null) _ErrorText(error!),
+            ],
+          ),
+        );
+      },
+    ),
+  );
+
+  titleC.dispose();
+  descC.dispose();
+  instC.dispose();
+  return result;
+}
+
+// ---------------------------------------------------------------
+// Edit exam details dialog (title, type, sections, description, instructions)
+// ---------------------------------------------------------------
+
+const Map<String, String> _kAssessmentTypes = {
+  'quiz': 'Quiz',
+  'long_quiz': 'Long Quiz',
+  'prelim': 'Prelim',
+  'midterm': 'Midterm',
+  'prefinal': 'Prefinal',
+  'final': 'Final',
+};
+
+/// The sections (classes) that can share one exam: same subject, school year,
+/// semester and year level as [current] (the same grouping My Subjects uses).
+List<_Json> _siblingSections(List<_Json> classes, _Json? current) {
+  if (current == null) return [];
+
+  String key(_Json c) {
+    final s = c['subject'];
+    final subjectId = s is Map ? s['id'] : null;
+    return '$subjectId|${c['school_year']}|${c['semester']}|${c['year_level']}';
+  }
+
+  final k = key(current);
+  final out = classes.where((c) => key(c) == k).toList()
+    ..sort(
+      (a, b) => (a['section']?.toString() ?? '').toLowerCase().compareTo(
+        (b['section']?.toString() ?? '').toLowerCase(),
+      ),
+    );
+  return out;
+}
+
+Future<bool?> _showEditExamDialog(
+  BuildContext context, {
+  required _Json exam,
+  required List<_Json> classes,
+}) async {
+  final examId = _id(exam['id']);
+  final currentClassId = _examClassId(exam);
+
+  _Json? currentClass;
+  for (final c in classes) {
+    if (_id(c['id']) == currentClassId) {
+      currentClass = c;
+      break;
+    }
+  }
+
+  final siblings = _siblingSections(classes, currentClass);
+  final siblingIds = siblings.map((c) => _id(c['id'])).whereType<int>().toSet();
+
+  // "INSY1003 · Professional Issues in Information Systems and Technology"
+  final examClass = exam['class'];
+  final subjectRaw =
+      currentClass?['subject'] ??
+      (examClass is Map ? examClass['subject'] : null);
+  var subtitle = 'Examination information';
+  if (subjectRaw is Map) {
+    final joined = [
+      subjectRaw['code']?.toString() ?? '',
+      subjectRaw['name']?.toString() ?? '',
+    ].where((e) => e.isNotEmpty).join(' · ');
+    if (joined.isNotEmpty) subtitle = joined;
+  }
+
+  // Sections the exam is currently given to (only ones we can show).
+  final initialIds = <int>{};
+  final rawIds = exam['class_ids'];
+  if (rawIds is List) {
+    for (final v in rawIds) {
+      final n = _id(v);
+      if (n != null && siblingIds.contains(n)) initialIds.add(n);
+    }
+  }
+  if (currentClassId != null && siblingIds.contains(currentClassId)) {
+    initialIds.add(currentClassId);
+  }
+  final selected = Set<int>.of(initialIds);
+
+  final status = exam['status']?.toString().toLowerCase() ?? 'draft';
+  final canEditSections = siblings.isNotEmpty && status == 'draft';
+
+  String? type = exam['assessment_type']?.toString();
+  if (type != null && !_kAssessmentTypes.containsKey(type)) type = null;
+
+  final titleC = TextEditingController(text: exam['title']?.toString() ?? '');
+  final descC = TextEditingController(
+    text: exam['description']?.toString() ?? '',
+  );
+  final instC = TextEditingController(
+    text: exam['instructions']?.toString() ?? '',
+  );
+
+  bool saving = false;
+  String? error;
+
+  final result = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (dialogContext, setS) {
+        Future<void> save() async {
+          final title = titleC.text.trim();
+          if (title.isEmpty) {
+            setS(() => error = 'Exam title is required.');
+            return;
+          }
+          if (siblings.isNotEmpty && selected.isEmpty) {
+            setS(() => error = 'Choose at least one section.');
+            return;
+          }
+          setS(() {
+            saving = true;
+            error = null;
+          });
+          try {
+            if (examId == null) throw Exception('Invalid exam ID.');
+            final token = await _token();
+            final d = descC.text.trim();
+            final i = instC.text.trim();
+
+            // Only send the sections when the teacher actually changed them.
+            final sectionsChanged =
+                canEditSections &&
+                !(selected.length == initialIds.length &&
+                    selected.containsAll(initialIds));
+
+            await ApiService.updateExam(
+              token: token,
+              examId: examId,
+              title: title,
+              assessmentType: type,
+              classIds: sectionsChanged ? (selected.toList()..sort()) : null,
+              description: d.isEmpty ? null : d,
+              instructions: i.isEmpty ? null : i,
+            );
+            if (dialogContext.mounted) Navigator.pop(dialogContext, true);
+          } catch (e) {
+            setS(() {
+              saving = false;
+              error = _err(e);
+            });
+          }
+        }
+
+        Widget sectionRow(_Json sec) {
+          final secId = _id(sec['id'])!;
+          final count = _id(sec['student_count']);
+          final enabled = !saving && canEditSections;
+
+          void toggle(bool on) => setS(() {
+            if (on) {
+              selected.add(secId);
+            } else {
+              selected.remove(secId);
+            }
+          });
+
+          return InkWell(
+            borderRadius: BorderRadius.circular(6),
+            onTap: enabled ? () => toggle(!selected.contains(secId)) : null,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 40),
+              child: Row(
+                children: [
+                  Checkbox(
+                    value: selected.contains(secId),
+                    activeColor: _Brand.ink,
+                    onChanged: enabled ? (v) => toggle(v == true) : null,
+                  ),
+                  Expanded(
+                    child: Text(
+                      sec['section']?.toString() ?? 'Section',
+                      style: _inputText.copyWith(fontSize: 14),
+                    ),
+                  ),
+                  if (count != null)
+                    Text(
+                      '$count ${count == 1 ? 'student' : 'students'}',
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        color: CmColors.slate,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return _CmDialog(
+          title: 'Edit Exam Details',
+          subtitle: subtitle,
+          actions: [
+            TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: _Brand.inkSoft,
+                minimumSize: const Size(0, 40),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                textStyle: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13.5,
+                ),
+              ),
+              onPressed: saving
+                  ? null
+                  : () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: _amberStyle,
+              onPressed: saving ? null : save,
+              child: saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: _Brand.ink,
+                      ),
+                    )
+                  : const Text('Save changes'),
+            ),
+          ],
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: titleC,
+                enabled: !saving,
+                style: _inputText,
+                decoration: _deco('Exam title'),
+              ),
+              const SizedBox(height: 14),
+              DropdownButtonFormField<String>(
+                initialValue: type,
+                isExpanded: true,
+                style: _inputText,
+                decoration: _deco('Select type').copyWith(
+                  labelText: 'Type',
+                  labelStyle: const TextStyle(
+                    color: CmColors.slate,
+                    fontSize: 13,
+                  ),
+                ),
+                items: [
+                  for (final e in _kAssessmentTypes.entries)
+                    DropdownMenuItem<String>(
+                      value: e.key,
+                      child: Text(e.value),
+                    ),
+                ],
+                onChanged: saving ? null : (v) => setS(() => type = v),
+              ),
+              if (siblings.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                const Text(
+                  'Sections',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: _Brand.ink,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                for (final sec in siblings)
+                  if (_id(sec['id']) != null) sectionRow(sec),
+                if (!canEditSections)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text(
+                      'Sections can only be changed while the exam is a draft.',
+                      style: TextStyle(fontSize: 12, color: CmColors.slate),
+                    ),
+                  ),
+              ],
+              const SizedBox(height: 18),
               _Field(
                 'Description',
                 TextField(
@@ -655,35 +1003,34 @@ class _ExamsTabState extends State<ExamsTab> {
 
   /// Section / question totals for the list cards (loaded in the background).
   Future<void> _loadCounts(String token, List<_Json> exams) async {
-    await Future.wait(exams.map((exam) async {
-      final key = exam['id']?.toString();
-      final examId = _id(exam['id']);
-      if (key == null || examId == null) return;
-      try {
-        final sections = await ApiService.getExamSections(token, examId);
-        var q = 0;
-        for (final s in sections) {
-          final sid = _id(s['id']);
-          if (sid == null) continue;
-          q += (await ApiService.getQuestions(token, sid)).length;
+    await Future.wait(
+      exams.map((exam) async {
+        final key = exam['id']?.toString();
+        final examId = _id(exam['id']);
+        if (key == null || examId == null) return;
+        try {
+          final sections = await ApiService.getExamSections(token, examId);
+          var q = 0;
+          for (final s in sections) {
+            final sid = _id(s['id']);
+            if (sid == null) continue;
+            q += (await ApiService.getQuestions(token, sid)).length;
+          }
+          if (!mounted) return;
+          setState(() => _counts[key] = _Counts(sections.length, q));
+        } catch (_) {
+          // The card simply omits the counts.
         }
-        if (!mounted) return;
-        setState(() => _counts[key] = _Counts(sections.length, q));
-      } catch (_) {
-        // The card simply omits the counts.
-      }
-    }));
+      }),
+    );
   }
 
   String _sectionOf(_Json item) => (item['section']?.toString() ?? '').trim();
 
   List<String> get _sections {
-    final values = _classes
-        .map(_sectionOf)
-        .where((s) => s.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final values =
+        _classes.map(_sectionOf).where((s) => s.isNotEmpty).toSet().toList()
+          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
     return values;
   }
 
@@ -716,25 +1063,32 @@ class _ExamsTabState extends State<ExamsTab> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Create Exam',
-                  style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: _Brand.ink)),
+              const Text(
+                'Create Exam',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: _Brand.ink,
+                ),
+              ),
               const SizedBox(height: 8),
               ListTile(
                 leading: const Icon(Icons.edit_document, color: _Brand.ink),
                 title: const Text('Build Exam'),
                 subtitle: const Text(
-                    'Create an exam using CheckMate questions and answer keys.'),
+                  'Create an exam using CheckMate questions and answer keys.',
+                ),
                 onTap: () => Navigator.pop(sheetContext, 'builder'),
               ),
               ListTile(
-                leading: const Icon(Icons.picture_as_pdf_outlined,
-                    color: _Brand.ink),
+                leading: const Icon(
+                  Icons.picture_as_pdf_outlined,
+                  color: _Brand.ink,
+                ),
                 title: const Text('Upload Question Paper PDF'),
                 subtitle: const Text(
-                    'Use an existing PDF and configure its answer key.'),
+                  'Use an existing PDF and configure its answer key.',
+                ),
                 onTap: () => Navigator.pop(sheetContext, 'pdf'),
               ),
             ],
@@ -780,9 +1134,10 @@ class _ExamsTabState extends State<ExamsTab> {
           maxWidth: 420,
           actions: [
             FilledButton(
-                style: _primaryStyle,
-                onPressed: () => Navigator.pop(c),
-                child: const Text('OK')),
+              style: _primaryStyle,
+              onPressed: () => Navigator.pop(c),
+              child: const Text('OK'),
+            ),
           ],
           child: const Padding(
             padding: EdgeInsets.only(bottom: 12),
@@ -851,12 +1206,19 @@ class _ExamsTabState extends State<ExamsTab> {
                   initialValue: _selectedSection,
                   isExpanded: true,
                   style: _inputText,
-                  decoration: _deco('All sections',
-                      prefix: const Icon(Icons.filter_list,
-                          size: 18, color: CmColors.slate)),
+                  decoration: _deco(
+                    'All sections',
+                    prefix: const Icon(
+                      Icons.filter_list,
+                      size: 18,
+                      color: CmColors.slate,
+                    ),
+                  ),
                   items: [
                     const DropdownMenuItem<String?>(
-                        value: null, child: Text('All sections')),
+                      value: null,
+                      child: Text('All sections'),
+                    ),
                     for (final s in _sections)
                       DropdownMenuItem<String?>(value: s, child: Text(s)),
                   ],
@@ -879,11 +1241,14 @@ class _ExamsTabState extends State<ExamsTab> {
               Row(
                 children: [
                   const Expanded(
-                    child: Text('Exams',
-                        style: TextStyle(
-                            fontSize: 26,
-                            fontWeight: FontWeight.w800,
-                            color: _Brand.ink)),
+                    child: Text(
+                      'Exams',
+                      style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w800,
+                        color: _Brand.ink,
+                      ),
+                    ),
                   ),
                   if (!narrow && filter != null) ...[
                     filter,
@@ -920,14 +1285,17 @@ class _ExamsTabState extends State<ExamsTab> {
           children: [
             const Icon(Icons.error_outline, size: 40, color: CmColors.slate),
             const SizedBox(height: 12),
-            Text(_error!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: _Brand.ink)),
+            Text(
+              _error!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: _Brand.ink),
+            ),
             const SizedBox(height: 12),
             FilledButton(
-                style: _primaryStyle,
-                onPressed: _loadData,
-                child: const Text('Retry')),
+              style: _primaryStyle,
+              onPressed: _loadData,
+              child: const Text('Retry'),
+            ),
           ],
         ),
       );
@@ -940,28 +1308,32 @@ class _ExamsTabState extends State<ExamsTab> {
         padding: 36,
         child: Column(
           children: [
-            const Icon(Icons.assignment_outlined,
-                size: 44, color: CmColors.slate),
+            const Icon(
+              Icons.assignment_outlined,
+              size: 44,
+              color: CmColors.slate,
+            ),
             const SizedBox(height: 12),
             Text(
               noClasses
                   ? 'No subjects assigned to you yet.'
                   : (_selectedSection == null
-                      ? 'No exams yet.'
-                      : 'No exams in this section.'),
+                        ? 'No exams yet.'
+                        : 'No exams in this section.'),
               textAlign: TextAlign.center,
               style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: _Brand.ink),
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: _Brand.ink,
+              ),
             ),
             const SizedBox(height: 6),
             Text(
               noClasses
                   ? 'Ask an administrator to assign a subject and section to you.'
                   : (_selectedSection == null
-                      ? 'Tap Add exam to create one.'
-                      : 'Choose another section or tap Add exam.'),
+                        ? 'Tap Add exam to create one.'
+                        : 'Choose another section or tap Add exam.'),
               textAlign: TextAlign.center,
               style: const TextStyle(color: CmColors.slate),
             ),
@@ -995,22 +1367,30 @@ class _ExamsTabState extends State<ExamsTab> {
             color: CmColors.bg,
             borderRadius: BorderRadius.circular(10),
           ),
-          child: const Icon(Icons.assignment_outlined,
-              size: 20, color: _Brand.ink),
+          child: const Icon(
+            Icons.assignment_outlined,
+            size: 20,
+            color: _Brand.ink,
+          ),
         ),
         const SizedBox(width: 14),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title,
-                  style: const TextStyle(
-                      fontSize: 15.5,
-                      fontWeight: FontWeight.w700,
-                      color: _Brand.ink)),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 15.5,
+                  fontWeight: FontWeight.w700,
+                  color: _Brand.ink,
+                ),
+              ),
               const SizedBox(height: 3),
-              Text(_classLabel(exam['class']),
-                  style: const TextStyle(fontSize: 12.5, color: CmColors.slate)),
+              Text(
+                _classLabel(exam['class']),
+                style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
+              ),
               if (counts != null) ...[
                 const SizedBox(height: 3),
                 Text(
@@ -1048,13 +1428,7 @@ class _ExamsTabState extends State<ExamsTab> {
                 children: [
                   info,
                   const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      _StatusPill(status),
-                      const Spacer(),
-                      open,
-                    ],
-                  ),
+                  Row(children: [_StatusPill(status), const Spacer(), open]),
                 ],
               )
             : Row(
@@ -1126,8 +1500,9 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
       final token = await _token();
 
       final exams = await ApiService.getExams(token);
-      final match = exams
-          .where((e) => e['id'].toString() == widget.examId.toString());
+      final match = exams.where(
+        (e) => e['id'].toString() == widget.examId.toString(),
+      );
       if (match.isEmpty) throw Exception('Exam not found.');
 
       final sections = await ApiService.getExamSections(token, widget.examId);
@@ -1175,8 +1550,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
 
   // ---------- derived ----------
 
-  int get _totalQuestions =>
-      _questions.values.fold(0, (a, l) => a + l.length);
+  int get _totalQuestions => _questions.values.fold(0, (a, l) => a + l.length);
 
   double get _totalPoints {
     var t = 0.0;
@@ -1253,10 +1627,12 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
   // ---------- exam details ----------
 
   Future<void> _editDetails() async {
-    final ok = await _showExamDetailsDialog(
+    final exam = _exam;
+    if (exam == null) return;
+    final ok = await _showEditExamDialog(
       context,
       classes: widget.classes,
-      exam: _exam,
+      exam: exam,
     );
     if (ok == true) await _load(silent: true);
   }
@@ -1265,15 +1641,19 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
 
   Future<void> _showSectionDialog({_Json? section}) async {
     final editing = section != null;
-    final nameC = TextEditingController(text: section?['name']?.toString() ?? '');
+    final nameC = TextEditingController(
+      text: section?['name']?.toString() ?? '',
+    );
     final ptsC = TextEditingController(
-        text: editing ? _trim(_num(section['default_points'])) : '1');
+      text: editing ? _trim(_num(section['default_points'])) : '1',
+    );
     var type = section?['question_type']?.toString() ?? 'multiple_choice';
     if (!_kTypes.contains(type)) type = 'multiple_choice';
     bool saving = false;
     String? error;
 
-    final nextOrder = _sections.fold<int>(0, (m, s) {
+    final nextOrder =
+        _sections.fold<int>(0, (m, s) {
           final o = int.tryParse(s['section_order']?.toString() ?? '') ?? 0;
           return o > m ? o : m;
         }) +
@@ -1287,8 +1667,10 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
             final name = nameC.text.trim();
             final points = num.tryParse(ptsC.text.trim());
             if (name.isEmpty || points == null || points <= 0) {
-              setS(() => error =
-                  'Enter a section name and points greater than zero.');
+              setS(
+                () => error =
+                    'Enter a section name and points greater than zero.',
+              );
               return;
             }
             setS(() {
@@ -1330,16 +1712,19 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
             subtitle: 'Section details',
             actions: [
               OutlinedButton(
-                  style: _outlineStyle,
-                  onPressed:
-                      saving ? null : () => Navigator.pop(dialogContext, false),
-                  child: const Text('Cancel')),
+                style: _outlineStyle,
+                onPressed: saving
+                    ? null
+                    : () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
               FilledButton(
-                  style: _primaryStyle,
-                  onPressed: saving ? null : save,
-                  child: saving
-                      ? const _Spin()
-                      : Text(editing ? 'Save changes' : 'Save section')),
+                style: _primaryStyle,
+                onPressed: saving ? null : save,
+                child: saving
+                    ? const _Spin()
+                    : Text(editing ? 'Save changes' : 'Save section'),
+              ),
             ],
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1378,8 +1763,9 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                   TextField(
                     controller: ptsC,
                     enabled: !saving,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                     style: _inputText,
                     decoration: _deco('1'),
                   ),
@@ -1440,7 +1826,8 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
   ) async {
     final token = await _token();
     final existing = _questions[sectionId] ?? const <_Json>[];
-    final next = existing.fold<int>(0, (m, q) {
+    final next =
+        existing.fold<int>(0, (m, q) {
           final n = int.tryParse(q['question_number']?.toString() ?? '') ?? 0;
           return n > m ? n : m;
         }) +
@@ -1551,14 +1938,17 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
             maxWidth: 400,
             actions: [
               OutlinedButton(
-                  style: _outlineStyle,
-                  onPressed:
-                      saving ? null : () => Navigator.pop(dialogContext, false),
-                  child: const Text('Cancel')),
+                style: _outlineStyle,
+                onPressed: saving
+                    ? null
+                    : () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
               FilledButton(
-                  style: _primaryStyle,
-                  onPressed: saving ? null : save,
-                  child: saving ? const _Spin() : const Text('Add')),
+                style: _primaryStyle,
+                onPressed: saving ? null : save,
+                child: saving ? const _Spin() : const Text('Add'),
+              ),
             ],
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1603,21 +1993,25 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
             children: [
               const Icon(Icons.error_outline, size: 44, color: CmColors.slate),
               const SizedBox(height: 12),
-              Text(_error!,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: _Brand.ink)),
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: _Brand.ink),
+              ),
               const SizedBox(height: 14),
               Wrap(
                 spacing: 10,
                 children: [
                   OutlinedButton(
-                      style: _outlineStyle,
-                      onPressed: widget.onBack,
-                      child: const Text('All exams')),
+                    style: _outlineStyle,
+                    onPressed: widget.onBack,
+                    child: const Text('All exams'),
+                  ),
                   FilledButton(
-                      style: _primaryStyle,
-                      onPressed: _load,
-                      child: const Text('Retry')),
+                    style: _primaryStyle,
+                    onPressed: _load,
+                    child: const Text('Retry'),
+                  ),
                 ],
               ),
             ],
@@ -1645,11 +2039,14 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
               Row(
                 children: [
                   const Expanded(
-                    child: Text('Exam Builder',
-                        style: TextStyle(
-                            fontSize: 26,
-                            fontWeight: FontWeight.w800,
-                            color: _Brand.ink)),
+                    child: Text(
+                      'Exam Builder',
+                      style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w800,
+                        color: _Brand.ink,
+                      ),
+                    ),
                   ),
                   OutlinedButton.icon(
                     style: _outlineStyle,
@@ -1671,22 +2068,28 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                       children: [
                         Row(
                           children: [
-                            const Text('EXAMINATION',
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    letterSpacing: 0.8,
-                                    fontWeight: FontWeight.w700,
-                                    color: CmColors.slate)),
+                            const Text(
+                              'EXAMINATION',
+                              style: TextStyle(
+                                fontSize: 11,
+                                letterSpacing: 0.8,
+                                fontWeight: FontWeight.w700,
+                                color: CmColors.slate,
+                              ),
+                            ),
                             const SizedBox(width: 10),
                             _StatusPill(status),
                           ],
                         ),
                         const SizedBox(height: 8),
-                        Text(exam['title']?.toString() ?? 'Exam',
-                            style: const TextStyle(
-                                fontSize: 21,
-                                fontWeight: FontWeight.w800,
-                                color: _Brand.ink)),
+                        Text(
+                          exam['title']?.toString() ?? 'Exam',
+                          style: const TextStyle(
+                            fontSize: 21,
+                            fontWeight: FontWeight.w800,
+                            color: _Brand.ink,
+                          ),
+                        ),
                         const SizedBox(height: 6),
                         Wrap(
                           spacing: 16,
@@ -1696,21 +2099,31 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                             Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.class_outlined,
-                                    size: 14, color: CmColors.slate),
+                                const Icon(
+                                  Icons.class_outlined,
+                                  size: 14,
+                                  color: CmColors.slate,
+                                ),
                                 const SizedBox(width: 6),
                                 Flexible(
-                                  child: Text(_classLabel(exam['class']),
-                                      style: const TextStyle(
-                                          fontSize: 12.5,
-                                          color: CmColors.slate)),
+                                  child: Text(
+                                    _classLabel(exam['class']),
+                                    style: const TextStyle(
+                                      fontSize: 12.5,
+                                      color: CmColors.slate,
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),
                             if (description.isNotEmpty)
-                              Text(description,
-                                  style: const TextStyle(
-                                      fontSize: 12.5, color: CmColors.slate)),
+                              Text(
+                                description,
+                                style: const TextStyle(
+                                  fontSize: 12.5,
+                                  color: CmColors.slate,
+                                ),
+                              ),
                           ],
                         ),
                       ],
@@ -1731,18 +2144,28 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
               Row(
                 children: [
                   Expanded(
-                    child: _stat(Icons.assignment_outlined,
-                        '${_sections.length}', 'Sections',
-                        compact: box.maxWidth < 480),
-                  ),
-                  Expanded(
-                    child: _stat(Icons.checklist, '$_totalQuestions', 'Questions',
-                        compact: box.maxWidth < 480),
+                    child: _stat(
+                      Icons.assignment_outlined,
+                      '${_sections.length}',
+                      'Sections',
+                      compact: box.maxWidth < 480,
+                    ),
                   ),
                   Expanded(
                     child: _stat(
-                        Icons.check, _trim(_totalPoints), 'Total points',
-                        compact: box.maxWidth < 480),
+                      Icons.checklist,
+                      '$_totalQuestions',
+                      'Questions',
+                      compact: box.maxWidth < 480,
+                    ),
+                  ),
+                  Expanded(
+                    child: _stat(
+                      Icons.check,
+                      _trim(_totalPoints),
+                      'Total points',
+                      compact: box.maxWidth < 480,
+                    ),
                   ),
                 ],
               ),
@@ -1772,8 +2195,12 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     );
   }
 
-  Widget _stat(IconData icon, String value, String label,
-      {bool compact = false}) {
+  Widget _stat(
+    IconData icon,
+    String value,
+    String label, {
+    bool compact = false,
+  }) {
     final tile = compact ? 30.0 : 36.0;
     return Row(
       children: [
@@ -1792,17 +2219,21 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(value,
-                  style: TextStyle(
-                      fontSize: compact ? 16 : 18,
-                      fontWeight: FontWeight.w800,
-                      color: _Brand.ink)),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: compact ? 16 : 18,
+                  fontWeight: FontWeight.w800,
+                  color: _Brand.ink,
+                ),
+              ),
               FittedBox(
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.centerLeft,
-                child: Text(label,
-                    style:
-                        const TextStyle(fontSize: 11.5, color: CmColors.slate)),
+                child: Text(
+                  label,
+                  style: const TextStyle(fontSize: 11.5, color: CmColors.slate),
+                ),
               ),
             ],
           ),
@@ -1819,14 +2250,19 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
       children: [
         Row(
           children: [
-            const Text('Exam Sections',
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: _Brand.ink)),
+            const Text(
+              'Exam Sections',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: _Brand.ink,
+              ),
+            ),
             const SizedBox(width: 6),
-            Text('(${_sections.length})',
-                style: const TextStyle(fontSize: 12.5, color: CmColors.slate)),
+            Text(
+              '(${_sections.length})',
+              style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
+            ),
             const Spacer(),
             FilledButton.icon(
               style: _amberStyle,
@@ -1841,15 +2277,20 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
           const _Card(
             padding: 36,
             child: Center(
-              child: Text('No sections yet',
-                  style: TextStyle(fontSize: 13, color: CmColors.slate)),
+              child: Text(
+                'No sections yet',
+                style: TextStyle(fontSize: 13, color: CmColors.slate),
+              ),
             ),
           )
         else
-          for (var i = 0; i < _sections.length; i++) _sectionCard(_sections[i], i),
+          for (var i = 0; i < _sections.length; i++)
+            _sectionCard(_sections[i], i),
         const SizedBox(height: 4),
-        const Text('Changes updated for this session',
-            style: TextStyle(fontSize: 11.5, color: CmColors.slate)),
+        const Text(
+          'Changes updated for this session',
+          style: TextStyle(fontSize: 11.5, color: CmColors.slate),
+        ),
       ],
     );
   }
@@ -1884,18 +2325,23 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(name,
-                              style: const TextStyle(
-                                  fontSize: 14.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: _Brand.ink)),
+                          Text(
+                            name,
+                            style: const TextStyle(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w700,
+                              color: _Brand.ink,
+                            ),
+                          ),
                           const SizedBox(height: 2),
                           Text(
                             '${_typeLabel(type)} · '
                             '${_fixed2(_num(section['default_points']))} pts/item · '
                             '${qs.length} ${qs.length == 1 ? 'question' : 'questions'}',
                             style: const TextStyle(
-                                fontSize: 11.5, color: CmColors.slate),
+                              fontSize: 11.5,
+                              color: CmColors.slate,
+                            ),
                           ),
                         ],
                       ),
@@ -1914,8 +2360,9 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                       iconSize: 18,
                       color: CmColors.slate,
                       icon: const Icon(Icons.delete_outline),
-                      onPressed:
-                          sid == null ? null : () => _deleteSection(sid, name),
+                      onPressed: sid == null
+                          ? null
+                          : () => _deleteSection(sid, name),
                     ),
                     Icon(
                       expanded
@@ -1942,12 +2389,19 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                         child: Center(
                           child: Column(
                             children: [
-                              Icon(Icons.description_outlined,
-                                  size: 22, color: CmColors.slate),
+                              Icon(
+                                Icons.description_outlined,
+                                size: 22,
+                                color: CmColors.slate,
+                              ),
                               SizedBox(height: 6),
-                              Text('No questions yet',
-                                  style: TextStyle(
-                                      fontSize: 12.5, color: CmColors.slate)),
+                              Text(
+                                'No questions yet',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: CmColors.slate,
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -1960,16 +2414,20 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                         number: qs.length + i + 1,
                         type: type,
                         onDiscard: () => _discardDraft(sid, drafts[i]),
-                        onSave: (text, choices, correct) =>
-                            _saveQuestion(sid, drafts[i], text, choices, correct),
+                        onSave: (text, choices, correct) => _saveQuestion(
+                          sid,
+                          drafts[i],
+                          text,
+                          choices,
+                          correct,
+                        ),
                       ),
                     const SizedBox(height: 4),
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
                         style: _outlineStyle.copyWith(
-                          backgroundColor:
-                              WidgetStatePropertyAll(CmColors.bg),
+                          backgroundColor: WidgetStatePropertyAll(CmColors.bg),
                         ),
                         onPressed: () => _addDraft(sid),
                         icon: const Icon(Icons.add, size: 16),
@@ -2016,7 +2474,8 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
       final value = (choices is List && idx < choices.length)
           ? choices[idx].toString()
           : '';
-      final isCorrect = correct.toUpperCase() == letter ||
+      final isCorrect =
+          correct.toUpperCase() == letter ||
           (correct.isNotEmpty && correct == value);
       return Row(
         children: [
@@ -2034,14 +2493,19 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         children: [
           Row(
             children: [
-              Text('Question $number',
-                  style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: _Brand.ink)),
+              Text(
+                'Question $number',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: _Brand.ink,
+                ),
+              ),
               const SizedBox(width: 8),
-              Text('$points ${points == '1' ? 'pt' : 'pts'}',
-                  style: const TextStyle(fontSize: 11.5, color: CmColors.slate)),
+              Text(
+                '$points ${points == '1' ? 'pt' : 'pts'}',
+                style: const TextStyle(fontSize: 11.5, color: CmColors.slate),
+              ),
               const Spacer(),
               IconButton(
                 tooltip: 'Edit question',
@@ -2059,8 +2523,9 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 iconSize: 17,
                 color: CmColors.slate,
                 icon: const Icon(Icons.delete_outline),
-                onPressed:
-                    qid == null ? null : () => _deleteQuestion(qid, number),
+                onPressed: qid == null
+                    ? null
+                    : () => _deleteQuestion(qid, number),
               ),
             ],
           ),
@@ -2068,33 +2533,40 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
           _ReadBox(text),
           if (type == 'multiple_choice' && choices is List) ...[
             const SizedBox(height: 10),
-            LayoutBuilder(builder: (context, box) {
-              if (box.maxWidth >= 480) {
+            LayoutBuilder(
+              builder: (context, box) {
+                if (box.maxWidth >= 480) {
+                  return Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(child: choiceBox(0)),
+                          const SizedBox(width: 12),
+                          Expanded(child: choiceBox(1)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(child: choiceBox(2)),
+                          const SizedBox(width: 12),
+                          Expanded(child: choiceBox(3)),
+                        ],
+                      ),
+                    ],
+                  );
+                }
                 return Column(
                   children: [
-                    Row(children: [
-                      Expanded(child: choiceBox(0)),
-                      const SizedBox(width: 12),
-                      Expanded(child: choiceBox(1)),
-                    ]),
-                    const SizedBox(height: 8),
-                    Row(children: [
-                      Expanded(child: choiceBox(2)),
-                      const SizedBox(width: 12),
-                      Expanded(child: choiceBox(3)),
-                    ]),
+                    for (var k = 0; k < 4; k++)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: choiceBox(k),
+                      ),
                   ],
                 );
-              }
-              return Column(
-                children: [
-                  for (var k = 0; k < 4; k++)
-                    Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: choiceBox(k)),
-                ],
-              );
-            }),
+              },
+            ),
           ],
           const SizedBox(height: 10),
           Wrap(
@@ -2107,11 +2579,14 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 children: [
                   Icon(Icons.check, size: 16, color: CmColors.green),
                   const SizedBox(width: 6),
-                  Text('Correct answer',
-                      style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: CmColors.green)),
+                  Text(
+                    'Correct answer',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: CmColors.green,
+                    ),
+                  ),
                 ],
               ),
               SizedBox(width: 170, child: _ReadBox(correct)),
@@ -2125,16 +2600,19 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 if (answers.isNotEmpty)
-                  const Text('Also accepted:',
-                      style: TextStyle(fontSize: 12, color: CmColors.slate)),
+                  const Text(
+                    'Also accepted:',
+                    style: TextStyle(fontSize: 12, color: CmColors.slate),
+                  ),
                 for (final a in answers)
                   Chip(
                     visualDensity: VisualDensity.compact,
                     backgroundColor: CmColors.bg,
                     side: const BorderSide(color: CmColors.line),
-                    label: Text(a['answer']?.toString() ?? '',
-                        style: const TextStyle(
-                            fontSize: 12, color: _Brand.ink)),
+                    label: Text(
+                      a['answer']?.toString() ?? '',
+                      style: const TextStyle(fontSize: 12, color: _Brand.ink),
+                    ),
                   ),
                 TextButton.icon(
                   onPressed: () => _addAcceptableAnswer(qid),
@@ -2143,7 +2621,9 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                   style: TextButton.styleFrom(
                     foregroundColor: _Brand.ink,
                     textStyle: const TextStyle(
-                        fontSize: 12.5, fontWeight: FontWeight.w600),
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
@@ -2163,11 +2643,14 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Exam Papers',
-            style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: _Brand.ink)),
+        const Text(
+          'Exam Papers',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            color: _Brand.ink,
+          ),
+        ),
         const SizedBox(height: 12),
         _paperCard(
           icon: Icons.description_outlined,
@@ -2185,15 +2668,23 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
             padding: EdgeInsets.symmetric(vertical: 16),
             child: Divider(height: 1, color: CmColors.line),
           ),
-          const Text('Instructions',
-              style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w800,
-                  color: _Brand.ink)),
+          const Text(
+            'Instructions',
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w800,
+              color: _Brand.ink,
+            ),
+          ),
           const SizedBox(height: 6),
-          Text(instructions,
-              style: const TextStyle(
-                  fontSize: 12.5, height: 1.4, color: CmColors.slate)),
+          Text(
+            instructions,
+            style: const TextStyle(
+              fontSize: 12.5,
+              height: 1.4,
+              color: CmColors.slate,
+            ),
+          ),
         ],
       ],
     );
@@ -2224,13 +2715,18 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title,
-                      style: const TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w700,
-                          color: _Brand.ink)),
-                  const Text('A4 · PDF document',
-                      style: TextStyle(fontSize: 11.5, color: CmColors.slate)),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                      color: _Brand.ink,
+                    ),
+                  ),
+                  const Text(
+                    'A4 · PDF document',
+                    style: TextStyle(fontSize: 11.5, color: CmColors.slate),
+                  ),
                 ],
               ),
             ],
@@ -2245,9 +2741,12 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 minimumSize: const Size(0, 38),
                 side: const BorderSide(color: CmColors.line),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-                textStyle:
-                    const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                textStyle: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
               ),
               onPressed: () => _showPreview(answerSheet),
               icon: const Icon(Icons.visibility_outlined, size: 16),
@@ -2297,9 +2796,7 @@ class _ReadBox extends StatelessWidget {
       decoration: BoxDecoration(
         color: highlight ? CmColors.green.withValues(alpha: 0.08) : CmColors.bg,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: highlight ? CmColors.green : CmColors.line,
-        ),
+        border: Border.all(color: highlight ? CmColors.green : CmColors.line),
       ),
       child: Text(
         text.isEmpty ? '—' : text,
@@ -2330,8 +2827,12 @@ class _DraftQuestion extends StatefulWidget {
   /// A saved question to edit; null for a brand-new question.
   final _Json? initial;
   final String saveLabel;
-  final Future<void> Function(String text, List<String>? choices, String correct)
-      onSave;
+  final Future<void> Function(
+    String text,
+    List<String>? choices,
+    String correct,
+  )
+  onSave;
   final VoidCallback onDiscard;
 
   @override
@@ -2341,8 +2842,10 @@ class _DraftQuestion extends StatefulWidget {
 class _DraftQuestionState extends State<_DraftQuestion> {
   final _text = TextEditingController();
   final _answer = TextEditingController();
-  final List<TextEditingController> _choices =
-      List.generate(4, (_) => TextEditingController());
+  final List<TextEditingController> _choices = List.generate(
+    4,
+    (_) => TextEditingController(),
+  );
 
   String? _picked;
   bool _saving = false;
@@ -2402,8 +2905,9 @@ class _DraftQuestionState extends State<_DraftQuestion> {
       }
     }
 
-    final correct =
-        widget.type == 'identification' ? _answer.text.trim() : (_picked ?? '');
+    final correct = widget.type == 'identification'
+        ? _answer.text.trim()
+        : (_picked ?? '');
     if (correct.isEmpty) {
       setState(() => _error = 'Correct answer is required.');
       return;
@@ -2480,11 +2984,14 @@ class _DraftQuestionState extends State<_DraftQuestion> {
         children: [
           Row(
             children: [
-              Text('Question ${widget.number}',
-                  style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: _Brand.ink)),
+              Text(
+                'Question ${widget.number}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: _Brand.ink,
+                ),
+              ),
               const Spacer(),
               IconButton(
                 tooltip: widget.initial == null
@@ -2493,9 +3000,9 @@ class _DraftQuestionState extends State<_DraftQuestion> {
                 visualDensity: VisualDensity.compact,
                 iconSize: 17,
                 color: CmColors.slate,
-                icon: Icon(widget.initial == null
-                    ? Icons.delete_outline
-                    : Icons.close),
+                icon: Icon(
+                  widget.initial == null ? Icons.delete_outline : Icons.close,
+                ),
                 onPressed: _saving ? null : widget.onDiscard,
               ),
             ],
@@ -2511,33 +3018,40 @@ class _DraftQuestionState extends State<_DraftQuestion> {
           ),
           if (widget.type == 'multiple_choice') ...[
             const SizedBox(height: 10),
-            LayoutBuilder(builder: (context, box) {
-              if (box.maxWidth >= 480) {
+            LayoutBuilder(
+              builder: (context, box) {
+                if (box.maxWidth >= 480) {
+                  return Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(child: _choiceField(0)),
+                          const SizedBox(width: 12),
+                          Expanded(child: _choiceField(1)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(child: _choiceField(2)),
+                          const SizedBox(width: 12),
+                          Expanded(child: _choiceField(3)),
+                        ],
+                      ),
+                    ],
+                  );
+                }
                 return Column(
                   children: [
-                    Row(children: [
-                      Expanded(child: _choiceField(0)),
-                      const SizedBox(width: 12),
-                      Expanded(child: _choiceField(1)),
-                    ]),
-                    const SizedBox(height: 8),
-                    Row(children: [
-                      Expanded(child: _choiceField(2)),
-                      const SizedBox(width: 12),
-                      Expanded(child: _choiceField(3)),
-                    ]),
+                    for (var k = 0; k < 4; k++)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: _choiceField(k),
+                      ),
                   ],
                 );
-              }
-              return Column(
-                children: [
-                  for (var k = 0; k < 4; k++)
-                    Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: _choiceField(k)),
-                ],
-              );
-            }),
+              },
+            ),
           ],
           const SizedBox(height: 10),
           Wrap(
@@ -2550,11 +3064,14 @@ class _DraftQuestionState extends State<_DraftQuestion> {
                 children: [
                   Icon(Icons.check, size: 16, color: CmColors.green),
                   const SizedBox(width: 6),
-                  Text('Correct answer',
-                      style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: CmColors.green)),
+                  Text(
+                    'Correct answer',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: CmColors.green,
+                    ),
+                  ),
                 ],
               ),
               SizedBox(width: 170, child: _correctControl()),
@@ -2621,20 +3138,23 @@ class _PaperPreviewDialogState extends State<_PaperPreviewDialog> {
         decoration: BoxDecoration(
           color: selected ? Colors.white : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
-          border:
-              Border.all(color: selected ? CmColors.line : Colors.transparent),
+          border: Border.all(
+            color: selected ? CmColors.line : Colors.transparent,
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon,
-                size: 15, color: selected ? _Brand.ink : CmColors.slate),
+            Icon(icon, size: 15, color: selected ? _Brand.ink : CmColors.slate),
             const SizedBox(width: 6),
-            Text(label,
-                style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    color: selected ? _Brand.ink : CmColors.slate)),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: selected ? _Brand.ink : CmColors.slate,
+              ),
+            ),
           ],
         ),
       ),
@@ -2666,18 +3186,23 @@ class _PaperPreviewDialogState extends State<_PaperPreviewDialog> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Paper preview',
-                            style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                                color: _Brand.ink)),
+                        const Text(
+                          'Paper preview',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: _Brand.ink,
+                          ),
+                        ),
                         const SizedBox(height: 2),
                         Text(
                           '$q ${q == 1 ? 'question' : 'questions'} · '
                           '${_trim(widget.totalPoints)} '
                           '${widget.totalPoints == 1 ? 'point' : 'points'}',
                           style: const TextStyle(
-                              fontSize: 12, color: CmColors.slate),
+                            fontSize: 12,
+                            color: CmColors.slate,
+                          ),
                         ),
                       ],
                     ),
@@ -2706,35 +3231,46 @@ class _PaperPreviewDialogState extends State<_PaperPreviewDialog> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        _tab('Question paper', Icons.description_outlined,
-                            !_answerSheet,
-                            () => setState(() => _answerSheet = false)),
-                        _tab('Answer sheet', Icons.document_scanner_outlined,
-                            _answerSheet,
-                            () => setState(() => _answerSheet = true)),
+                        _tab(
+                          'Question paper',
+                          Icons.description_outlined,
+                          !_answerSheet,
+                          () => setState(() => _answerSheet = false),
+                        ),
+                        _tab(
+                          'Answer sheet',
+                          Icons.document_scanner_outlined,
+                          _answerSheet,
+                          () => setState(() => _answerSheet = true),
+                        ),
                       ],
                     ),
                   ),
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                  IconButton(
-                    tooltip: 'Print',
-                    style: IconButton.styleFrom(
-                        side: const BorderSide(color: CmColors.line)),
-                    icon: const Icon(Icons.print_outlined, size: 18),
-                    color: _Brand.ink,
-                    onPressed: () => widget.onPrint(_answerSheet),
-                  ),
-                  const SizedBox(width: 6),
-                  IconButton(
-                    tooltip: 'Download',
-                    style: IconButton.styleFrom(
-                        side: const BorderSide(color: CmColors.line)),
-                    icon: const Icon(Icons.file_download_outlined, size: 18),
-                    color: _Brand.ink,
-                    onPressed: () => widget.onDownload(_answerSheet),
-                  ),
+                      IconButton(
+                        tooltip: 'Print',
+                        style: IconButton.styleFrom(
+                          side: const BorderSide(color: CmColors.line),
+                        ),
+                        icon: const Icon(Icons.print_outlined, size: 18),
+                        color: _Brand.ink,
+                        onPressed: () => widget.onPrint(_answerSheet),
+                      ),
+                      const SizedBox(width: 6),
+                      IconButton(
+                        tooltip: 'Download',
+                        style: IconButton.styleFrom(
+                          side: const BorderSide(color: CmColors.line),
+                        ),
+                        icon: const Icon(
+                          Icons.file_download_outlined,
+                          size: 18,
+                        ),
+                        color: _Brand.ink,
+                        onPressed: () => widget.onDownload(_answerSheet),
+                      ),
                     ],
                   ),
                 ],
@@ -2760,9 +3296,11 @@ class _PaperPreviewDialogState extends State<_PaperPreviewDialog> {
                       onError: (context, error) => Center(
                         child: Padding(
                           padding: const EdgeInsets.all(24),
-                          child: Text(_err(error),
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(color: _Brand.ink)),
+                          child: Text(
+                            _err(error),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: _Brand.ink),
+                          ),
                         ),
                       ),
                     ),

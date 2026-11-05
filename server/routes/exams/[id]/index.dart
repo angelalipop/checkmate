@@ -101,6 +101,29 @@ Future<Response> _patch(RequestContext context, int examId) async {
       );
     }
 
+    // Optional list of section (class) ids the exam is given to.
+    List<int>? classIds;
+    final rawClassIds = decoded['class_ids'];
+    if (rawClassIds != null) {
+      if (rawClassIds is! List) {
+        return Response.json(
+          statusCode: 400,
+          body: {'message': 'class_ids must be a list'},
+        );
+      }
+      classIds = <int>[];
+      for (final value in rawClassIds) {
+        final n = int.tryParse(value.toString());
+        if (n == null) {
+          return Response.json(
+            statusCode: 400,
+            body: {'message': 'Invalid section id'},
+          );
+        }
+        classIds.add(n);
+      }
+    }
+
     final exam = await ExamService.update(
       examId,
       userId: userId,
@@ -109,21 +132,26 @@ Future<Response> _patch(RequestContext context, int examId) async {
       description: decoded['description']?.toString(),
       instructions: decoded['instructions']?.toString(),
       classId: int.tryParse(decoded['class_id']?.toString() ?? ''),
+      classIds: classIds,
+      assessmentType: decoded['assessment_type']?.toString(),
     );
 
     if (exam == null) {
       return Response.json(
         statusCode: 409,
         body: {
-          'message':
-              'Exam not found or update not permitted. A class can only be '
-              'changed on a draft exam that has no attempts.',
+          'message': 'Exam not found or you do not have permission to edit it.',
         },
       );
     }
 
     return Response.json(
       body: {'status': 'ok', 'exam': exam},
+    );
+  } on ExamValidationException catch (e) {
+    return Response.json(
+      statusCode: 400,
+      body: {'message': e.message},
     );
   } catch (e) {
     // ignore: avoid_print

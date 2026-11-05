@@ -25,7 +25,12 @@ class ClassService {
           u.name AS teacher_name,
           c.created_at,
           c.year_level,
-          s.academic_subject_id
+          s.academic_subject_id,
+          (
+            SELECT COUNT(DISTINCT LOWER(BTRIM(st.student_number)))
+            FROM students st
+            WHERE st.class_id = c.id
+          ) AS student_count
         FROM classes c
         JOIN subjects s ON s.id = c.subject_id
         LEFT JOIN users u ON u.id = c.teacher_id
@@ -54,6 +59,8 @@ class ClassService {
         },
         'created_at': row[9].toString(),
         'year_level': row[10],
+        // Number of distinct students enrolled in this section.
+        'student_count': row[12],
       };
     }).toList();
   }

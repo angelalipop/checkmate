@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/auth_storage.dart';
 import '../services/my_subjects_api_service.dart';
 import 'exams_tab.dart';
+import 'teacher_dashboard.dart' show TeacherPage, TeacherShell;
 
 // =============================================================
 // CheckMate — My Subjects (Teacher Portal)
@@ -708,11 +709,19 @@ class _ErrorBox extends StatelessWidget {
 }
 
 class _EmptyBox extends StatelessWidget {
-  const _EmptyBox({required this.icon, required this.title, this.message});
+  const _EmptyBox({
+    required this.icon,
+    required this.title,
+    this.message,
+    this.action,
+  });
 
   final IconData icon;
   final String title;
   final String? message;
+
+  /// Optional button shown under the message.
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -745,7 +754,42 @@ class _EmptyBox extends StatelessWidget {
               style: const TextStyle(fontSize: 13, color: _slate),
             ),
           ],
+          if (action != null) ...[
+            const SizedBox(height: 16),
+            action!,
+          ],
         ],
+      ),
+    );
+  }
+}
+
+/// Dark pill button (same look as the Students tab) that switches the
+/// Teacher Portal to its Students tab.
+class _AddStudentsButton extends StatelessWidget {
+  const _AddStudentsButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton.icon(
+      onPressed: () {
+        // Uses the portal shell's own navigation, so the sidebar and
+        // bottom bar behave exactly as if Students had been tapped.
+        context
+            .findAncestorWidgetOfExactType<TeacherShell>()
+            ?.onSelect(TeacherPage.students);
+      },
+      style: FilledButton.styleFrom(
+        backgroundColor: _navy,
+        foregroundColor: Colors.white,
+        minimumSize: const Size(0, 44),
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        shape: const StadiumBorder(),
+      ),
+      icon: const Icon(Icons.person_add_alt_1_outlined, size: 20),
+      label: const Text(
+        'Add Students',
+        style: TextStyle(fontWeight: FontWeight.w500),
       ),
     );
   }
@@ -1863,6 +1907,7 @@ class _SectionPageState extends State<_SectionPage> {
         _EmptyBox(
           icon: Icons.people_outline,
           title: 'No students enrolled in this section yet.',
+          action: _AddStudentsButton(),
         ),
       ];
     }

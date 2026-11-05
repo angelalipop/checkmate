@@ -5,10 +5,17 @@ import 'package:http/http.dart' as http;
 
 class ApiService {
   static String get baseUrl {
+    const configuredUrl = String.fromEnvironment('API_BASE_URL');
+
+    if (configuredUrl.isNotEmpty) {
+      return configuredUrl;
+    }
+
     if (kIsWeb) {
       return 'http://localhost:8080';
     }
-    // Physical iPhone → Mac running the CheckMate backend.
+
+    // Default Android emulator → Windows host.
     return 'http://10.0.2.2:8080';
   }
 
@@ -466,8 +473,9 @@ class ApiService {
     if (response.statusCode != 200) {
       final data = _decodeBody(response);
       throw Exception(
-        data['message']?.toString() ?? 'Failed to delete section.'
-        '(HTTP ${response.statusCode}): ${response.body}',
+        data['message']?.toString() ??
+            'Failed to delete section.'
+                '(HTTP ${response.statusCode}): ${response.body}',
       );
     }
   }
@@ -495,8 +503,12 @@ class ApiService {
   static Future<Map<String, dynamic>> updateExam({
     required String token,
     required int examId,
-    required int classId,
     required String title,
+    int? classId,
+    // Sections (class ids) the exam is given to. Omit to leave them as is.
+    List<int>? classIds,
+    // quiz | long_quiz | prelim | midterm | prefinal | final
+    String? assessmentType,
     String? description,
     String? instructions,
   }) async {
@@ -504,7 +516,9 @@ class ApiService {
       Uri.parse('$baseUrl/exams/$examId'),
       headers: _authHeaders(token),
       body: jsonEncode({
-        'class_id': classId,
+        'class_id': ?classId,
+        'class_ids': ?classIds,
+        'assessment_type': ?assessmentType,
         'title': title,
         'description': description,
         'instructions': instructions,
@@ -531,10 +545,7 @@ class ApiService {
     final response = await http.patch(
       Uri.parse('$baseUrl/exam_sections/$sectionId'),
       headers: _authHeaders(token),
-      body: jsonEncode({
-        'name': name,
-        'default_points': defaultPoints,
-      }),
+      body: jsonEncode({'name': name, 'default_points': defaultPoints}),
     );
 
     final data = _decodeBody(response);
