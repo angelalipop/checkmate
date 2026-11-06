@@ -50,11 +50,10 @@ flutter:
     - assets/transparent_logo1.png
     - assets/logo_circle.png
     - assets/logo_circle1.png
+    - assets/Systems_Technology_Institute.png
 
 hooks:
   user_defines:
     dartcv4:
       ios:
         deployment_target: "15.0"
-
-

@@ -1,12 +1,15 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 
 import '../services/answer_sheet_pdf_service.dart';
 import '../services/api_service.dart';
+import '../services/assessment_validator.dart';
 import '../services/auth_storage.dart';
+import '../services/question_paper_import_service.dart';
 import '../services/question_paper_pdf_service.dart';
 import 'login_screen.dart' show CmColors;
 
@@ -21,9 +24,7 @@ import 'login_screen.dart' show CmColors;
 // answer sheet opens a popup (no separate preview screens).
 //
 // Existing ApiService calls are reused. Editing uses the new PATCH
-// endpoints (updateExam / updateExamSection / updateQuestion). The server
-// only allows editing sections and questions of a DRAFT exam that has no
-// attempts, and only by the class owner (or an admin).
+// endpoints (updateExam / updateExamSection / updateQuestion).
 // =============================================================
 
 typedef _Json = Map<String, dynamic>;
@@ -42,7 +43,7 @@ class _Brand {
   /// Light blue-grey: field and button outlines, text on dark.
   static const Color mist = Color(0xFFCFD8E5);
 
-  /// Accent: Add section, draft status.
+  /// Accent: Add section, draft status, Save changes.
   static const Color amber = Color(0xFFF7A224);
 }
 
@@ -111,6 +112,36 @@ String _classLabel(dynamic cls) {
   return code.isEmpty ? '$section - $name' : '$section - $code - $name';
 }
 
+String _examSubjectAndSectionsLabel(_Json exam) {
+  final cls = exam['class'];
+  final subject = cls is Map ? cls['subject'] : null;
+  final code = subject is Map ? (subject['code']?.toString().trim() ?? '') : '';
+  final name = subject is Map ? (subject['name']?.toString().trim() ?? '') : '';
+  final subjectPart = [code, name].where((s) => s.isNotEmpty).join(' · ');
+
+  final sectionsList = <String>[];
+  if (exam['sections'] is List) {
+    for (final s in exam['sections'] as List) {
+      final clean = s?.toString().trim() ?? '';
+      if (clean.isNotEmpty && !sectionsList.contains(clean)) {
+        sectionsList.add(clean);
+      }
+    }
+  }
+  if (sectionsList.isEmpty && cls is Map) {
+    final sec = cls['section']?.toString().trim() ?? '';
+    if (sec.isNotEmpty) sectionsList.add(sec);
+  }
+
+  final sectionPart = sectionsList.join(', ');
+  if (subjectPart.isNotEmpty && sectionPart.isNotEmpty) {
+    return '$subjectPart · $sectionPart';
+  }
+  if (subjectPart.isNotEmpty) return subjectPart;
+  if (sectionPart.isNotEmpty) return sectionPart;
+  return _classLabel(cls);
+}
+
 String _statusLabel(String s) {
   switch (s.toLowerCase()) {
     case 'published':
@@ -160,6 +191,27 @@ InputDecoration _deco(String hint, {Widget? prefix}) => InputDecoration(
   disabledBorder: _ob(_Brand.mist),
   focusedBorder: _ob(_Brand.ink, 1.5),
 );
+
+InputDecoration _floatingDeco(
+  String label, {
+  String? hint,
+  Widget? suffixIcon,
+  bool locked = false,
+}) =>
+    _deco(hint ?? '').copyWith(
+      labelText: label,
+      floatingLabelBehavior: FloatingLabelBehavior.always,
+      labelStyle: const TextStyle(
+        color: CmColors.slate,
+        fontSize: 13,
+      ),
+      floatingLabelStyle: const TextStyle(
+        color: CmColors.slate,
+        fontSize: 13,
+      ),
+      fillColor: locked ? const Color(0xFFF1F5F9) : Colors.white,
+      suffixIcon: suffixIcon,
+    );
 
 const TextStyle _inputText = TextStyle(fontSize: 13.5, color: _Brand.ink);
 
@@ -455,309 +507,531 @@ Future<bool> _confirm(
 }
 
 // ---------------------------------------------------------------
-// Create / edit exam dialog
-// ---------------------------------------------------------------
-
-Future<bool?> _showExamDetailsDialog(
-  BuildContext context, {
-  required List<_Json> classes,
-  _Json? exam,
-  int? initialClassId,
-}) async {
-  final editing = exam != null;
-  final titleC = TextEditingController(text: exam?['title']?.toString() ?? '');
-  final descC = TextEditingController(
-    text: exam?['description']?.toString() ?? '',
-  );
-  final instC = TextEditingController(
-    text: exam?['instructions']?.toString() ?? '',
-  );
-
-  int? classId = initialClassId ?? _examClassId(exam);
-  if (classId != null && !classes.any((c) => _id(c['id']) == classId)) {
-    classId = null;
-  }
-  bool saving = false;
-  String? error;
-
-  final result = await showDialog<bool>(
-    context: context,
-    builder: (dialogContext) => StatefulBuilder(
-      builder: (dialogContext, setS) {
-        Future<void> save() async {
-          final title = titleC.text.trim();
-          if (classId == null) {
-            setS(() => error = 'Please select a class.');
-            return;
-          }
-          if (title.isEmpty) {
-            setS(() => error = 'Exam title is required.');
-            return;
-          }
-          setS(() {
-            saving = true;
-            error = null;
-          });
-          try {
-            final token = await _token();
-            final d = descC.text.trim();
-            final i = instC.text.trim();
-            if (editing) {
-              final examId = _id(exam['id']);
-              if (examId == null) throw Exception('Invalid exam ID.');
-              await ApiService.updateExam(
-                token: token,
-                examId: examId,
-                classId: classId!,
-                title: title,
-                description: d.isEmpty ? null : d,
-                instructions: i.isEmpty ? null : i,
-              );
-            } else {
-              await ApiService.createExam(
-                token: token,
-                classId: classId!,
-                title: title,
-                description: d.isEmpty ? null : d,
-                instructions: i.isEmpty ? null : i,
-                status: 'draft',
-              );
-            }
-            if (dialogContext.mounted) Navigator.pop(dialogContext, true);
-          } catch (e) {
-            setS(() {
-              saving = false;
-              error = _err(e);
-            });
-          }
-        }
-
-        return _CmDialog(
-          title: editing ? 'Edit exam details' : 'Create exam',
-          subtitle: editing
-              ? 'Examination information'
-              : 'New examination · Draft',
-          actions: [
-            OutlinedButton(
-              style: _outlineStyle,
-              onPressed: saving
-                  ? null
-                  : () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              style: _primaryStyle,
-              onPressed: saving ? null : save,
-              child: saving
-                  ? const _Spin()
-                  : Text(editing ? 'Save changes' : 'Create exam'),
-            ),
-          ],
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _Field(
-                'Class',
-                DropdownButtonFormField<int>(
-                  initialValue: classId,
-                  isExpanded: true,
-                  style: _inputText,
-                  decoration: _deco('Select class'),
-                  items: [
-                    for (final c in classes)
-                      if (_id(c['id']) != null)
-                        DropdownMenuItem<int>(
-                          value: _id(c['id']),
-                          child: Text(
-                            _classLabel(c),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                  ],
-                  onChanged: saving ? null : (v) => setS(() => classId = v),
-                ),
-              ),
-              _Field(
-                'Exam title',
-                TextField(
-                  controller: titleC,
-                  enabled: !saving,
-                  style: _inputText,
-                  decoration: _deco('e.g. Computer Programming Midterm'),
-                ),
-              ),
-              _Field(
-                'Description',
-                TextField(
-                  controller: descC,
-                  enabled: !saving,
-                  style: _inputText,
-                  decoration: _deco('e.g. Midterm'),
-                ),
-              ),
-              _Field(
-                'Instructions',
-                TextField(
-                  controller: instC,
-                  enabled: !saving,
-                  minLines: 3,
-                  maxLines: 5,
-                  style: _inputText,
-                  decoration: _deco('Enter examination instructions'),
-                ),
-              ),
-              if (error != null) _ErrorText(error!),
-            ],
-          ),
-        );
-      },
-    ),
-  );
-
-  titleC.dispose();
-  descC.dispose();
-  instC.dispose();
-  return result;
-}
-
-// ---------------------------------------------------------------
-// Edit exam details dialog (title, type, sections, description, instructions)
+// Subject grouping & Date/Time formatting helpers for Exam Details
 // ---------------------------------------------------------------
 
 const Map<String, String> _kAssessmentTypes = {
   'quiz': 'Quiz',
+  'short_quiz': 'Short Quiz',
   'long_quiz': 'Long Quiz',
   'prelim': 'Prelim',
   'midterm': 'Midterm',
-  'prefinal': 'Prefinal',
-  'final': 'Final',
+  'prefinal': 'Prefinals',
+  'final': 'Finals',
+  'other': 'Other',
 };
 
-/// The sections (classes) that can share one exam: same subject, school year,
-/// semester and year level as [current] (the same grouping My Subjects uses).
-List<_Json> _siblingSections(List<_Json> classes, _Json? current) {
-  if (current == null) return [];
+const List<String> _kMonthNames = <String>[
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
 
-  String key(_Json c) {
-    final s = c['subject'];
-    final subjectId = s is Map ? s['id'] : null;
-    return '$subjectId|${c['school_year']}|${c['semester']}|${c['year_level']}';
+String _formatFullDate(DateTime d) {
+  return '${_kMonthNames[d.month - 1]} ${d.day}, ${d.year}';
+}
+
+DateTime? _tryParseFullDate(String raw) {
+  final clean = raw.trim();
+  if (clean.isEmpty) return null;
+  final iso = DateTime.tryParse(clean);
+  if (iso != null) return iso;
+
+  for (var m = 0; m < _kMonthNames.length; m++) {
+    final monthName = _kMonthNames[m];
+    final shortName = monthName.substring(0, 3);
+    final match = RegExp(
+      '^($monthName|$shortName)[a-z]*\\.?\\s+(\\d{1,2}),?\\s+(\\d{4})\$',
+      caseSensitive: false,
+    ).firstMatch(clean);
+    if (match != null) {
+      final day = int.tryParse(match.group(2)!);
+      final year = int.tryParse(match.group(3)!);
+      if (day != null && year != null) {
+        return DateTime(year, m + 1, day);
+      }
+    }
+  }
+  return null;
+}
+
+String _formatTimeOfDay(TimeOfDay t) {
+  final hour12 = t.hourOfPeriod == 0 ? 12 : t.hourOfPeriod;
+  final minStr = t.minute.toString().padLeft(2, '0');
+  final period = t.period == DayPeriod.am ? 'AM' : 'PM';
+  return '$hour12:$minStr $period';
+}
+
+TimeOfDay? _tryParseTimeOfDay(String raw) {
+  final clean = raw.trim();
+  if (clean.isEmpty) return null;
+  final match = RegExp(
+    r'^(\d{1,2}):(\d{2})\s*(AM|PM)?$',
+    caseSensitive: false,
+  ).firstMatch(clean);
+  if (match == null) return null;
+  var hour = int.tryParse(match.group(1)!) ?? 0;
+  final minute = int.tryParse(match.group(2)!) ?? 0;
+  final mer = match.group(3)?.toUpperCase();
+  if (mer == 'PM' && hour < 12) hour += 12;
+  if (mer == 'AM' && hour == 12) hour = 0;
+  return TimeOfDay(hour: hour.clamp(0, 23), minute: minute.clamp(0, 59));
+}
+
+class _SubjectOptionGroup {
+  _SubjectOptionGroup({
+    required this.key,
+    required this.subjectId,
+    required this.code,
+    required this.name,
+    required this.schoolYear,
+    required this.semester,
+    required this.sections,
+  });
+
+  final String key;
+  final int? subjectId;
+  final String code;
+  final String name;
+  final String schoolYear;
+  final String semester;
+  final List<_Json> sections;
+
+  String get displayLabel {
+    final joined = [code, name].where((e) => e.isNotEmpty).join(' · ');
+    return joined.isEmpty ? 'Subject' : joined;
   }
 
-  final k = key(current);
-  final out = classes.where((c) => key(c) == k).toList()
-    ..sort(
+  String get formattedSchoolYear =>
+      AssessmentValidator.formatSchoolYear(schoolYear);
+
+  String get formattedSchoolTerm =>
+      AssessmentValidator.formatSchoolTerm(semester);
+
+  List<int> get classIds =>
+      sections.map((c) => _id(c['id'])).whereType<int>().toList();
+}
+
+List<_SubjectOptionGroup> _buildSubjectGroups(
+  List<_Json> classes, {
+  _Json? fallbackExam,
+}) {
+  final groupsByKey = <String, _SubjectOptionGroup>{};
+
+  void addClassRecord(_Json c) {
+    final cid = _id(c['id']);
+    if (cid == null) return;
+    final subj = c['subject'] is Map
+        ? Map<String, dynamic>.from(c['subject'] as Map)
+        : <String, dynamic>{};
+    final subjId = _id(subj['id']);
+    final code = (subj['code']?.toString() ?? '').trim();
+    final name = (subj['name']?.toString() ?? '').trim();
+    final sy = (c['school_year']?.toString() ?? '').trim();
+    final sem = (c['semester']?.toString() ?? '').trim();
+    final yl = (c['year_level']?.toString() ?? '').trim();
+
+    final key = '${subjId ?? code}|$name|$sy|$sem|$yl';
+    final group = groupsByKey.putIfAbsent(
+      key,
+      () => _SubjectOptionGroup(
+        key: key,
+        subjectId: subjId,
+        code: code,
+        name: name.isEmpty ? 'Subject' : name,
+        schoolYear: sy,
+        semester: sem,
+        sections: <_Json>[],
+      ),
+    );
+    if (!group.sections.any((existing) => _id(existing['id']) == cid)) {
+      group.sections.add(c);
+    }
+  }
+
+  for (final c in classes) {
+    addClassRecord(c);
+  }
+
+  if (fallbackExam != null) {
+    final examCls = fallbackExam['class'];
+    if (examCls is Map) {
+      addClassRecord(Map<String, dynamic>.from(examCls));
+    }
+  }
+
+  final out = groupsByKey.values.toList();
+  for (final g in out) {
+    g.sections.sort(
       (a, b) => (a['section']?.toString() ?? '').toLowerCase().compareTo(
         (b['section']?.toString() ?? '').toLowerCase(),
       ),
     );
+  }
   return out;
 }
 
-Future<bool?> _showEditExamDialog(
-  BuildContext context, {
-  required _Json exam,
-  required List<_Json> classes,
-}) async {
-  final examId = _id(exam['id']);
-  final currentClassId = _examClassId(exam);
+// ---------------------------------------------------------------
+// Create / Edit Exam Details dialog (unified with live Paper Header Preview)
+// ---------------------------------------------------------------
 
-  _Json? currentClass;
-  for (final c in classes) {
-    if (_id(c['id']) == currentClassId) {
-      currentClass = c;
-      break;
+Future<ImportedQuestionPaper?> pickAndParseQuestionPaper(
+  BuildContext context,
+) async {
+  const typeGroup = XTypeGroup(
+    label: 'Question Paper (PDF or Word)',
+    extensions: <String>['pdf', 'docx'],
+  );
+  final file = await openFile(acceptedTypeGroups: const <XTypeGroup>[typeGroup]);
+  if (file == null) return null;
+
+  try {
+    final bytes = await file.readAsBytes();
+    final parsed = QuestionPaperImportService.parseBytes(
+      bytes: bytes,
+      fileName: file.name,
+    );
+    if (parsed.totalQuestions == 0) {
+      if (context.mounted) {
+        await showDialog<void>(
+          context: context,
+          builder: (c) => _CmDialog(
+            title: 'No questions detected',
+            maxWidth: 420,
+            actions: [
+              FilledButton(
+                style: _primaryStyle,
+                onPressed: () => Navigator.pop(c),
+                child: const Text('OK'),
+              ),
+            ],
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                'Could not find numbered questions (e.g. "1. ...") in "${file.name}". '
+                'Please make sure the PDF or Word document contains selectable text with numbered items.',
+                style: const TextStyle(fontSize: 13.5, color: _Brand.ink),
+              ),
+            ),
+          ),
+        );
+      }
+      return null;
+    }
+    return parsed;
+  } catch (e) {
+    if (context.mounted) {
+      _toast(context, 'Failed to read question paper: ${_err(e)}');
+    }
+    return null;
+  }
+}
+
+Future<int> importParsedSectionsIntoExam({
+  required String token,
+  required int examId,
+  required ImportedQuestionPaper paper,
+  int startingSectionOrder = 1,
+}) async {
+  var importedCount = 0;
+  var order = startingSectionOrder;
+  for (final sec in paper.sections) {
+    if (sec.questions.isEmpty) continue;
+    final createdSec = await ApiService.createExamSection(
+      token: token,
+      examId: examId,
+      name: sec.name,
+      questionType: sec.questionType,
+      sectionOrder: order++,
+      defaultPoints: sec.defaultPoints,
+    );
+    final sectionId = _id(createdSec['id']);
+    if (sectionId == null) continue;
+
+    for (var i = 0; i < sec.questions.length; i++) {
+      final q = sec.questions[i];
+      await ApiService.createQuestion(
+        token: token,
+        sectionId: sectionId,
+        questionNumber: i + 1,
+        questionText: q.questionText,
+        points: q.points > 0 ? q.points : sec.defaultPoints,
+        choices: q.questionType == 'multiple_choice' ? q.choices : null,
+        correctAnswer: q.correctAnswer,
+      );
+      importedCount++;
     }
   }
+  return importedCount;
+}
 
-  final siblings = _siblingSections(classes, currentClass);
-  final siblingIds = siblings.map((c) => _id(c['id'])).whereType<int>().toSet();
+Future<int?> showExamDetailsModal(
+  BuildContext context, {
+  required List<Map<String, dynamic>> classes,
+  Map<String, dynamic>? exam,
+  int? initialClassId,
+  ImportedQuestionPaper? initialImportedPaper,
+}) async {
+  final editing = exam != null;
+  final examId = _id(exam?['id']);
+  final currentClassId = initialClassId ?? _examClassId(exam);
+  var importedPaper = initialImportedPaper;
 
-  // "INSY1003 · Professional Issues in Information Systems and Technology"
-  final examClass = exam['class'];
-  final subjectRaw =
-      currentClass?['subject'] ??
-      (examClass is Map ? examClass['subject'] : null);
-  var subtitle = 'Examination information';
-  if (subjectRaw is Map) {
-    final joined = [
-      subjectRaw['code']?.toString() ?? '',
-      subjectRaw['name']?.toString() ?? '',
-    ].where((e) => e.isNotEmpty).join(' · ');
-    if (joined.isNotEmpty) subtitle = joined;
+  final subjectGroups = _buildSubjectGroups(classes, fallbackExam: exam);
+
+  _SubjectOptionGroup? activeGroup;
+  if (currentClassId != null) {
+    for (final g in subjectGroups) {
+      if (g.classIds.contains(currentClassId)) {
+        activeGroup = g;
+        break;
+      }
+    }
   }
+  if (activeGroup == null && importedPaper?.detectedSubjectName != null) {
+    final detSubj = importedPaper!.detectedSubjectName!.toLowerCase();
+    for (final g in subjectGroups) {
+      final gName = g.name.toLowerCase();
+      final gCode = g.code.toLowerCase();
+      if ((gName.isNotEmpty && (detSubj.contains(gName) || gName.contains(detSubj))) ||
+          (gCode.isNotEmpty && detSubj.contains(gCode))) {
+        activeGroup = g;
+        break;
+      }
+    }
+  }
+  activeGroup ??= subjectGroups.isNotEmpty ? subjectGroups.first : null;
 
-  // Sections the exam is currently given to (only ones we can show).
+  // Sections currently checked for this exam.
   final initialIds = <int>{};
-  final rawIds = exam['class_ids'];
+  final rawIds = exam?['class_ids'];
   if (rawIds is List) {
     for (final v in rawIds) {
       final n = _id(v);
-      if (n != null && siblingIds.contains(n)) initialIds.add(n);
+      if (n != null && (activeGroup?.classIds.contains(n) ?? true)) {
+        initialIds.add(n);
+      }
     }
   }
-  if (currentClassId != null && siblingIds.contains(currentClassId)) {
+  if (currentClassId != null &&
+      (activeGroup?.classIds.contains(currentClassId) ?? true)) {
     initialIds.add(currentClassId);
+  }
+  if (initialIds.isEmpty && activeGroup != null) {
+    initialIds.addAll(activeGroup.classIds);
   }
   final selected = Set<int>.of(initialIds);
 
-  final status = exam['status']?.toString().toLowerCase() ?? 'draft';
-  final canEditSections = siblings.isNotEmpty && status == 'draft';
-
-  String? type = exam['assessment_type']?.toString();
-  if (type != null && !_kAssessmentTypes.containsKey(type)) type = null;
-
-  final titleC = TextEditingController(text: exam['title']?.toString() ?? '');
-  final descC = TextEditingController(
-    text: exam['description']?.toString() ?? '',
+  // Determine initial Type.
+  String type = AssessmentValidator.normalizeAssessmentType(
+    exam?['assessment_type']?.toString() ?? importedPaper?.detectedAssessmentType,
+    title: exam?['title']?.toString() ?? importedPaper?.detectedQuizTitle,
+    description: exam?['description']?.toString(),
   );
+  if (!_kAssessmentTypes.containsKey(type)) {
+    type = 'quiz';
+  }
+
+  // Initial Quiz Name (for Quiz / Short Quiz / Long Quiz / Other).
+  final rawExistingTitle = (exam?['title']?.toString() ??
+          importedPaper?.detectedQuizTitle ??
+          '')
+      .trim();
+  final isExistingTitleFormalMajor = const {
+    'preliminary examination',
+    'midterm examination',
+    'pre-final examination',
+    'final examination',
+  }.contains(rawExistingTitle.toLowerCase());
+
+  final quizNameC = TextEditingController(
+    text: (!AssessmentValidator.isMajorExamination(type) &&
+            !isExistingTitleFormalMajor)
+        ? rawExistingTitle
+        : '',
+  );
+
+  // Initial Major Exam fields (Exam day, Exam date, Start time, End time, Reference no.).
+  final parsedHeader = ExamHeaderDetails.fromExam(exam);
+  final examDayC = TextEditingController(
+    text: parsedHeader.examDay.isNotEmpty
+        ? parsedHeader.examDay
+        : (importedPaper?.detectedExamDay ?? ''),
+  );
+  var examDateText = parsedHeader.examDate.isNotEmpty
+      ? parsedHeader.examDate
+      : (importedPaper?.detectedExamDate ?? '');
+  var startTimeText = parsedHeader.startTime.isNotEmpty
+      ? parsedHeader.startTime
+      : (importedPaper?.detectedStartTime ?? '');
+  var endTimeText = parsedHeader.endTime.isNotEmpty
+      ? parsedHeader.endTime
+      : (importedPaper?.detectedEndTime ?? '');
+  final refNoC = TextEditingController(
+    text: parsedHeader.referenceNo.isNotEmpty
+        ? parsedHeader.referenceNo
+        : (importedPaper?.detectedReferenceNo ?? ''),
+  );
+
+  // Initial Instructions (pre-filled with default STI Notice & instructions when empty).
+  final rawInstructions = (exam?['instructions']?.toString() ??
+          importedPaper?.detectedInstructions ??
+          '')
+      .trim();
   final instC = TextEditingController(
-    text: exam['instructions']?.toString() ?? '',
+    text: rawInstructions.isNotEmpty
+        ? rawInstructions
+        : QuestionPaperPdfService.defaultInstructionsText,
   );
 
   bool saving = false;
   String? error;
 
-  final result = await showDialog<bool>(
+  final result = await showDialog<int>(
     context: context,
     builder: (dialogContext) => StatefulBuilder(
       builder: (dialogContext, setS) {
-        Future<void> save() async {
-          final title = titleC.text.trim();
-          if (title.isEmpty) {
-            setS(() => error = 'Exam title is required.');
-            return;
+        final isMajor = AssessmentValidator.isMajorExamination(type);
+        final siblings = activeGroup?.sections ?? const <_Json>[];
+        final subtitle = activeGroup?.displayLabel ?? 'Examination information';
+        final schoolYearStr =
+            activeGroup?.formattedSchoolYear ??
+            AssessmentValidator.formatSchoolYear(exam?['school_year']);
+        final schoolTermStr =
+            activeGroup?.formattedSchoolTerm ??
+            AssessmentValidator.formatSchoolTerm(exam?['semester']);
+
+        final currentHeaderDetails = ExamHeaderDetails(
+          examDay: examDayC.text.trim(),
+          examDate: examDateText.trim(),
+          startTime: startTimeText.trim(),
+          endTime: endTimeText.trim(),
+          referenceNo: refNoC.text.trim(),
+        );
+
+        final effectiveTitle = isMajor
+            ? AssessmentValidator.formalExaminationTitle(type)
+            : (quizNameC.text.trim().isNotEmpty
+                  ? quizNameC.text.trim()
+                  : (_kAssessmentTypes[type] ?? 'Quiz'));
+
+        Future<void> pickExamDate() async {
+          final now = DateTime.now();
+          final initial = _tryParseFullDate(examDateText) ?? now;
+          final picked = await showDatePicker(
+            context: dialogContext,
+            initialDate: initial,
+            firstDate: DateTime(2020),
+            lastDate: DateTime(2035),
+          );
+          if (picked != null) {
+            setS(() => examDateText = _formatFullDate(picked));
           }
+        }
+
+        Future<void> pickTime({required bool isStart}) async {
+          final currentText = isStart ? startTimeText : endTimeText;
+          final initial =
+              _tryParseTimeOfDay(currentText) ??
+              (isStart
+                  ? const TimeOfDay(hour: 8, minute: 0)
+                  : const TimeOfDay(hour: 9, minute: 15));
+          final picked = await showTimePicker(
+            context: dialogContext,
+            initialTime: initial,
+          );
+          if (picked != null) {
+            setS(() {
+              if (isStart) {
+                startTimeText = _formatTimeOfDay(picked);
+              } else {
+                endTimeText = _formatTimeOfDay(picked);
+              }
+            });
+          }
+        }
+
+        Future<void> save() async {
           if (siblings.isNotEmpty && selected.isEmpty) {
             setS(() => error = 'Choose at least one section.');
             return;
           }
+          if (!isMajor && quizNameC.text.trim().isEmpty) {
+            setS(() => error = 'Quiz name is required.');
+            return;
+          }
+
+          final finalTitle = isMajor
+              ? AssessmentValidator.formalExaminationTitle(type)
+              : quizNameC.text.trim();
+
+          final finalDescription = isMajor
+              ? currentHeaderDetails.toDescriptionString()
+              : '';
+
+          final sortedClassIds = selected.toList()..sort();
+          final primaryClassId = sortedClassIds.isNotEmpty
+              ? sortedClassIds.first
+              : (currentClassId ?? _id(siblings.firstOrNull?['id']));
+
+          if (primaryClassId == null) {
+            setS(() => error = 'Please select a subject and section.');
+            return;
+          }
+
           setS(() {
             saving = true;
             error = null;
           });
           try {
-            if (examId == null) throw Exception('Invalid exam ID.');
             final token = await _token();
-            final d = descC.text.trim();
-            final i = instC.text.trim();
+            final cleanInst = instC.text.trim();
 
-            // Only send the sections when the teacher actually changed them.
-            final sectionsChanged =
-                canEditSections &&
-                !(selected.length == initialIds.length &&
-                    selected.containsAll(initialIds));
-
-            await ApiService.updateExam(
-              token: token,
-              examId: examId,
-              title: title,
-              assessmentType: type,
-              classIds: sectionsChanged ? (selected.toList()..sort()) : null,
-              description: d.isEmpty ? null : d,
-              instructions: i.isEmpty ? null : i,
-            );
-            if (dialogContext.mounted) Navigator.pop(dialogContext, true);
+            int? savedExamId = examId;
+            if (editing) {
+              if (examId == null) throw Exception('Invalid exam ID.');
+              await ApiService.updateExam(
+                token: token,
+                examId: examId,
+                title: finalTitle,
+                assessmentType: type,
+                classId: primaryClassId,
+                classIds: sortedClassIds,
+                description: finalDescription.isEmpty ? null : finalDescription,
+                instructions: cleanInst.isEmpty ? null : cleanInst,
+              );
+            } else {
+              final created = await ApiService.createExam(
+                token: token,
+                classId: primaryClassId,
+                classIds: sortedClassIds,
+                assessmentType: type,
+                title: finalTitle,
+                description: finalDescription.isEmpty ? null : finalDescription,
+                instructions: cleanInst.isEmpty ? null : cleanInst,
+                status: 'draft',
+              );
+              savedExamId = _id(created['id']) ?? 0;
+              if (importedPaper != null && savedExamId > 0) {
+                await importParsedSectionsIntoExam(
+                  token: token,
+                  examId: savedExamId,
+                  paper: importedPaper!,
+                );
+              }
+            }
+            if (dialogContext.mounted) {
+              Navigator.pop(dialogContext, savedExamId ?? 0);
+            }
           } catch (e) {
             setS(() {
               saving = false;
@@ -768,8 +1042,8 @@ Future<bool?> _showEditExamDialog(
 
         Widget sectionRow(_Json sec) {
           final secId = _id(sec['id'])!;
-          final count = _id(sec['student_count']);
-          final enabled = !saving && canEditSections;
+          final count = _id(sec['student_count']) ?? 0;
+          final enabled = !saving;
 
           void toggle(bool on) => setS(() {
             if (on) {
@@ -797,23 +1071,208 @@ Future<bool?> _showEditExamDialog(
                       style: _inputText.copyWith(fontSize: 14),
                     ),
                   ),
-                  if (count != null)
-                    Text(
-                      '$count ${count == 1 ? 'student' : 'students'}',
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        color: CmColors.slate,
-                      ),
+                  Text(
+                    '$count ${count == 1 ? 'student' : 'students'}',
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      color: CmColors.slate,
                     ),
+                  ),
                 ],
               ),
             ),
           );
         }
 
+        Widget pickerField({
+          required String label,
+          required String value,
+          required String placeholder,
+          required IconData icon,
+          required VoidCallback onTap,
+          VoidCallback? onClear,
+        }) {
+          return InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: saving ? null : onTap,
+            child: InputDecorator(
+              decoration: _floatingDeco(
+                label,
+                hint: placeholder,
+                suffixIcon: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (value.isNotEmpty && onClear != null)
+                      InkWell(
+                        onTap: saving ? null : onClear,
+                        child: const Padding(
+                          padding: EdgeInsets.all(4),
+                          child: Icon(
+                            Icons.clear,
+                            size: 15,
+                            color: CmColors.slate,
+                          ),
+                        ),
+                      ),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 10),
+                      child: Icon(icon, size: 17, color: CmColors.slate),
+                    ),
+                  ],
+                ),
+              ),
+              child: Text(
+                value.isEmpty ? placeholder : value,
+                overflow: TextOverflow.ellipsis,
+                style: value.isEmpty
+                    ? const TextStyle(color: CmColors.slate, fontSize: 13)
+                    : _inputText,
+              ),
+            ),
+          );
+        }
+
+        Widget lockedField({required String label, required String value}) {
+          return InputDecorator(
+            decoration: _floatingDeco(label, locked: true),
+            child: Text(
+              value,
+              overflow: TextOverflow.ellipsis,
+              style: _inputText.copyWith(color: CmColors.slate),
+            ),
+          );
+        }
+
+        Widget paperHeaderPreview() {
+          final subjName = activeGroup?.name ?? 'Subject Name';
+          final dateLine = currentHeaderDetails.scheduleDateLine;
+          final timeLine = currentHeaderDetails.scheduleTimeLine;
+          final refLine = currentHeaderDetails.referenceNo;
+          final termAndSy = '$schoolTermStr, $schoolYearStr';
+
+          return Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+            decoration: BoxDecoration(
+              color: CmColors.bg,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: _Brand.mist),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'PAPER HEADER PREVIEW',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          letterSpacing: 0.7,
+                          fontWeight: FontWeight.w800,
+                          color: CmColors.slate,
+                        ),
+                      ),
+                    ),
+                    if (isMajor && refLine.isNotEmpty)
+                      Text(
+                        '$refLine · Page 1',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: _Brand.ink,
+                        ),
+                      )
+                    else
+                      const Text(
+                        'Page 1',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: _Brand.ink,
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  subjName,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: _Brand.ink,
+                  ),
+                ),
+                if (isMajor) ...[
+                  if (dateLine.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        dateLine,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: _Brand.inkSoft,
+                        ),
+                      ),
+                    ),
+                  if (timeLine.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 1),
+                      child: Text(
+                        timeLine,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: _Brand.inkSoft,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 6),
+                  Text(
+                    termAndSy,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                      color: _Brand.ink,
+                    ),
+                  ),
+                  Text(
+                    effectiveTitle,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                      color: _Brand.ink,
+                    ),
+                  ),
+                ] else ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    effectiveTitle,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                      color: _Brand.ink,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+        }
+
         return _CmDialog(
-          title: 'Edit Exam Details',
+          title: editing
+              ? 'Edit Exam Details'
+              : (importedPaper != null
+                    ? 'Upload Question Paper'
+                    : 'Create Exam'),
           subtitle: subtitle,
+          maxWidth: 500,
           actions: [
             TextButton(
               style: TextButton.styleFrom(
@@ -827,7 +1286,7 @@ Future<bool?> _showEditExamDialog(
               ),
               onPressed: saving
                   ? null
-                  : () => Navigator.pop(dialogContext, false),
+                  : () => Navigator.pop(dialogContext),
               child: const Text('Cancel'),
             ),
             FilledButton(
@@ -842,30 +1301,123 @@ Future<bool?> _showEditExamDialog(
                         color: _Brand.ink,
                       ),
                     )
-                  : const Text('Save changes'),
+                  : Text(
+                      editing
+                          ? 'Save changes'
+                          : (importedPaper != null
+                                ? 'Create & import (${importedPaper!.totalQuestions} items)'
+                                : 'Create exam'),
+                    ),
             ),
           ],
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              TextField(
-                controller: titleC,
-                enabled: !saving,
-                style: _inputText,
-                decoration: _deco('Exam title'),
-              ),
-              const SizedBox(height: 14),
+              if (importedPaper != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: CmColors.green.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: CmColors.green.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.picture_as_pdf_outlined,
+                        size: 20,
+                        color: _Brand.ink,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              importedPaper!.fileName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: _Brand.ink,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${importedPaper!.totalQuestions} questions in ${importedPaper!.sections.length} '
+                              '${importedPaper!.sections.length == 1 ? "section" : "sections"} ready to import into Exam Builder.',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                color: CmColors.slate,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: saving
+                            ? null
+                            : () async {
+                                final repicked =
+                                    await pickAndParseQuestionPaper(
+                                      dialogContext,
+                                    );
+                                if (repicked != null) {
+                                  setS(() {
+                                    importedPaper = repicked;
+                                    if (repicked.detectedAssessmentType !=
+                                            null &&
+                                        _kAssessmentTypes.containsKey(
+                                          repicked.detectedAssessmentType,
+                                        )) {
+                                      type = repicked.detectedAssessmentType!;
+                                    }
+                                    if (repicked.detectedQuizTitle != null &&
+                                        !AssessmentValidator.isMajorExamination(
+                                          type,
+                                        )) {
+                                      quizNameC.text =
+                                          repicked.detectedQuizTitle!;
+                                    }
+                                    if (repicked.detectedExamDay != null) {
+                                      examDayC.text = repicked.detectedExamDay!;
+                                    }
+                                    if (repicked.detectedExamDate != null) {
+                                      examDateText = repicked.detectedExamDate!;
+                                    }
+                                    if (repicked.detectedStartTime != null) {
+                                      startTimeText =
+                                          repicked.detectedStartTime!;
+                                    }
+                                    if (repicked.detectedEndTime != null) {
+                                      endTimeText = repicked.detectedEndTime!;
+                                    }
+                                    if (repicked.detectedReferenceNo != null) {
+                                      refNoC.text =
+                                          repicked.detectedReferenceNo!;
+                                    }
+                                  });
+                                }
+                              },
+                        child: const Text(
+                          'Change file',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+              ],
+              // 1. Type dropdown (top)
               DropdownButtonFormField<String>(
                 initialValue: type,
                 isExpanded: true,
                 style: _inputText,
-                decoration: _deco('Select type').copyWith(
-                  labelText: 'Type',
-                  labelStyle: const TextStyle(
-                    color: CmColors.slate,
-                    fontSize: 13,
-                  ),
-                ),
+                decoration: _floatingDeco('Type', hint: 'Select type'),
                 items: [
                   for (final e in _kAssessmentTypes.entries)
                     DropdownMenuItem<String>(
@@ -873,8 +1425,151 @@ Future<bool?> _showEditExamDialog(
                       child: Text(e.value),
                     ),
                 ],
-                onChanged: saving ? null : (v) => setS(() => type = v),
+                onChanged: saving
+                    ? null
+                    : (v) {
+                        if (v != null) setS(() => type = v);
+                      },
               ),
+              const SizedBox(height: 14),
+
+              // 2. Subject name dropdown
+              if (subjectGroups.isNotEmpty) ...[
+                DropdownButtonFormField<String>(
+                  key: ValueKey(activeGroup?.key),
+                  initialValue: activeGroup?.key,
+                  isExpanded: true,
+                  style: _inputText,
+                  decoration: _floatingDeco(
+                    'Subject name',
+                    hint: 'Select subject',
+                  ),
+                  items: [
+                    for (final g in subjectGroups)
+                      DropdownMenuItem<String>(
+                        value: g.key,
+                        child: Text(
+                          g.displayLabel,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                  onChanged: saving
+                      ? null
+                      : (v) {
+                          if (v == null) return;
+                          final found = subjectGroups
+                              .where((g) => g.key == v)
+                              .firstOrNull;
+                          if (found != null) {
+                            setS(() {
+                              activeGroup = found;
+                              selected
+                                ..clear()
+                                ..addAll(found.classIds);
+                            });
+                          }
+                        },
+                ),
+                const SizedBox(height: 14),
+              ],
+
+              // 3. Fields that depend on Type
+              if (!isMajor) ...[
+                TextField(
+                  controller: quizNameC,
+                  enabled: !saving,
+                  onChanged: (_) => setS(() {}),
+                  style: _inputText,
+                  decoration: _floatingDeco(
+                    'Quiz name',
+                    hint: 'e.g. Long Quiz 1 – Loops',
+                  ),
+                ),
+              ] else ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: examDayC,
+                        enabled: !saving,
+                        keyboardType: TextInputType.number,
+                        onChanged: (_) => setS(() {}),
+                        style: _inputText,
+                        decoration: _floatingDeco('Exam day', hint: 'e.g. 1'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: pickerField(
+                        label: 'Exam date',
+                        value: examDateText,
+                        placeholder: 'Select date',
+                        icon: Icons.calendar_today_outlined,
+                        onTap: pickExamDate,
+                        onClear: () => setS(() => examDateText = ''),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: pickerField(
+                        label: 'Start time',
+                        value: startTimeText,
+                        placeholder: '8:00 AM',
+                        icon: Icons.access_time_outlined,
+                        onTap: () => pickTime(isStart: true),
+                        onClear: () => setS(() => startTimeText = ''),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: pickerField(
+                        label: 'End time',
+                        value: endTimeText,
+                        placeholder: '9:15 AM',
+                        icon: Icons.access_time_outlined,
+                        onTap: () => pickTime(isStart: false),
+                        onClear: () => setS(() => endTimeText = ''),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: refNoC,
+                  enabled: !saving,
+                  onChanged: (_) => setS(() {}),
+                  style: _inputText,
+                  decoration: _floatingDeco(
+                    'Reference no.',
+                    hint: '1000014607 — IT2511',
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: lockedField(
+                        label: 'School year',
+                        value: schoolYearStr,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: lockedField(
+                        label: 'School term',
+                        value: schoolTermStr,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+
+              // 4. Sections checkbox list
               if (siblings.isNotEmpty) ...[
                 const SizedBox(height: 18),
                 const Text(
@@ -888,36 +1583,33 @@ Future<bool?> _showEditExamDialog(
                 const SizedBox(height: 4),
                 for (final sec in siblings)
                   if (_id(sec['id']) != null) sectionRow(sec),
-                if (!canEditSections)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 4),
-                    child: Text(
-                      'Sections can only be changed while the exam is a draft.',
-                      style: TextStyle(fontSize: 12, color: CmColors.slate),
-                    ),
+                const Padding(
+                  padding: EdgeInsets.only(top: 4),
+                  child: Text(
+                    'Checked sections are pre-selected when you assign & publish.',
+                    style: TextStyle(fontSize: 12, color: CmColors.slate),
                   ),
+                ),
               ],
+
+              // 5. Instructions (~6 rows, scrollable, pre-filled with Notice)
               const SizedBox(height: 18),
-              _Field(
-                'Description',
-                TextField(
-                  controller: descC,
-                  enabled: !saving,
-                  style: _inputText,
-                  decoration: _deco('e.g. Midterm'),
+              TextField(
+                controller: instC,
+                enabled: !saving,
+                minLines: 6,
+                maxLines: 8,
+                style: _inputText,
+                decoration: _floatingDeco(
+                  'Instructions',
+                  hint: 'Enter examination instructions',
                 ),
               ),
-              _Field(
-                'Instructions',
-                TextField(
-                  controller: instC,
-                  enabled: !saving,
-                  minLines: 3,
-                  maxLines: 5,
-                  style: _inputText,
-                  decoration: _deco('Enter examination instructions'),
-                ),
-              ),
+
+              // 6. Paper header preview
+              const SizedBox(height: 16),
+              paperHeaderPreview(),
+              const SizedBox(height: 10),
               if (error != null) _ErrorText(error!),
             ],
           ),
@@ -926,8 +1618,9 @@ Future<bool?> _showEditExamDialog(
     ),
   );
 
-  titleC.dispose();
-  descC.dispose();
+  quizNameC.dispose();
+  examDayC.dispose();
+  refNoC.dispose();
   instC.dispose();
   return result;
 }
@@ -1116,40 +1809,56 @@ class _ExamsTabState extends State<ExamsTab> {
           }
         }
       }
-      final ok = await _showExamDetailsDialog(
+      final createdId = await showExamDetailsModal(
         context,
         classes: _classes,
         initialClassId: preselect,
       );
-      if (ok == true) {
+      if (createdId != null) {
         await _loadData();
         if (!mounted) return;
         _toast(context, 'Exam added successfully.');
       }
     } else if (choice == 'pdf') {
-      await showDialog<void>(
-        context: context,
-        builder: (c) => _CmDialog(
-          title: 'PDF Upload — Coming Next',
-          maxWidth: 420,
-          actions: [
-            FilledButton(
-              style: _primaryStyle,
-              onPressed: () => Navigator.pop(c),
-              child: const Text('OK'),
-            ),
-          ],
-          child: const Padding(
-            padding: EdgeInsets.only(bottom: 12),
-            child: Text(
-              'The PDF upload workflow needs file storage and an API endpoint. '
-              'It is not connected yet, so no exam or file will be saved. '
-              'You can use Build Exam in the meantime.',
-              style: TextStyle(fontSize: 13.5, color: _Brand.ink),
-            ),
-          ),
-        ),
+      if (_classes.isEmpty) {
+        _toast(
+          context,
+          'No subject or section is assigned to you yet. '
+          'Ask an administrator to assign one.',
+        );
+        return;
+      }
+      final parsedPaper = await pickAndParseQuestionPaper(context);
+      if (parsedPaper == null || !mounted) return;
+
+      int? preselect;
+      if (_selectedSection != null) {
+        for (final c in _classes) {
+          if (_sectionOf(c) == _selectedSection) {
+            preselect = _id(c['id']);
+            break;
+          }
+        }
+      }
+      final createdId = await showExamDetailsModal(
+        context,
+        classes: _classes,
+        initialClassId: preselect,
+        initialImportedPaper: parsedPaper,
       );
+      if (createdId != null) {
+        await _loadData();
+        if (!mounted) return;
+        if (createdId > 0) {
+          setState(() => _openExamId = createdId);
+          _toast(
+            context,
+            'Imported ${parsedPaper.totalQuestions} questions. Select the answer key for each item below.',
+          );
+        } else {
+          _toast(context, 'Exam imported successfully.');
+        }
+      }
     }
   }
 
@@ -1388,7 +2097,7 @@ class _ExamsTabState extends State<ExamsTab> {
               ),
               const SizedBox(height: 3),
               Text(
-                _classLabel(exam['class']),
+                _examSubjectAndSectionsLabel(exam),
                 style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
               ),
               if (counts != null) ...[
@@ -1473,6 +2182,8 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
   List<_Json> _sections = [];
   final Map<int, List<_Json>> _questions = {};
   final Map<int, List<_Json>> _acceptable = {};
+  List<_Json> _students = [];
+  bool _updatingStatus = false;
 
   /// Accordion: only one section open at a time.
   int? _expandedId;
@@ -1523,16 +2234,22 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         }
       }
 
+      final students = await ApiService.getExamStudents(token, match.first);
+
       if (!mounted) return;
       setState(() {
         _exam = match.first;
         _sections = sections;
+        if (_expandedId == null && sections.isNotEmpty) {
+          _expandedId = _id(sections.first['id']);
+        }
         _questions
           ..clear()
           ..addAll(qs);
         _acceptable
           ..clear()
           ..addAll(acc);
+        _students = students;
         _loading = false;
       });
     } catch (e) {
@@ -1562,7 +2279,54 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     return t;
   }
 
-  // ---------- PDFs ----------
+  AssessmentValidationResult get _validation {
+    return AssessmentValidator.validate(
+      assessmentType: _exam?['assessment_type']?.toString(),
+      title: _exam?['title']?.toString(),
+      description: _exam?['description']?.toString(),
+      sections: _sections,
+      questionsBySectionId: _questions,
+    );
+  }
+
+  Future<void> _setStatus(String targetStatus) async {
+    final exam = _exam;
+    if (exam == null || _updatingStatus) return;
+
+    final validation = _validation;
+    if (targetStatus == 'published' && !validation.isValid) {
+      _toast(context, validation.errors.join('\n'));
+      return;
+    }
+
+    setState(() => _updatingStatus = true);
+    try {
+      final token = await _token();
+      await ApiService.updateExam(
+        token: token,
+        examId: widget.examId,
+        title: exam['title']?.toString() ?? 'Exam',
+        description: exam['description']?.toString(),
+        instructions: exam['instructions']?.toString(),
+        assessmentType: exam['assessment_type']?.toString(),
+        status: targetStatus,
+      );
+      await _load(silent: true);
+      if (!mounted) return;
+      _toast(
+        context,
+        targetStatus == 'published'
+            ? 'Assessment published successfully.'
+            : 'Assessment saved as draft.',
+      );
+    } catch (e) {
+      if (mounted) _toast(context, _err(e));
+    } finally {
+      if (mounted) setState(() => _updatingStatus = false);
+    }
+  }
+
+  // ---------- PDFs & Word (.docx) ----------
 
   Future<Uint8List> _generate({required bool answerSheet}) async {
     final exam = _exam;
@@ -1572,6 +2336,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         exam: exam,
         sections: _sections,
         questions: _questions,
+        students: _students,
       );
     }
     return await QuestionPaperPdfService.generate(
@@ -1581,12 +2346,12 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     );
   }
 
-  String _pdfFileName(String prefix) {
+  String _docFileName(String prefix, String ext) {
     final title = (_exam?['title']?.toString() ?? 'exam')
         .trim()
         .replaceAll(RegExp(r'[^A-Za-z0-9]+'), '_')
         .replaceAll(RegExp(r'^_+|_+$'), '');
-    return '${prefix}_${title.isEmpty ? 'exam' : title}.pdf';
+    return '${prefix}_${title.isEmpty ? 'exam' : title}.$ext';
   }
 
   Future<void> _printPaper(bool answerSheet) async {
@@ -1600,11 +2365,25 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
 
   Future<void> _downloadPaper(bool answerSheet) async {
     try {
-      final bytes = await _generate(answerSheet: answerSheet);
-      await Printing.sharePdf(
-        bytes: bytes,
-        filename: _pdfFileName(answerSheet ? 'answer_sheet' : 'question_paper'),
-      );
+      final exam = _exam;
+      if (exam == null) throw Exception('Exam not loaded.');
+      if (answerSheet) {
+        final bytes = await _generate(answerSheet: true);
+        await Printing.sharePdf(
+          bytes: bytes,
+          filename: _docFileName('answer_sheet', 'pdf'),
+        );
+      } else {
+        final docxBytes = await QuestionPaperPdfService.generateDocx(
+          exam: exam,
+          sections: _sections,
+          questions: _questions,
+        );
+        await Printing.sharePdf(
+          bytes: docxBytes,
+          filename: _docFileName('question_paper', 'docx'),
+        );
+      }
     } catch (e) {
       if (mounted) _toast(context, _err(e));
     }
@@ -1629,12 +2408,12 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
   Future<void> _editDetails() async {
     final exam = _exam;
     if (exam == null) return;
-    final ok = await _showEditExamDialog(
+    final updatedId = await showExamDetailsModal(
       context,
       classes: widget.classes,
       exam: exam,
     );
-    if (ok == true) await _load(silent: true);
+    if (updatedId != null) await _load(silent: true);
   }
 
   // ---------- sections ----------
@@ -1687,6 +2466,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                   sectionId: sectionId,
                   name: name,
                   defaultPoints: points,
+                  questionType: type,
                 );
               } else {
                 await ApiService.createExamSection(
@@ -1750,8 +2530,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                       for (final t in _kTypes)
                         DropdownMenuItem(value: t, child: Text(_typeLabel(t))),
                     ],
-                    // A section's type can't change once it exists.
-                    onChanged: (saving || editing)
+                    onChanged: saving
                         ? null
                         : (v) {
                             if (v != null) setS(() => type = v);
@@ -1852,6 +2631,59 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     _drafts[sectionId]?.remove(key);
     await _load(silent: true);
     if (mounted) _toast(context, 'Question added successfully.');
+  }
+
+  Future<void> _importPdfIntoCurrentExam() async {
+    final parsedPaper = await pickAndParseQuestionPaper(context);
+    if (parsedPaper == null || !mounted) return;
+    try {
+      final token = await _token();
+      final nextOrder = _sections.fold<int>(0, (m, s) {
+            final o = int.tryParse(s['section_order']?.toString() ?? '') ?? 0;
+            return o > m ? o : m;
+          }) +
+          1;
+      final count = await importParsedSectionsIntoExam(
+        token: token,
+        examId: widget.examId,
+        paper: parsedPaper,
+        startingSectionOrder: nextOrder,
+      );
+      await _load(silent: true);
+      if (mounted) {
+        _toast(
+          context,
+          'Imported $count questions from "${parsedPaper.fileName}". Set the answer key below.',
+        );
+      }
+    } catch (e) {
+      if (mounted) _toast(context, _err(e));
+    }
+  }
+
+  Future<void> _quickSetAnswerKey(_Json q, String newAnswer) async {
+    final qid = _id(q['id']);
+    if (qid == null) return;
+    final clean = newAnswer.trim();
+    if (clean.isEmpty) return;
+    final prev = q['correct_answer'];
+    setState(() => q['correct_answer'] = clean);
+    try {
+      final token = await _token();
+      await ApiService.updateQuestion(
+        token: token,
+        questionId: qid,
+        questionText: q['question_text']?.toString() ?? '',
+        points: _num(q['points']),
+        choices: q['choices'],
+        correctAnswer: clean,
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() => q['correct_answer'] = prev);
+        _toast(context, _err(e));
+      }
+    }
   }
 
   Future<void> _updateQuestion(
@@ -1980,6 +2812,133 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
 
   // ---------- build ----------
 
+  Widget _buildExamTitleArea(_Json exam, String status) {
+    final rawType = exam['assessment_type']?.toString();
+    final rawTitle = exam['title']?.toString() ?? 'Exam';
+    final rawDesc = exam['description']?.toString() ?? '';
+
+    final normalizedType = AssessmentValidator.normalizeAssessmentType(
+      rawType,
+      title: rawTitle,
+      description: rawDesc,
+    );
+    final isMajor = AssessmentValidator.isMajorExamination(
+      normalizedType,
+      title: rawTitle,
+      description: rawDesc,
+    );
+
+    final badgeCategory = isMajor
+        ? 'EXAMINATION'
+        : (normalizedType == 'other' ? 'ASSESSMENT' : 'QUIZ');
+
+    final displayTitle = isMajor
+        ? AssessmentValidator.formalExaminationTitle(
+            normalizedType,
+            title: rawTitle,
+            description: rawDesc,
+          )
+        : rawTitle;
+
+    final subjectAndSections = _examSubjectAndSectionsLabel(exam);
+    final headerDetails = ExamHeaderDetails.fromExam(exam);
+    final sy = AssessmentValidator.formatSchoolYear(
+      exam['school_year'] ??
+          (exam['class'] is Map ? (exam['class'] as Map)['school_year'] : null),
+    );
+    final term = AssessmentValidator.formatSchoolTerm(
+      exam['semester'] ??
+          (exam['class'] is Map ? (exam['class'] as Map)['semester'] : null),
+    );
+
+    final metaParts = <String>[
+      if (isMajor) ...[
+        if (headerDetails.scheduleDateLine.isNotEmpty)
+          headerDetails.scheduleDateLine,
+        if (headerDetails.scheduleTimeLine.isNotEmpty)
+          headerDetails.scheduleTimeLine,
+        '$term, $sy',
+        if (headerDetails.referenceNo.isNotEmpty)
+          'Ref: ${headerDetails.referenceNo}',
+      ],
+    ];
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    badgeCategory,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      letterSpacing: 0.8,
+                      fontWeight: FontWeight.w700,
+                      color: CmColors.slate,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  _StatusPill(status),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                displayTitle,
+                style: const TextStyle(
+                  fontSize: 21,
+                  fontWeight: FontWeight.w800,
+                  color: _Brand.ink,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.class_outlined,
+                    size: 14,
+                    color: CmColors.slate,
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      subjectAndSections,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        color: CmColors.slate,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (metaParts.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  metaParts.join(' · '),
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    color: CmColors.slate,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        OutlinedButton.icon(
+          style: _outlineStyle,
+          onPressed: _editDetails,
+          icon: const Icon(Icons.edit_outlined, size: 16),
+          label: const Text('Edit details'),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
@@ -2025,7 +2984,6 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         final wide = box.maxWidth >= _kWide;
         final exam = _exam!;
         final status = exam['status']?.toString() ?? 'draft';
-        final description = exam['description']?.toString() ?? '';
 
         final sectionsColumn = _sectionsColumn();
         final papers = _papersColumn(exam);
@@ -2058,86 +3016,8 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
               ),
               const SizedBox(height: 14),
 
-              // Exam header
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Text(
-                              'EXAMINATION',
-                              style: TextStyle(
-                                fontSize: 11,
-                                letterSpacing: 0.8,
-                                fontWeight: FontWeight.w700,
-                                color: CmColors.slate,
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            _StatusPill(status),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          exam['title']?.toString() ?? 'Exam',
-                          style: const TextStyle(
-                            fontSize: 21,
-                            fontWeight: FontWeight.w800,
-                            color: _Brand.ink,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Wrap(
-                          spacing: 16,
-                          runSpacing: 4,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
-                                  Icons.class_outlined,
-                                  size: 14,
-                                  color: CmColors.slate,
-                                ),
-                                const SizedBox(width: 6),
-                                Flexible(
-                                  child: Text(
-                                    _classLabel(exam['class']),
-                                    style: const TextStyle(
-                                      fontSize: 12.5,
-                                      color: CmColors.slate,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            if (description.isNotEmpty)
-                              Text(
-                                description,
-                                style: const TextStyle(
-                                  fontSize: 12.5,
-                                  color: CmColors.slate,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  OutlinedButton.icon(
-                    style: _outlineStyle,
-                    onPressed: _editDetails,
-                    icon: const Icon(Icons.edit_outlined, size: 16),
-                    label: const Text('Edit details'),
-                  ),
-                ],
-              ),
+              // Exam header (updated title area)
+              _buildExamTitleArea(exam, status),
               const SizedBox(height: 18),
 
               // Stats
@@ -2169,6 +3049,8 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                   ),
                 ],
               ),
+              const SizedBox(height: 16),
+              _validationBanner(status),
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 18),
                 child: Divider(height: 1, color: CmColors.line),
@@ -2192,6 +3074,128 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
           ),
         );
       },
+    );
+  }
+
+  Widget _validationBanner(String status) {
+    final v = _validation;
+    final ok = v.isValid;
+    final isPublished = status.toLowerCase() == 'published';
+    final accent = ok ? CmColors.green : _Brand.amber;
+
+    return _Card(
+      padding: 16,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                ok ? Icons.check_circle_outline : Icons.info_outline,
+                size: 20,
+                color: accent,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${v.assessmentLabel} Question Requirements · '
+                      '${v.actualTotal} / ${v.requiredTotal} total questions',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: _Brand.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Each included question type requires at least '
+                      '${v.requiredPerQuestionType} questions.',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: CmColors.slate,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    style: _outlineStyle,
+                    onPressed: _updatingStatus
+                        ? null
+                        : () => _setStatus('draft'),
+                    icon: const Icon(Icons.save_outlined, size: 16),
+                    label: Text(isPublished ? 'Save as draft' : 'Save draft'),
+                  ),
+                  FilledButton.icon(
+                    style: _primaryStyle,
+                    onPressed: (_updatingStatus || !ok)
+                        ? null
+                        : () => _setStatus('published'),
+                    icon: _updatingStatus
+                        ? const _Spin()
+                        : const Icon(Icons.publish_outlined, size: 16),
+                    label: Text(isPublished ? 'Published' : 'Publish exam'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          if (v.questionTypeValidations.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                for (final qt in v.questionTypeValidations)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: (qt.isValid ? CmColors.green : _Brand.amber)
+                          .withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      '${qt.label}: ${qt.actualCount}/${qt.requiredCount}'
+                      '${qt.isValid ? '' : ' (need ${qt.missingCount} more)'}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: _Brand.ink,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+          if (!ok) ...[
+            const SizedBox(height: 8),
+            for (final err in v.errors)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  '• $err',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.error,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -2264,6 +3268,15 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
               style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
             ),
             const Spacer(),
+            OutlinedButton.icon(
+              style: _outlineStyle.copyWith(
+                minimumSize: const WidgetStatePropertyAll(Size(0, 38)),
+              ),
+              onPressed: _importPdfIntoCurrentExam,
+              icon: const Icon(Icons.upload_file_outlined, size: 17),
+              label: const Text('Upload PDF'),
+            ),
+            const SizedBox(width: 8),
             FilledButton.icon(
               style: _amberStyle,
               onPressed: () => _showSectionDialog(),
@@ -2469,20 +3482,142 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     final correct = (q['correct_answer']?.toString() ?? '').trim();
     final answers = qid == null ? <_Json>[] : (_acceptable[qid] ?? <_Json>[]);
 
+    final missingKey = correct.isEmpty || correct.toLowerCase() == 'null';
+
     Widget choiceBox(int idx) {
       final letter = String.fromCharCode(65 + idx);
       final value = (choices is List && idx < choices.length)
           ? choices[idx].toString()
           : '';
       final isCorrect =
-          correct.toUpperCase() == letter ||
-          (correct.isNotEmpty && correct == value);
-      return Row(
-        children: [
-          _Badge(letter),
-          const SizedBox(width: 8),
-          Expanded(child: _ReadBox(value, highlight: isCorrect)),
-        ],
+          !missingKey &&
+          (correct.toUpperCase() == letter ||
+              (correct.isNotEmpty && correct == value));
+      return InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: qid == null ? null : () => _quickSetAnswerKey(q, letter),
+        child: Row(
+          children: [
+            Container(
+              width: 26,
+              height: 26,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: isCorrect ? CmColors.green : CmColors.bg,
+                borderRadius: BorderRadius.circular(7),
+              ),
+              child: Text(
+                letter,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                  color: isCorrect ? Colors.white : _Brand.ink,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(child: _ReadBox(value, highlight: isCorrect)),
+          ],
+        ),
+      );
+    }
+
+    Widget answerKeySelector() {
+      if (type == 'multiple_choice') {
+        return Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final letter in const ['A', 'B', 'C', 'D'])
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: qid == null ? null : () => _quickSetAnswerKey(q, letter),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 7,
+                  ),
+                  decoration: BoxDecoration(
+                    color: (!missingKey && correct.toUpperCase() == letter)
+                        ? CmColors.green
+                        : CmColors.bg,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: (!missingKey && correct.toUpperCase() == letter)
+                          ? CmColors.green
+                          : CmColors.line,
+                    ),
+                  ),
+                  child: Text(
+                    letter,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                      color: (!missingKey && correct.toUpperCase() == letter)
+                          ? Colors.white
+                          : _Brand.ink,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      }
+      if (type == 'true_false') {
+        return Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final opt in const ['True', 'False'])
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: qid == null ? null : () => _quickSetAnswerKey(q, opt),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 7,
+                  ),
+                  decoration: BoxDecoration(
+                    color: (!missingKey &&
+                            correct.toLowerCase() == opt.toLowerCase())
+                        ? CmColors.green
+                        : CmColors.bg,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: (!missingKey &&
+                              correct.toLowerCase() == opt.toLowerCase())
+                          ? CmColors.green
+                          : CmColors.line,
+                    ),
+                  ),
+                  child: Text(
+                    opt,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: (!missingKey &&
+                              correct.toLowerCase() == opt.toLowerCase())
+                          ? Colors.white
+                          : _Brand.ink,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      }
+      return InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: qid == null
+            ? null
+            : () => setState(() => _editingQuestionId = qid),
+        child: SizedBox(
+          width: 200,
+          child: _ReadBox(
+            missingKey ? 'Click to set answer key' : correct,
+            highlight: !missingKey,
+          ),
+        ),
       );
     }
 
@@ -2506,6 +3641,27 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 '$points ${points == '1' ? 'pt' : 'pts'}',
                 style: const TextStyle(fontSize: 11.5, color: CmColors.slate),
               ),
+              if (missingKey) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _Brand.amber.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    'Answer key needed',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: _Brand.ink,
+                    ),
+                  ),
+                ),
+              ],
               const Spacer(),
               IconButton(
                 tooltip: 'Edit question',
@@ -2577,19 +3733,23 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.check, size: 16, color: CmColors.green),
+                  Icon(
+                    missingKey ? Icons.key_outlined : Icons.check,
+                    size: 16,
+                    color: missingKey ? _Brand.amber : CmColors.green,
+                  ),
                   const SizedBox(width: 6),
                   Text(
-                    'Correct answer',
+                    missingKey ? 'Select answer key:' : 'Correct answer:',
                     style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w700,
-                      color: CmColors.green,
+                      color: missingKey ? _Brand.ink : CmColors.green,
                     ),
                   ),
                 ],
               ),
-              SizedBox(width: 170, child: _ReadBox(correct)),
+              answerKeySelector(),
             ],
           ),
           if (type == 'identification' && qid != null) ...[

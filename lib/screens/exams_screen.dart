@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import 'exam_builder_screen.dart';
+import 'exams_tab.dart' show pickAndParseQuestionPaper, showExamDetailsModal;
 
 class ExamsScreen extends StatefulWidget {
   const ExamsScreen({super.key});
@@ -134,23 +135,36 @@ class _ExamsScreenState extends State<ExamsScreen> {
     if (choice == 'builder') {
       await _showAddExamDialog();
     } else if (choice == 'pdf') {
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('PDF Upload — Coming Next'),
-          content: const Text(
-            'The PDF upload workflow needs file storage and an API endpoint. '
-            'It is not connected yet, so no exam or file will be saved. '
-            'You can use Build Exam in the meantime.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
+      final parsedPaper = await pickAndParseQuestionPaper(context);
+      if (parsedPaper == null || !mounted) return;
+      int? selectedClassId;
+      if (_selectedSection != null) {
+        for (final item in _classes) {
+          if (_sectionOf(item) == _selectedSection) {
+            selectedClassId = int.tryParse(item['id']?.toString() ?? '');
+            break;
+          }
+        }
+      }
+      final createdId = await showExamDetailsModal(
+        context,
+        classes: _classes,
+        initialClassId: selectedClassId,
+        initialImportedPaper: parsedPaper,
       );
+      if (createdId != null) {
+        await _loadData();
+        if (!mounted) return;
+        if (createdId > 0) {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ExamBuilderScreen(examId: createdId),
+            ),
+          );
+          if (mounted) await _loadData();
+        }
+      }
     }
   }
 
@@ -165,188 +179,18 @@ class _ExamsScreenState extends State<ExamsScreen> {
       }
     }
 
-    final titleController = TextEditingController();
-    final descriptionController = TextEditingController();
-    final instructionsController = TextEditingController();
-
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        bool saving = false;
-        String? dialogError;
-
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            Future<void> saveExam() async {
-              if (selectedClassId == null) {
-                setDialogState(() {
-                  dialogError = 'Please select a class.';
-                });
-                return;
-              }
-
-              final title = titleController.text.trim();
-              final description = descriptionController.text.trim();
-              final instructions = instructionsController.text.trim();
-
-              if (title.isEmpty) {
-                setDialogState(() {
-                  dialogError = 'Exam title is required.';
-                });
-                return;
-              }
-
-              setDialogState(() {
-                saving = true;
-                dialogError = null;
-              });
-
-              try {
-                final token = await AuthStorage.getToken();
-
-                if (token == null || token.isEmpty) {
-                  throw Exception('Authentication token not found.');
-                }
-
-                await ApiService.createExam(
-                  token: token,
-                  classId: selectedClassId!,
-                  title: title,
-                  description: description.isEmpty ? null : description,
-                  instructions: instructions.isEmpty ? null : instructions,
-                  status: 'draft',
-                );
-
-                if (!context.mounted) {
-                  return;
-                }
-
-                Navigator.pop(context, true);
-              } catch (e) {
-                setDialogState(() {
-                  saving = false;
-                  dialogError = e.toString().replaceFirst('Exception: ', '');
-                });
-              }
-            }
-
-            return AlertDialog(
-              title: const Text('Add Exam'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    DropdownButtonFormField<int>(
-                      initialValue: selectedClassId,
-                      decoration: const InputDecoration(
-                        labelText: 'Class',
-                        prefixIcon: Icon(Icons.class_outlined),
-                        border: OutlineInputBorder(),
-                      ),
-                      items: _classes.map((item) {
-                        final id = int.parse(item['id'].toString());
-
-                        return DropdownMenuItem<int>(
-                          value: id,
-                          child: Text(_getClassLabel(item)),
-                        );
-                      }).toList(),
-                      onChanged: saving
-                          ? null
-                          : (value) {
-                              setDialogState(() {
-                                selectedClassId = value;
-                              });
-                            },
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: titleController,
-                      enabled: !saving,
-                      decoration: const InputDecoration(
-                        labelText: 'Exam Title',
-                        hintText: 'e.g. Computer Programming Midterm Exam',
-                        prefixIcon: Icon(Icons.assignment_outlined),
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: descriptionController,
-                      enabled: !saving,
-                      maxLines: 3,
-                      decoration: const InputDecoration(
-                        labelText: 'Description',
-                        hintText: 'Optional',
-                        prefixIcon: Icon(Icons.description_outlined),
-                        border: OutlineInputBorder(),
-                        alignLabelWithHint: true,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: instructionsController,
-                      enabled: !saving,
-                      maxLines: 4,
-                      decoration: const InputDecoration(
-                        labelText: 'Instructions',
-                        hintText: 'Optional',
-                        prefixIcon: Icon(Icons.list_alt_outlined),
-                        border: OutlineInputBorder(),
-                        alignLabelWithHint: true,
-                      ),
-                    ),
-                    if (dialogError != null) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        dialogError!,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: saving
-                      ? null
-                      : () {
-                          Navigator.pop(context, false);
-                        },
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: saving ? null : saveExam,
-                  child: saving
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Save'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+    final createdId = await showExamDetailsModal(
+      context,
+      classes: _classes,
+      initialClassId: selectedClassId,
     );
 
-    titleController.dispose();
-    descriptionController.dispose();
-    instructionsController.dispose();
-
-    if (result == true) {
+    if (createdId != null) {
       await _loadData();
-
       if (!mounted) return;
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Exam added successfully.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Exam added successfully.')),
+      );
     }
   }
 

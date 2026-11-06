@@ -3,6 +3,12 @@ import 'package:postgres/postgres.dart';
 import 'package:server/database.dart';
 
 class ExamSectionService {
+  static const allowedQuestionTypes = <String>{
+    'multiple_choice',
+    'true_false',
+    'identification',
+  };
+
   static Future<List<Map<String, dynamic>>> getByExam(
     int examId,
   ) async {
@@ -43,12 +49,6 @@ class ExamSectionService {
     required int sectionOrder,
     required num defaultPoints,
   }) async {
-    const allowedQuestionTypes = {
-      'multiple_choice',
-      'true_false',
-      'identification',
-    };
-
     final normalizedQuestionType = questionType.trim().toLowerCase();
 
     if (!allowedQuestionTypes.contains(
@@ -142,15 +142,15 @@ DELETE FROM exam_sections AS s
     return result.isNotEmpty;
   }
 
-  /// Renames a section / changes its default points. The question type and
-  /// order are fixed. Same rules as delete: owner (or admin), draft exam,
-  /// no attempts. Returns null when not found or not permitted.
+  /// Renames a section / changes its default points and optionally its
+  /// question type on a draft exam with no attempts.
   static Future<Map<String, dynamic>?> updateDraftSection(
     int id, {
     required int userId,
     required String role,
     required String name,
     required num defaultPoints,
+    String? questionType,
   }) async {
     if (name.trim().isEmpty) {
       throw Exception('Section name is required.');
@@ -160,10 +160,23 @@ DELETE FROM exam_sections AS s
       throw Exception('Default points must be greater than zero.');
     }
 
+    String? normalizedType;
+    if (questionType != null && questionType.trim().isNotEmpty) {
+      normalizedType = questionType.trim().toLowerCase();
+      if (!allowedQuestionTypes.contains(normalizedType)) {
+        throw Exception(
+          'Invalid question type. Use multiple_choice, true_false, or identification.',
+        );
+      }
+    }
+
     final result = await Database.pool.execute(
       Sql.named('''
         UPDATE exam_sections AS s
-        SET name = @name, default_points = @default_points
+        SET
+          name = @name,
+          default_points = @default_points,
+          question_type = COALESCE(@question_type::text, s.question_type)
         FROM exams AS e, classes AS c
         WHERE s.id = @id AND e.id = s.exam_id AND c.id = e.class_id
           AND (@role = 'admin' OR (@role = 'teacher' AND c.teacher_id = @user_id))
@@ -183,6 +196,7 @@ DELETE FROM exam_sections AS s
         'role': role,
         'name': name.trim(),
         'default_points': defaultPoints,
+        'question_type': normalizedType,
       },
     );
 

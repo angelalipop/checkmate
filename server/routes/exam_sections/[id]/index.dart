@@ -79,6 +79,7 @@ Future<Response> _patch(
 
     final name = decoded['name']?.toString().trim() ?? '';
     final points = num.tryParse(decoded['default_points']?.toString() ?? '');
+    final questionType = decoded['question_type']?.toString().trim();
 
     if (name.isEmpty || points == null || points <= 0) {
       return Response.json(
@@ -95,6 +96,8 @@ Future<Response> _patch(
       role: role,
       name: name,
       defaultPoints: points,
+      questionType:
+          (questionType == null || questionType.isEmpty) ? null : questionType,
     );
 
     if (section == null) {
@@ -114,8 +117,8 @@ Future<Response> _patch(
     // ignore: avoid_print
     print('PATCH EXAM_SECTION ERROR: $e');
     return Response.json(
-      statusCode: 500,
-      body: {'message': 'Unable to update section.'},
+      statusCode: 400,
+      body: {'message': e.toString().replaceFirst('Exception: ', '')},
     );
   }
 }

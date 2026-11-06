@@ -67,11 +67,13 @@ String _ordinal(int n) {
 
 const _typeLabels = <String, String>{
   'quiz': 'Quiz',
+  'short_quiz': 'Short Quiz',
   'long_quiz': 'Long Quiz',
   'prelim': 'Prelim',
   'midterm': 'Midterm',
-  'prefinal': 'Prefinal',
-  'final': 'Final',
+  'prefinal': 'Prefinals',
+  'final': 'Finals',
+  'other': 'Other',
 };
 
 String _typeLabel(String? type) => _typeLabels[type] ?? 'Assessment';
@@ -1218,12 +1220,36 @@ class _SubjectPageState extends State<_SubjectPage> {
   }
 
   Future<void> _newAssessment() async {
-    // Nothing is created until the teacher saves the dialog.
-    final examId = await showDialog<int>(
-      context: context,
-      builder: (_) => _NewAssessmentDialog(subject: widget.subject),
+    // Uses the exact same Create Exam / Edit Exam Details modal format as ExamsTab.
+    final s = widget.subject;
+    final subjectClasses = <Map<String, dynamic>>[
+      for (final sec in s.sections)
+        <String, dynamic>{
+          'id': sec.classId,
+          'section': sec.name,
+          'student_count': sec.students,
+          'school_year': s.schoolYear,
+          'semester': s.semesterLabel.isNotEmpty
+              ? s.semesterLabel
+              : (s.semester != null ? '${s.semester}' : ''),
+          'year_level': s.yearLevel,
+          'subject': <String, dynamic>{
+            'id': s.subjectId,
+            'code': s.code,
+            'name': s.name,
+          },
+        },
+    ];
+    final examId = await showExamDetailsModal(
+      context,
+      classes: subjectClasses,
+      initialClassId: s.sections.isNotEmpty ? s.sections.first.classId : null,
     );
-    if (examId != null && mounted) widget.onOpenBuilder(examId);
+    if (examId != null && examId > 0 && mounted) {
+      widget.onOpenBuilder(examId);
+    } else if (examId != null && mounted) {
+      await _load();
+    }
   }
 
   @override
@@ -1490,207 +1516,6 @@ class _AssessmentRow extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------
-// New assessment dialog (subject already selected)
-// ---------------------------------------------------------------
-
-class _NewAssessmentDialog extends StatefulWidget {
-  const _NewAssessmentDialog({required this.subject});
-
-  final _Subject subject;
-
-  @override
-  State<_NewAssessmentDialog> createState() => _NewAssessmentDialogState();
-}
-
-class _NewAssessmentDialogState extends State<_NewAssessmentDialog> {
-  final _titleC = TextEditingController();
-  String _type = 'quiz';
-  late final Set<int> _selected = widget.subject.classIds.toSet();
-  bool _saving = false;
-  String? _error;
-
-  @override
-  void dispose() {
-    _titleC.dispose();
-    super.dispose();
-  }
-
-  Future<void> _create() async {
-    final title = _titleC.text.trim();
-
-    if (title.isEmpty) {
-      setState(() => _error = 'Assessment title is required.');
-      return;
-    }
-    if (_selected.isEmpty) {
-      setState(() => _error = 'Choose at least one section.');
-      return;
-    }
-
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-
-    try {
-      final token = await _token();
-      final created = await MySubjectsApi.createAssessment(
-        token,
-        classIds: _selected.toList()..sort(),
-        title: title,
-        assessmentType: _type,
-      );
-      final id = _int(created['id']);
-      if (id == null) throw Exception('The server did not return an id.');
-      if (!mounted) return;
-      Navigator.pop(context, id);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _saving = false;
-        _error = _err(e);
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final s = widget.subject;
-
-    return AlertDialog(
-      backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      title: const Text(
-        'New assessment',
-        style: TextStyle(fontWeight: FontWeight.w500, color: _ink),
-      ),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 440),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                [s.code, s.name].where((e) => e.isNotEmpty).join(' · '),
-                style: const TextStyle(fontSize: 13, color: _slate),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: _titleC,
-                enabled: !_saving,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: InputDecoration(
-                  labelText: 'Title',
-                  hintText: 'e.g. Midterm Examination',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              _FilterField(
-                label: 'Type',
-                value: _type,
-                options: [
-                  for (final e in _typeLabels.entries)
-                    MapEntry(e.key, e.value),
-                ],
-                onChanged: (v) {
-                  if (!_saving) setState(() => _type = v);
-                },
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Sections',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  color: _ink,
-                ),
-              ),
-              const SizedBox(height: 4),
-              for (final sec in s.sections)
-                InkWell(
-                  borderRadius: BorderRadius.circular(6),
-                  onTap: _saving
-                      ? null
-                      : () => setState(() {
-                            if (!_selected.remove(sec.classId)) {
-                              _selected.add(sec.classId);
-                            }
-                          }),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(minHeight: 44),
-                    child: Row(
-                      children: [
-                        Checkbox(
-                          value: _selected.contains(sec.classId),
-                          activeColor: _navy,
-                          onChanged: _saving
-                              ? null
-                              : (v) => setState(() {
-                                    if (v == true) {
-                                      _selected.add(sec.classId);
-                                    } else {
-                                      _selected.remove(sec.classId);
-                                    }
-                                  }),
-                        ),
-                        Expanded(
-                          child: Text(
-                            sec.name,
-                            style: const TextStyle(color: _ink),
-                          ),
-                        ),
-                        Text(
-                          '${sec.students} '
-                          '${sec.students == 1 ? 'student' : 'students'}',
-                          style:
-                              const TextStyle(fontSize: 12, color: _slate),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              if (_error != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  _error!,
-                  style: const TextStyle(fontSize: 13, color: _red),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          style: TextButton.styleFrom(minimumSize: const Size(88, 44)),
-          onPressed: _saving ? null : () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          style: FilledButton.styleFrom(
-            backgroundColor: _amber,
-            foregroundColor: _navy,
-            minimumSize: const Size(88, 44),
-          ),
-          onPressed: _saving ? null : _create,
-          child: _saving
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('Create'),
-        ),
-      ],
     );
   }
 }

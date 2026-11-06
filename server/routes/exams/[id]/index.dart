@@ -134,6 +134,7 @@ Future<Response> _patch(RequestContext context, int examId) async {
       classId: int.tryParse(decoded['class_id']?.toString() ?? ''),
       classIds: classIds,
       assessmentType: decoded['assessment_type']?.toString(),
+      status: decoded['status']?.toString(),
     );
 
     if (exam == null) {
@@ -151,7 +152,7 @@ Future<Response> _patch(RequestContext context, int examId) async {
   } on ExamValidationException catch (e) {
     return Response.json(
       statusCode: 400,
-      body: {'message': e.message},
+      body: e.toResponseBody(),
     );
   } catch (e) {
     // ignore: avoid_print

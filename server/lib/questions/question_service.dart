@@ -133,7 +133,6 @@ DELETE FROM questions AS q
           USING exam_sections AS s, exams AS e, classes AS c
           WHERE q.id = @id AND s.id = q.section_id AND e.id = s.exam_id AND c.id = e.class_id
             AND (@role = 'admin' OR (@role = 'teacher' AND c.teacher_id = @user_id))
-            AND e.status = 'draft'
             AND NOT EXISTS (SELECT 1 FROM exam_attempts a WHERE a.exam_id = e.id)
           RETURNING q.id'''),
       parameters: {'id': id, 'user_id': userId, 'role': role},
@@ -141,9 +140,9 @@ DELETE FROM questions AS q
     return result.isNotEmpty;
   }
 
-  /// Edits a question's text, points, choices and correct answer.
-  /// Same rules as delete: owner (or admin), draft exam, no attempts.
-  /// Returns null when not found or not permitted.
+  /// Edits a question's text, points, choices, correct answer, and optionally
+  /// reassigns it to another section ([targetSectionId]) within the same draft
+  /// exam.
   static Future<Map<String, dynamic>?> updateDraftQuestion(
     int id, {
     required int userId,
@@ -152,6 +151,7 @@ DELETE FROM questions AS q
     required num points,
     dynamic choices,
     String? correctAnswer,
+    int? targetSectionId,
   }) async {
     if (questionText.trim().isEmpty) {
       throw Exception('Question text is required.');
@@ -161,55 +161,103 @@ DELETE FROM questions AS q
       throw Exception('Question points cannot be negative.');
     }
 
-    final result = await Database.pool.execute(
-      Sql.named('''
-        UPDATE questions AS q
-        SET
-          question_text = @question_text,
-          points = @points,
-          choices = @choices,
-          correct_answer = @correct_answer
-        FROM exam_sections AS s, exams AS e, classes AS c
-        WHERE q.id = @id AND s.id = q.section_id AND e.id = s.exam_id AND c.id = e.class_id
-          AND (@role = 'admin' OR (@role = 'teacher' AND c.teacher_id = @user_id))
-          AND e.status = 'draft'
-          AND NOT EXISTS (SELECT 1 FROM exam_attempts a WHERE a.exam_id = e.id)
-        RETURNING
-          q.id,
-          q.section_id,
-          q.question_number,
-          q.question_text,
-          q.points,
-          q.choices,
-          q.correct_answer,
-          q.created_at
-      '''),
-      parameters: {
-        'id': id,
-        'user_id': userId,
-        'role': role,
-        'question_text': questionText.trim(),
-        'points': points,
-        'choices': choices == null ? null : jsonEncode(choices),
-        'correct_answer': (correctAnswer?.trim().isEmpty ?? true)
-            ? null
-            : correctAnswer!.trim(),
-      },
-    );
+    return Database.pool.runTx<Map<String, dynamic>?>((tx) async {
+      final currentRows = await tx.execute(
+        Sql.named('''
+          SELECT q.section_id, q.question_number, s.exam_id
+          FROM questions q
+          JOIN exam_sections s ON s.id = q.section_id
+          JOIN exams e ON e.id = s.exam_id
+          JOIN classes c ON c.id = e.class_id
+          WHERE q.id = @id
+            AND (@role = 'admin' OR (@role = 'teacher' AND c.teacher_id = @user_id))
+            AND NOT EXISTS (SELECT 1 FROM exam_attempts a WHERE a.exam_id = e.id)
+          FOR UPDATE OF q
+        '''),
+        parameters: {'id': id, 'user_id': userId, 'role': role},
+      );
 
-    if (result.isEmpty) return null;
+      if (currentRows.isEmpty) return null;
 
-    final row = result.first;
+      final currentSectionId = currentRows.first[0]! as int;
+      final currentQuestionNumber = currentRows.first[1]! as int;
+      final examId = currentRows.first[2]! as int;
 
-    return {
-      'id': row[0],
-      'section_id': row[1],
-      'question_number': row[2],
-      'question_text': row[3],
-      'points': row[4].toString(),
-      'choices': row[5],
-      'correct_answer': row[6],
-      'created_at': row[7].toString(),
-    };
+      var newSectionId = currentSectionId;
+      var newQuestionNumber = currentQuestionNumber;
+
+      if (targetSectionId != null && targetSectionId != currentSectionId) {
+        final targetSec = await tx.execute(
+          Sql.named('''
+            SELECT id FROM exam_sections
+            WHERE id = @sec_id AND exam_id = @exam_id
+          '''),
+          parameters: {'sec_id': targetSectionId, 'exam_id': examId},
+        );
+        if (targetSec.isEmpty) {
+          throw Exception('Target section does not belong to this exam.');
+        }
+
+        final maxNoRows = await tx.execute(
+          Sql.named('''
+            SELECT COALESCE(MAX(question_number), 0)::int + 1
+            FROM questions
+            WHERE section_id = @sec_id
+          '''),
+          parameters: {'sec_id': targetSectionId},
+        );
+        newSectionId = targetSectionId;
+        newQuestionNumber = maxNoRows.first[0]! as int;
+      }
+
+      final result = await tx.execute(
+        Sql.named('''
+          UPDATE questions
+          SET
+            section_id = @section_id,
+            question_number = @question_number,
+            question_text = @question_text,
+            points = @points,
+            choices = @choices,
+            correct_answer = @correct_answer
+          WHERE id = @id
+          RETURNING
+            id,
+            section_id,
+            question_number,
+            question_text,
+            points,
+            choices,
+            correct_answer,
+            created_at
+        '''),
+        parameters: {
+          'id': id,
+          'section_id': newSectionId,
+          'question_number': newQuestionNumber,
+          'question_text': questionText.trim(),
+          'points': points,
+          'choices': choices == null ? null : jsonEncode(choices),
+          'correct_answer': (correctAnswer?.trim().isEmpty ?? true)
+              ? null
+              : correctAnswer!.trim(),
+        },
+      );
+
+      if (result.isEmpty) return null;
+
+      final row = result.first;
+
+      return {
+        'id': row[0],
+        'section_id': row[1],
+        'question_number': row[2],
+        'question_text': row[3],
+        'points': row[4].toString(),
+        'choices': row[5],
+        'correct_answer': row[6],
+        'created_at': row[7].toString(),
+      };
+    });
   }
 }

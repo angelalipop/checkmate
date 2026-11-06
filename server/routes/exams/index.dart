@@ -22,8 +22,7 @@ Future<Response> onRequest(RequestContext context) async {
         final classIdText =
             context.request.uri.queryParameters['class_id'];
 
-        final classId = classIdText == null ||
-                classIdText.isEmpty
+        final classId = classIdText == null || classIdText.isEmpty
             ? null
             : int.tryParse(classIdText);
 
@@ -66,21 +65,28 @@ Future<Response> onRequest(RequestContext context) async {
           );
         }
 
+        List<int>? classIds;
+        if (body['class_ids'] is List) {
+          classIds = (body['class_ids'] as List)
+              .map((v) => int.tryParse(v.toString()))
+              .whereType<int>()
+              .toList();
+        }
+
         final classId = int.tryParse(
-          body['class_id']?.toString() ?? '',
-        );
+              body['class_id']?.toString() ?? '',
+            ) ??
+            (classIds != null && classIds.isNotEmpty ? classIds.first : null);
 
-        final title =
-            body['title']?.toString().trim();
+        final title = body['title']?.toString().trim();
 
-        final description =
-            body['description']?.toString().trim();
+        final description = body['description']?.toString().trim();
 
-        final instructions =
-            body['instructions']?.toString().trim();
+        final instructions = body['instructions']?.toString().trim();
 
-        final status =
-            body['status']?.toString().trim();
+        final status = body['status']?.toString().trim();
+
+        final assessmentType = body['assessment_type']?.toString().trim();
 
         if (classId == null) {
           return Response.json(
@@ -114,8 +120,7 @@ Future<Response> onRequest(RequestContext context) async {
             body: {
               'status': 'error',
               'message':
-                  'Invalid exam status. '
-                  'Use draft, published, or archived.',
+                  'Invalid exam status. Use draft, published, or archived.',
             },
           );
         }
@@ -124,20 +129,24 @@ Future<Response> onRequest(RequestContext context) async {
         final denied = await ExamAccess.guardClass(context, classId);
         if (denied != null) return denied;
 
+        if (classIds != null) {
+          for (final cid in classIds) {
+            final d = await ExamAccess.guardClass(context, cid);
+            if (d != null) return d;
+          }
+        }
+
         final exam = await ExamService.create(
           classId: classId,
+          classIds: classIds,
           title: title,
           description:
-              description?.isEmpty ?? false
-                  ? null
-                  : description,
+              description?.isEmpty ?? false ? null : description,
           instructions:
-              instructions?.isEmpty ?? false
-                  ? null
-                  : instructions,
-          status: status?.isEmpty ?? false
-              ? null
-              : status,
+              instructions?.isEmpty ?? false ? null : instructions,
+          status: status?.isEmpty ?? false ? null : status,
+          assessmentType:
+              assessmentType?.isEmpty ?? false ? null : assessmentType,
         );
 
         return Response.json(
@@ -157,6 +166,11 @@ Future<Response> onRequest(RequestContext context) async {
           },
         );
     }
+  } on ExamValidationException catch (e) {
+    return Response.json(
+      statusCode: 400,
+      body: e.toResponseBody(),
+    );
   } catch (e) {
     return Response.json(
       statusCode: 500,

@@ -3,6 +3,7 @@ import 'package:printing/printing.dart';
 
 import '../services/answer_sheet_pdf_service.dart';
 import '../services/api_service.dart';
+import '../services/assessment_validator.dart';
 import '../services/auth_storage.dart';
 import '../services/question_paper_pdf_service.dart';
 import 'answer_sheet_preview_screen.dart';
@@ -20,10 +21,13 @@ class ExamBuilderScreen extends StatefulWidget {
 
 class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
   bool _isLoading = true;
+  bool _isUpdatingStatus = false;
   String? _errorMessage;
 
   Map<String, dynamic>? _exam;
   List<Map<String, dynamic>> _sections = [];
+  final Map<int, List<Map<String, dynamic>>> _questions = {};
+  List<Map<String, dynamic>> _students = [];
 
   @override
   void initState() {
@@ -57,12 +61,28 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
       final exam = matchingExams.first;
 
       final sections = await ApiService.getExamSections(token, widget.examId);
+      final questionsMap = <int, List<Map<String, dynamic>>>{};
+
+      for (final section in sections) {
+        final sectionId = int.tryParse(section['id']?.toString() ?? '');
+        if (sectionId == null) continue;
+        questionsMap[sectionId] = await ApiService.getQuestions(
+          token,
+          sectionId,
+        );
+      }
+
+      final students = await ApiService.getExamStudents(token, exam);
 
       if (!mounted) return;
 
       setState(() {
         _exam = exam;
         _sections = sections;
+        _questions
+          ..clear()
+          ..addAll(questionsMap);
+        _students = students;
         _isLoading = false;
       });
     } catch (e) {
@@ -72,6 +92,75 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
         _errorMessage = e.toString();
         _isLoading = false;
       });
+    }
+  }
+
+  AssessmentValidationResult get _validation {
+    return AssessmentValidator.validate(
+      assessmentType: _exam?['assessment_type']?.toString(),
+      title: _exam?['title']?.toString(),
+      description: _exam?['description']?.toString(),
+      sections: _sections,
+      questionsBySectionId: _questions,
+    );
+  }
+
+  Future<void> _updateAssessmentStatus(String targetStatus) async {
+    final exam = _exam;
+    if (exam == null || _isUpdatingStatus) return;
+
+    final validation = _validation;
+    if (targetStatus == 'published' && !validation.isValid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Theme.of(context).colorScheme.error,
+          content: Text(validation.errors.join('\n')),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isUpdatingStatus = true);
+    try {
+      final token = await AuthStorage.getToken();
+      if (token == null || token.isEmpty) {
+        throw Exception('Your session has expired. Please log in again.');
+      }
+
+      await ApiService.updateExam(
+        token: token,
+        examId: widget.examId,
+        title: exam['title']?.toString() ?? 'Exam',
+        description: exam['description']?.toString(),
+        instructions: exam['instructions']?.toString(),
+        assessmentType: exam['assessment_type']?.toString(),
+        status: targetStatus,
+      );
+
+      if (!mounted) return;
+      await _loadExam();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            targetStatus == 'published'
+                ? 'Assessment published successfully.'
+                : 'Assessment saved as draft.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Theme.of(context).colorScheme.error,
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isUpdatingStatus = false);
+      }
     }
   }
 
@@ -113,7 +202,10 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
     }
   }
 
-  Future<void> _generateQuestionPaperPdf({bool download = false}) async {
+  Future<void> _generateQuestionPaperPdf({
+    bool download = false,
+    bool asDocx = false,
+  }) async {
     try {
       final token = await AuthStorage.getToken();
 
@@ -145,6 +237,19 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
         }
 
         questions[sectionId] = await ApiService.getQuestions(token, sectionId);
+      }
+
+      if (download && asDocx) {
+        final docxBytes = await QuestionPaperPdfService.generateDocx(
+          exam: exam,
+          sections: sections,
+          questions: questions,
+        );
+        await Printing.sharePdf(
+          bytes: docxBytes,
+          filename: _docFileName('question_paper', exam, 'docx'),
+        );
+        return;
       }
 
       final pdfBytes = await QuestionPaperPdfService.generate(
@@ -208,10 +313,13 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
         questions[sectionId] = await ApiService.getQuestions(token, sectionId);
       }
 
+      final students = await ApiService.getExamStudents(token, exam);
+
       final pdfBytes = await AnswerSheetPdfService.generate(
         exam: exam,
         sections: sections,
         questions: questions,
+        students: students,
       );
 
       if (download) {
@@ -338,7 +446,8 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                         );
                         if (name.isEmpty || points == null || points <= 0) {
                           updateDialog(
-                            () => error = 'Enter a section name and points greater than zero.',
+                            () => error =
+                                'Enter a section name and points greater than zero.',
                           );
                           return;
                         }
@@ -391,12 +500,19 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
     }
   }
 
-  String _pdfFileName(String prefix, Map<String, dynamic> exam) {
+  String _pdfFileName(String prefix, Map<String, dynamic> exam) =>
+      _docFileName(prefix, exam, 'pdf');
+
+  String _docFileName(
+    String prefix,
+    Map<String, dynamic> exam,
+    String extension,
+  ) {
     final title = (exam['title']?.toString() ?? 'exam')
         .trim()
         .replaceAll(RegExp(r'[^A-Za-z0-9]+'), '_')
         .replaceAll(RegExp(r'^_+|_+$'), '');
-    return '${prefix}_${title.isEmpty ? 'exam' : title}.pdf';
+    return '${prefix}_${title.isEmpty ? 'exam' : title}.$extension';
   }
 
   String _formatQuestionType(String type) {
@@ -413,6 +529,111 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
       default:
         return type;
     }
+  }
+
+  Widget _buildValidationCard() {
+    final validation = _validation;
+    final status = (_exam?['status']?.toString() ?? 'draft').toLowerCase();
+    final isValid = validation.isValid;
+    final color = isValid ? Colors.green.shade700 : Colors.orange.shade800;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  isValid ? Icons.check_circle : Icons.warning_amber_rounded,
+                  color: color,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${validation.assessmentLabel} Requirements '
+                    '(${validation.actualTotal} / ${validation.requiredTotal} total questions)',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: color,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Minimum per included question type: '
+              '${validation.requiredPerQuestionType} questions',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            if (validation.questionTypeValidations.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: validation.questionTypeValidations.map((q) {
+                  final ok = q.isValid;
+                  return Chip(
+                    visualDensity: VisualDensity.compact,
+                    avatar: Icon(
+                      ok ? Icons.check : Icons.error_outline,
+                      size: 16,
+                      color: ok ? Colors.green.shade700 : Colors.red.shade700,
+                    ),
+                    label: Text(
+                      '${q.label}: ${q.actualCount}/${q.requiredCount}',
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+            if (!isValid) ...[
+              const SizedBox(height: 8),
+              for (final err in validation.errors)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    '• $err',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
+            ],
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _isUpdatingStatus
+                      ? null
+                      : () => _updateAssessmentStatus('draft'),
+                  icon: const Icon(Icons.save_outlined, size: 18),
+                  label: Text(
+                    status == 'draft' ? 'Save Draft' : 'Revert to Draft',
+                  ),
+                ),
+                FilledButton.icon(
+                  onPressed: (_isUpdatingStatus || !isValid)
+                      ? null
+                      : () => _updateAssessmentStatus('published'),
+                  icon: const Icon(Icons.publish_outlined, size: 18),
+                  label: Text(
+                    status == 'published' ? 'Published' : 'Publish Assessment',
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -465,6 +686,8 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
 
           const SizedBox(height: 16),
 
+          _buildValidationCard(),
+
           // PREVIEW TEST PAPER
           SizedBox(
             width: double.infinity,
@@ -488,7 +711,19 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
             width: double.infinity,
             child: ElevatedButton(
               onPressed: _generateQuestionPaperPdf,
-              child: const Text('Print Question Paper PDF'),
+              child: const Text('Print Question Paper'),
+            ),
+          ),
+
+          const SizedBox(height: 10),
+
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () =>
+                  _generateQuestionPaperPdf(download: true, asDocx: true),
+              icon: const Icon(Icons.description_outlined),
+              label: const Text('Download Question Paper (Word .docx)'),
             ),
           ),
 
@@ -529,7 +764,10 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
             width: double.infinity,
             child: ElevatedButton(
               onPressed: _generateAnswerSheetPdf,
-              child: const Text('Print Answer Sheet PDF'),
+              child: Text(
+                'Print Answer Sheets '
+                '(${_students.isEmpty ? 'Template' : '${_students.length} students'})',
+              ),
             ),
           ),
 
@@ -576,14 +814,17 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
             final type = section['question_type']?.toString() ?? '';
 
             final sectionId = int.tryParse(section['id']?.toString() ?? '');
+            final qCount = sectionId == null
+                ? 0
+                : (_questions[sectionId]?.length ?? 0);
 
             return Card(
               margin: const EdgeInsets.only(bottom: 12),
               child: ListTile(
                 onTap: sectionId == null
                     ? null
-                    : () {
-                        Navigator.push(
+                    : () async {
+                        await Navigator.push(
                           context,
                           MaterialPageRoute(
                             builder: (_) => QuestionsScreen(
@@ -594,6 +835,9 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                             ),
                           ),
                         );
+                        if (mounted) {
+                          await _loadExam();
+                        }
                       },
                 leading: CircleAvatar(
                   child: Text(section['section_order']?.toString() ?? '-'),
@@ -601,8 +845,8 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                 title: Text(section['name']?.toString() ?? 'Section'),
                 subtitle: Text(
                   '${_formatQuestionType(type)} • '
-                  '${section['default_points'] ?? '1'} '
-                  'pts/item',
+                  '${section['default_points'] ?? '1'} pts/item • '
+                  '$qCount/5 min questions',
                 ),
                 trailing: IconButton(
                   tooltip: 'Delete section',

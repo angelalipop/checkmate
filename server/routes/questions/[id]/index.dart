@@ -106,6 +106,9 @@ Future<Response> _patch(
     final text = decoded['question_text']?.toString().trim() ?? '';
     final points = num.tryParse(decoded['points']?.toString() ?? '');
     final correct = decoded['correct_answer']?.toString().trim() ?? '';
+    final targetSectionId = int.tryParse(
+      decoded['section_id']?.toString() ?? '',
+    );
 
     if (text.isEmpty) {
       return Response.json(
@@ -136,6 +139,7 @@ Future<Response> _patch(
       points: points,
       choices: decoded['choices'],
       correctAnswer: correct,
+      targetSectionId: targetSectionId,
     );
 
     if (question == null) {
@@ -156,8 +160,8 @@ Future<Response> _patch(
     // ignore: avoid_print
     print('PATCH QUESTION ERROR: $e');
     return Response.json(
-      statusCode: 500,
-      body: {'message': 'Unable to update question.'},
+      statusCode: 400,
+      body: {'message': e.toString().replaceFirst('Exception: ', '')},
     );
   }
 }

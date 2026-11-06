@@ -791,7 +791,7 @@ class _AnswerSheetInputScreenState
   }
 
   // =========================
-  // DOWNLOAD BLANK ANSWER SHEET
+  // DOWNLOAD ANSWER SHEET
   // =========================
 
   Future<void> _downloadAnswerSheet() async {
@@ -823,10 +823,13 @@ class _AnswerSheetInputScreenState
         questions[sectionId] = await ApiService.getQuestions(token, sectionId);
       }
 
+      final students = await ApiService.getExamStudents(token, exam);
+
       final pdfBytes = await AnswerSheetPdfService.generate(
         exam: exam,
         sections: sections,
         questions: questions,
+        students: students,
       );
 
       final title = (exam['title']?.toString() ?? 'exam')

@@ -266,6 +266,104 @@ class ApiService {
         .toList();
   }
 
+  /// Retrieves all students assigned to [exam] across all of its assigned
+  /// sections (`class_ids` / `class_id`), ordered by section, last name, and
+  /// first name.
+  static Future<List<Map<String, dynamic>>> getExamStudents(
+    String token,
+    Map<String, dynamic> exam,
+  ) async {
+    final embedded = exam['students'];
+    if (embedded is List && embedded.isNotEmpty) {
+      return embedded
+          .whereType<Map>()
+          .map((s) => Map<String, dynamic>.from(s))
+          .toList();
+    }
+
+    final classIds = <int>{};
+    final rawClassIds = exam['class_ids'];
+    if (rawClassIds is List) {
+      for (final item in rawClassIds) {
+        final parsed = int.tryParse(item.toString());
+        if (parsed != null) classIds.add(parsed);
+      }
+    }
+    final directClassId = int.tryParse(exam['class_id']?.toString() ?? '');
+    if (directClassId != null) {
+      classIds.add(directClassId);
+    } else if (exam['class'] is Map) {
+      final nestedId = int.tryParse(
+        (exam['class'] as Map)['id']?.toString() ?? '',
+      );
+      if (nestedId != null) classIds.add(nestedId);
+    }
+
+    if (classIds.isEmpty) {
+      final examId = int.tryParse(exam['id']?.toString() ?? '');
+      if (examId != null) {
+        try {
+          final detail = await getExamById(token, examId);
+          final detailStudents = detail['students'];
+          if (detailStudents is List) {
+            return detailStudents
+                .whereType<Map>()
+                .map((s) => Map<String, dynamic>.from(s))
+                .toList();
+          }
+        } catch (_) {
+          // Fall back below.
+        }
+      }
+      return <Map<String, dynamic>>[];
+    }
+
+    final sortedClassIds = classIds.toList()..sort();
+    final combined = <Map<String, dynamic>>[];
+    final seenKeys = <String>{};
+
+    for (final cid in sortedClassIds) {
+      final list = await getStudents(token, classId: cid);
+      for (final student in list) {
+        final sid = student['id']?.toString() ?? '';
+        final snum =
+            (student['student_number']?.toString() ?? '').trim().toLowerCase();
+        final dedupKey = sid.isNotEmpty ? 'id:$sid' : 'c:$cid:n:$snum';
+        if (seenKeys.add(dedupKey)) {
+          combined.add(student);
+        }
+      }
+    }
+
+    combined.sort((a, b) {
+      final secA = _extractSectionName(a).toLowerCase();
+      final secB = _extractSectionName(b).toLowerCase();
+      final cmpSec = secA.compareTo(secB);
+      if (cmpSec != 0) return cmpSec;
+
+      final lastA = (a['last_name']?.toString() ?? '').toLowerCase();
+      final lastB = (b['last_name']?.toString() ?? '').toLowerCase();
+      final cmpLast = lastA.compareTo(lastB);
+      if (cmpLast != 0) return cmpLast;
+
+      final firstA = (a['first_name']?.toString() ?? '').toLowerCase();
+      final firstB = (b['first_name']?.toString() ?? '').toLowerCase();
+      return firstA.compareTo(firstB);
+    });
+
+    return combined;
+  }
+
+  static String _extractSectionName(Map<String, dynamic> student) {
+    final direct = student['section']?.toString().trim() ?? '';
+    if (direct.isNotEmpty) return direct;
+    final cls = student['class'];
+    if (cls is Map) {
+      return cls['section']?.toString().trim() ?? '';
+    }
+    return '';
+  }
+
   // =========================
   // CREATE STUDENT
   // =========================
@@ -326,17 +424,7 @@ class ApiService {
       body: jsonEncode({'email': email}),
     );
 
-    Map<String, dynamic> data = {};
-
-    try {
-      final decoded = jsonDecode(response.body);
-
-      if (decoded is Map<String, dynamic>) {
-        data = decoded;
-      }
-    } catch (_) {
-      // Non-JSON body; handled by the status check below.
-    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
 
     if (response.statusCode != 200) {
       throw Exception(data['message'] ?? 'Failed to update student');
@@ -344,7 +432,30 @@ class ApiService {
 
     final student = data['student'];
 
-    return student is Map ? Map<String, dynamic>.from(student) : data;
+    if (student is! Map) {
+      throw Exception('Invalid student data received.');
+    }
+
+    return Map<String, dynamic>.from(student);
+  }
+
+  // =========================
+  // DELETE STUDENT
+  // =========================
+
+  static Future<void> deleteStudent({
+    required String token,
+    required int studentId,
+  }) async {
+    final response = await http.delete(
+      Uri.parse('$baseUrl/students/$studentId'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+
+    if (response.statusCode != 200) {
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      throw Exception(data['message'] ?? 'Failed to delete student');
+    }
   }
 
   // =========================
@@ -382,6 +493,28 @@ class ApiService {
     return exams.map((exam) => Map<String, dynamic>.from(exam as Map)).toList();
   }
 
+  static Future<Map<String, dynamic>> getExamById(
+    String token,
+    int examId,
+  ) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/exams/$examId'),
+      headers: _authHeaders(token),
+    );
+
+    final data = _decodeBody(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(data['message']?.toString() ?? 'Failed to load exam.');
+    }
+
+    final exam = data['exam'];
+    if (exam is Map) {
+      return Map<String, dynamic>.from(exam);
+    }
+    return data;
+  }
+
   // =========================
   // CREATE EXAM
   // =========================
@@ -389,10 +522,12 @@ class ApiService {
   static Future<Map<String, dynamic>> createExam({
     required String token,
     required int classId,
+    List<int>? classIds,
     required String title,
     String? description,
     String? instructions,
     String? status,
+    String? assessmentType,
   }) async {
     final response = await http.post(
       Uri.parse('$baseUrl/exams'),
@@ -402,17 +537,19 @@ class ApiService {
       },
       body: jsonEncode({
         'class_id': classId,
+        'class_ids': ?classIds,
         'title': title,
         'description': description,
         'instructions': instructions,
         'status': status,
+        'assessment_type': ?assessmentType,
       }),
     );
 
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = _decodeBody(response);
 
     if (response.statusCode != 201) {
-      throw Exception(data['message'] ?? 'Failed to create exam');
+      throw Exception(_extractErrorMessage(data, 'Failed to create exam'));
     }
 
     final exam = data['exam'];
@@ -507,10 +644,12 @@ class ApiService {
     int? classId,
     // Sections (class ids) the exam is given to. Omit to leave them as is.
     List<int>? classIds,
-    // quiz | long_quiz | prelim | midterm | prefinal | final
+    // quiz | short_quiz | long_quiz | prelim | midterm | prefinal | final | other
     String? assessmentType,
     String? description,
     String? instructions,
+    // draft | published | archived
+    String? status,
   }) async {
     final response = await http.patch(
       Uri.parse('$baseUrl/exams/$examId'),
@@ -519,6 +658,7 @@ class ApiService {
         'class_id': ?classId,
         'class_ids': ?classIds,
         'assessment_type': ?assessmentType,
+        'status': ?status,
         'title': title,
         'description': description,
         'instructions': instructions,
@@ -528,7 +668,7 @@ class ApiService {
     final data = _decodeBody(response);
 
     if (response.statusCode != 200) {
-      throw Exception(data['message']?.toString() ?? 'Failed to update exam.');
+      throw Exception(_extractErrorMessage(data, 'Failed to update exam.'));
     }
 
     final exam = data['exam'];
@@ -541,11 +681,16 @@ class ApiService {
     required int sectionId,
     required String name,
     required num defaultPoints,
+    String? questionType,
   }) async {
     final response = await http.patch(
       Uri.parse('$baseUrl/exam_sections/$sectionId'),
       headers: _authHeaders(token),
-      body: jsonEncode({'name': name, 'default_points': defaultPoints}),
+      body: jsonEncode({
+        'name': name,
+        'default_points': defaultPoints,
+        'question_type': ?questionType,
+      }),
     );
 
     final data = _decodeBody(response);
@@ -568,6 +713,7 @@ class ApiService {
     required num points,
     dynamic choices,
     String? correctAnswer,
+    int? sectionId,
   }) async {
     final response = await http.patch(
       Uri.parse('$baseUrl/questions/$questionId'),
@@ -577,6 +723,7 @@ class ApiService {
         'points': points,
         'choices': choices,
         'correct_answer': correctAnswer,
+        'section_id': ?sectionId,
       }),
     );
 
@@ -780,14 +927,6 @@ class ApiService {
   // =========================
   // TEACHER MANAGEMENT (ADMIN ONLY)
   // =========================
-  //
-  // Backend contract (all require an admin Bearer token):
-  //   POST   /teachers                    -> 201 { teacher }
-  //   PUT    /teachers/:id                -> 200 { teacher }
-  //   PUT    /teachers/:id/classes        -> 200 { teacher }
-  //   POST   /teachers/:id/reset-password -> 200 { temporary_password }
-  //   PATCH  /teachers/:id/active         -> 200 { teacher }
-  //   DELETE /teachers/:id                -> 200 { message }
 
   static Map<String, String> _authHeaders(String token) => {
     'Content-Type': 'application/json',
@@ -805,6 +944,21 @@ class ApiService {
       // Non-JSON body; callers rely on the status code instead.
     }
     return <String, dynamic>{};
+  }
+
+  static String _extractErrorMessage(
+    Map<String, dynamic> data,
+    String fallback,
+  ) {
+    final errors = data['errors'];
+    if (errors is List && errors.isNotEmpty) {
+      return errors.map((e) => e.toString()).join('\n');
+    }
+    final msg = data['message']?.toString();
+    if (msg != null && msg.trim().isNotEmpty) {
+      return msg.trim();
+    }
+    return fallback;
   }
 
   /// Retrieves a list of all teacher departments.
@@ -831,8 +985,6 @@ class ApiService {
     return departments.map((item) => item.toString()).toList();
   }
 
-  /// [assignments]: [{subject_id, section, school_year, semester}, ...]
-  /// A Subject + Section already owned by another teacher => HTTP 409.
   static Future<Map<String, dynamic>> createTeacher({
     required String token,
     required String firstName,
@@ -868,8 +1020,6 @@ class ApiService {
     return teacher is Map ? Map<String, dynamic>.from(teacher) : data;
   }
 
-  /// Pass [assignments] to change them in the same transaction as the
-  /// profile; leave it null to keep the teacher's assignments untouched.
   static Future<Map<String, dynamic>> updateTeacher({
     required String token,
     required int teacherId,
@@ -906,7 +1056,6 @@ class ApiService {
     return teacher is Map ? Map<String, dynamic>.from(teacher) : data;
   }
 
-  /// Replaces the teacher's whole set of Subject + Section assignments.
   static Future<Map<String, dynamic>> setTeacherAssignments({
     required String token,
     required int teacherId,
@@ -931,9 +1080,6 @@ class ApiService {
     return teacher is Map ? Map<String, dynamic>.from(teacher) : data;
   }
 
-  /// Every known section with its current owner for [subjectId].
-  /// Rows: {section, school_year, semester, year_level,
-  ///        class_id, teacher_id, teacher_name}
   static Future<List<Map<String, dynamic>>> getTeachingOptions(
     String token,
     int subjectId,
@@ -958,10 +1104,6 @@ class ApiService {
     return sections.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
-  /// Sections of ONE program for an Academic Management subject, with the
-  /// teacher who already teaches each (admin only).
-  /// Rows: {section, school_year, semester, year_level, program_id,
-  ///        program_code, program_level, class_id, teacher_id, teacher_name}
   static Future<List<Map<String, dynamic>>> getProgramTeachingOptions(
     String token, {
     required int academicSubjectId,
@@ -996,9 +1138,6 @@ class ApiService {
     return sections.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
-  /// Subjects of a program's published curriculum (Academic Management).
-  /// Rows: {id, code, name, units, legacy_subject_id, year_level, term,
-  ///        school_year (finalized elective only), needs_finalization}
   static Future<List<Map<String, dynamic>>> getProgramSubjects(
     String token,
     int programId,
@@ -1023,7 +1162,6 @@ class ApiService {
     return subjects.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
-  /// Returns the newly generated temporary password (shown once by the UI).
   static Future<String> resetTeacherPassword({
     required String token,
     required int teacherId,

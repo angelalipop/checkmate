@@ -1,6 +1,7 @@
 import 'package:postgres/postgres.dart';
 
 import 'package:server/database.dart';
+import 'package:server/exams/exam_validator.dart';
 
 class ExamDetailService {
   static Future<Map<String, dynamic>?> getById(int examId) async {
@@ -19,11 +20,26 @@ class ExamDetailService {
           s.name AS subject_name,
           s.code AS subject_code,
           c.teacher_id,
-          u.name AS teacher_name
+          u.name AS teacher_name,
+          e.assessment_type,
+          e.version,
+          c.school_year,
+          c.semester,
+          c.year_level,
+          (
+            SELECT string_agg(q.cid::text, ',' ORDER BY q.cid)
+            FROM (
+              SELECT x.class_id AS cid
+              FROM exam_class_assignments x
+              WHERE x.exam_id = e.id
+              UNION
+              SELECT e.class_id
+            ) q
+          ) AS class_ids
         FROM exams e
         JOIN classes c ON c.id = e.class_id
         JOIN subjects s ON s.id = c.subject_id
-        JOIN users u ON u.id = c.teacher_id
+        LEFT JOIN users u ON u.id = c.teacher_id
         WHERE e.id = @exam_id
       '''),
       parameters: {
@@ -36,6 +52,11 @@ class ExamDetailService {
     }
 
     final exam = examResult.first;
+    final classIds = (exam[18]?.toString() ?? '')
+        .split(',')
+        .map(int.tryParse)
+        .whereType<int>()
+        .toList();
 
     final sectionResult = await Database.pool.execute(
       Sql.named('''
@@ -96,9 +117,58 @@ class ExamDetailService {
         'question_type': section[2],
         'section_order': section[3],
         'default_points': section[4],
+        'question_count': questions.length,
         'questions': questions,
       });
     }
+
+    // Retrieve all students assigned to this assessment across all assigned
+    // sections (classes).
+    final studentRows = await Database.pool.execute(
+      Sql.named('''
+        SELECT
+          st.id,
+          st.class_id,
+          st.student_number,
+          st.first_name,
+          st.last_name,
+          st.email,
+          c.section
+        FROM students st
+        JOIN classes c ON c.id = st.class_id
+        WHERE st.class_id = ANY(@class_ids)
+        ORDER BY LOWER(c.section), LOWER(st.last_name), LOWER(st.first_name), st.student_number, st.id
+      '''),
+      parameters: {
+        'class_ids': TypedValue(
+          Type.bigIntegerArray,
+          classIds.isEmpty ? <int>[exam[1]! as int] : classIds,
+        ),
+      },
+    );
+
+    final students = studentRows.map((s) {
+      return {
+        'id': s[0],
+        'class_id': s[1],
+        'student_number': s[2],
+        'first_name': s[3],
+        'last_name': s[4],
+        'email': s[5],
+        'section': s[6],
+        'class': {
+          'id': s[1],
+          'section': s[6],
+        },
+      };
+    }).toList();
+
+    final validation = ExamValidator.validate(
+      assessmentType: exam[13]?.toString(),
+      title: exam[2]?.toString(),
+      description: exam[3]?.toString(),
+      sections: sections,
+    );
 
     return {
       'id': exam[0],
@@ -109,9 +179,18 @@ class ExamDetailService {
       'status': exam[5],
       'created_at': exam[6].toString(),
       'updated_at': exam[7].toString(),
+      'assessment_type': exam[13],
+      'version': exam[14],
+      'school_year': exam[15],
+      'semester': exam[16],
+      'year_level': exam[17],
+      'class_ids': classIds,
       'class': {
         'id': exam[1],
         'section': exam[8],
+        'school_year': exam[15],
+        'semester': exam[16],
+        'year_level': exam[17],
         'subject': {
           'name': exam[9],
           'code': exam[10],
@@ -122,6 +201,8 @@ class ExamDetailService {
         },
       },
       'sections': sections,
+      'students': students,
+      'validation': validation.toJson(),
     };
   }
 }

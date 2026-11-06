@@ -715,13 +715,55 @@ class _QuestionsScreenState
       );
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: _questions.length,
-      itemBuilder: (
-        context,
-        index,
-      ) {
+    final isValidSection = _questions.length >= 5;
+    final statusColor = isValidSection
+        ? Colors.green.shade700
+        : Colors.orange.shade800;
+
+    return Column(
+      children: [
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: statusColor.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: statusColor.withValues(alpha: 0.40)),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                isValidSection
+                    ? Icons.check_circle_outline
+                    : Icons.warning_amber_rounded,
+                color: statusColor,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  isValidSection
+                      ? '${_formatQuestionType(widget.questionType)}: '
+                        '${_questions.length} / 5 minimum questions met.'
+                      : '${_formatQuestionType(widget.questionType)} requires '
+                        'at least 5 questions (currently ${_questions.length} of 5).',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: statusColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: _questions.length,
+            itemBuilder: (
+              context,
+              index,
+            ) {
         final question =
             _questions[index];
 
@@ -922,6 +964,9 @@ class _QuestionsScreenState
           ),
         );
       },
+          ),
+        ),
+      ],
     );
   }
 }

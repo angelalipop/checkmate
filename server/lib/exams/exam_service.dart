@@ -1,12 +1,24 @@
 import 'package:postgres/postgres.dart';
 
 import 'package:server/database.dart';
+import 'package:server/exams/exam_validator.dart';
 
-/// An error whose [message] is safe to show to the teacher (HTTP 400).
+/// An error whose [message] and optional [validation] details are safe to show
+/// to the teacher (HTTP 400).
 class ExamValidationException implements Exception {
-  ExamValidationException(this.message);
+  ExamValidationException(this.message, {this.validation});
 
   final String message;
+  final ExamValidationResult? validation;
+
+  Map<String, dynamic> toResponseBody() => <String, dynamic>{
+        'status': 'error',
+        'message': message,
+        if (validation != null) ...<String, dynamic>{
+          'errors': validation!.errors,
+          'validation': validation!.toJson(),
+        },
+      };
 
   @override
   String toString() => message;
@@ -15,12 +27,46 @@ class ExamValidationException implements Exception {
 class ExamService {
   static const assessmentTypes = <String>{
     'quiz',
+    'short_quiz',
     'long_quiz',
     'prelim',
     'midterm',
     'prefinal',
+    'pre_finals',
     'final',
+    'finals',
+    'other',
   };
+
+  static bool _constraintEnsured = false;
+
+  static Future<void> _ensureAssessmentTypeConstraint() async {
+    if (_constraintEnsured) return;
+    _constraintEnsured = true;
+    try {
+      await Database.pool.execute('''
+        ALTER TABLE exams DROP CONSTRAINT IF EXISTS chk_exams_assessment_type;
+        ALTER TABLE exams
+          ADD CONSTRAINT chk_exams_assessment_type CHECK (
+            assessment_type IS NULL
+            OR assessment_type IN (
+              'quiz',
+              'short_quiz',
+              'long_quiz',
+              'prelim',
+              'midterm',
+              'prefinal',
+              'pre_finals',
+              'final',
+              'finals',
+              'other'
+            )
+          );
+      ''');
+    } catch (_) {
+      // Constraint already updated or managed externally.
+    }
+  }
 
   static List<int> _parseIds(Object? raw) {
     return (raw?.toString() ?? '')
@@ -28,6 +74,60 @@ class ExamService {
         .map(int.tryParse)
         .whereType<int>()
         .toList();
+  }
+
+  static List<String> _parseStrings(Object? raw) {
+    return (raw?.toString() ?? '')
+        .split('|')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+  }
+
+  /// Validates an exam's sections and questions in the database against the
+  /// assessment type minimum requirements.
+  static Future<ExamValidationResult> validateExamInDb(
+    Session session,
+    int examId, {
+    required String? assessmentType,
+    String? title,
+    String? description,
+  }) async {
+    final rows = await session.execute(
+      Sql.named('''
+        SELECT
+          es.id,
+          es.name,
+          es.question_type,
+          es.section_order,
+          COUNT(q.id)::int AS question_count
+        FROM exam_sections es
+        LEFT JOIN questions q ON q.section_id = es.id
+        WHERE es.exam_id = @exam_id
+        GROUP BY es.id, es.name, es.question_type, es.section_order
+        ORDER BY es.section_order, es.id
+      '''),
+      parameters: {'exam_id': examId},
+    );
+
+    final sections = rows
+        .map(
+          (r) => <String, dynamic>{
+            'id': r[0],
+            'name': r[1],
+            'question_type': r[2],
+            'section_order': r[3],
+            'question_count': r[4],
+          },
+        )
+        .toList();
+
+    return ExamValidator.validate(
+      assessmentType: assessmentType,
+      title: title,
+      description: description,
+      sections: sections,
+    );
   }
 
   /// When [teacherId] is given, only exams of that teacher's classes are
@@ -61,13 +161,35 @@ class ExamService {
               UNION
               SELECT e.class_id
             ) q
-          ) AS class_ids
+          ) AS class_ids,
+          c.school_year,
+          c.semester,
+          c.year_level,
+          c.teacher_id,
+          u.name AS teacher_name,
+          (
+            SELECT string_agg(c2.section, '|' ORDER BY c2.section)
+            FROM (
+              SELECT x.class_id AS cid
+              FROM exam_class_assignments x
+              WHERE x.exam_id = e.id
+              UNION
+              SELECT e.class_id
+            ) q2
+            JOIN classes c2 ON c2.id = q2.cid
+          ) AS assigned_sections,
+          s.id AS subject_id
         FROM exams e
         JOIN classes c ON c.id = e.class_id
         JOIN subjects s ON s.id = c.subject_id
+        LEFT JOIN users u ON u.id = c.teacher_id
         WHERE (
           @class_id::bigint IS NULL
           OR e.class_id = @class_id
+          OR EXISTS (
+            SELECT 1 FROM exam_class_assignments x
+            WHERE x.exam_id = e.id AND x.class_id = @class_id
+          )
         )
         AND (
           @teacher_id::bigint IS NULL
@@ -82,6 +204,7 @@ class ExamService {
     );
 
     return result.map((row) {
+      final sectionsList = _parseStrings(row[19]);
       return {
         'id': row[0],
         'class_id': row[1],
@@ -95,13 +218,26 @@ class ExamService {
         'version': row[12],
         // Every section (class) this exam is given to.
         'class_ids': _parseIds(row[13]),
+        'school_year': row[14],
+        'semester': row[15],
+        'year_level': row[16],
+        'sections': sectionsList,
         'class': {
           'id': row[1],
           'section': row[8],
+          'school_year': row[14],
+          'semester': row[15],
+          'year_level': row[16],
           'subject': {
+            'id': row[20],
             'name': row[9],
             'code': row[10],
           },
+          if (row[17] != null)
+            'teacher': {
+              'id': row[17],
+              'name': row[18],
+            },
         },
       };
     }).toList();
@@ -110,12 +246,15 @@ class ExamService {
   static Future<Map<String, dynamic>> create({
     required int classId,
     required String title,
+    List<int>? classIds,
     String? description,
     String? instructions,
     String? status,
+    String? assessmentType,
   }) async {
-    final normalizedStatus =
-        status?.trim().toLowerCase();
+    await _ensureAssessmentTypeConstraint();
+
+    final normalizedStatus = status?.trim().toLowerCase();
 
     const allowedStatuses = {
       'draft',
@@ -125,11 +264,39 @@ class ExamService {
 
     if (normalizedStatus != null &&
         !allowedStatuses.contains(normalizedStatus)) {
-      throw Exception(
-        'Invalid exam status. '
-        'Use draft, published, or archived.',
+      throw ExamValidationException(
+        'Invalid exam status. Use draft, published, or archived.',
       );
     }
+
+    String? cleanType;
+    if (assessmentType != null && assessmentType.trim().isNotEmpty) {
+      if (!ExamValidator.isValidAssessmentType(assessmentType)) {
+        throw ExamValidationException('Choose a valid assessment type.');
+      }
+      cleanType = ExamValidator.toDatabaseAssessmentType(assessmentType);
+    }
+
+    if (normalizedStatus == 'published') {
+      final validation = ExamValidator.validate(
+        assessmentType: cleanType,
+        title: title,
+        description: description,
+        sections: const <Map<String, dynamic>>[],
+      );
+      if (!validation.isValid) {
+        throw ExamValidationException(
+          validation.summaryMessage,
+          validation: validation,
+        );
+      }
+    }
+
+    final targetClassIds = <int>{
+      classId,
+      if (classIds != null) ...classIds,
+    }.toList()
+      ..sort();
 
     final result = await Database.pool.execute(
       Sql.named('''
@@ -138,14 +305,16 @@ class ExamService {
           title,
           description,
           instructions,
-          status
+          status,
+          assessment_type
         )
         VALUES (
           @class_id,
           @title,
           @description,
           @instructions,
-          COALESCE(@status, 'draft')
+          COALESCE(@status, 'draft'),
+          @assessment_type
         )
         RETURNING
           id,
@@ -155,24 +324,43 @@ class ExamService {
           instructions,
           status,
           created_at,
-          updated_at
+          updated_at,
+          assessment_type,
+          version
       '''),
       parameters: {
         'class_id': classId,
         'title': title.trim(),
         'description':
-            description?.trim().isEmpty ?? false
-                ? null
-                : description?.trim(),
+            description?.trim().isEmpty ?? false ? null : description?.trim(),
         'instructions':
-            instructions?.trim().isEmpty ?? false
-                ? null
-                : instructions?.trim(),
+            instructions?.trim().isEmpty ?? false ? null : instructions?.trim(),
         'status': normalizedStatus,
+        'assessment_type': cleanType,
       },
     );
 
     final row = result.first;
+    final examId = row[0]! as int;
+
+    try {
+      for (final cid in targetClassIds) {
+        await Database.pool.execute(
+          Sql.named('''
+            INSERT INTO exam_class_assignments (exam_id, class_id, exam_version)
+            VALUES (@exam_id, @class_id, @version)
+            ON CONFLICT (exam_id, class_id) DO NOTHING
+          '''),
+          parameters: {
+            'exam_id': examId,
+            'class_id': cid,
+            'version': row[9] ?? 1,
+          },
+        );
+      }
+    } catch (_) {
+      // Ignore if exam_class_assignments is not present.
+    }
 
     return {
       'id': row[0],
@@ -183,20 +371,18 @@ class ExamService {
       'status': row[5],
       'created_at': row[6].toString(),
       'updated_at': row[7].toString(),
+      'assessment_type': row[8],
+      'version': row[9],
+      'class_ids': targetClassIds,
     };
   }
 
-  /// Updates title / description / instructions / assessment type and,
+  /// Updates title / description / instructions / assessment type / status and,
   /// optionally, the sections (classes) the exam is given to.
   ///
   /// Returns null when the exam is not found or the user may not edit it.
-  /// Throws [ExamValidationException] for bad input.
-  ///
-  /// Sections ([classIds]) can only be changed on a DRAFT exam that has no
-  /// attempts. Every chosen section must belong to the same subject as the
-  /// exam, and a teacher can only choose their own sections.
-  /// The old single [classId] is still accepted (it means "only this
-  /// section").
+  /// Throws [ExamValidationException] for bad input or when publishing an
+  /// assessment that does not satisfy minimum question requirements.
   static Future<Map<String, dynamic>?> update(
     int id, {
     required int userId,
@@ -207,16 +393,32 @@ class ExamService {
     int? classId,
     List<int>? classIds,
     String? assessmentType,
+    String? status,
   }) async {
+    await _ensureAssessmentTypeConstraint();
+
     final cleanTitle = title.trim();
     if (cleanTitle.isEmpty) {
       throw ExamValidationException('Exam title is required.');
     }
 
     final typeText = assessmentType?.trim().toLowerCase();
-    final type = (typeText == null || typeText.isEmpty) ? null : typeText;
-    if (type != null && !assessmentTypes.contains(type)) {
-      throw ExamValidationException('Choose a valid assessment type.');
+    String? type;
+    if (typeText != null && typeText.isNotEmpty) {
+      if (!ExamValidator.isValidAssessmentType(typeText)) {
+        throw ExamValidationException('Choose a valid assessment type.');
+      }
+      type = ExamValidator.toDatabaseAssessmentType(typeText);
+    }
+
+    final statusText = status?.trim().toLowerCase();
+    final requestedStatus =
+        (statusText == null || statusText.isEmpty) ? null : statusText;
+    const allowedStatuses = {'draft', 'published', 'archived'};
+    if (requestedStatus != null && !allowedStatuses.contains(requestedStatus)) {
+      throw ExamValidationException(
+        'Invalid exam status. Use draft, published, or archived.',
+      );
     }
 
     final requested = classIds != null
@@ -238,7 +440,8 @@ class ExamService {
           SELECT e.class_id, e.status, c.teacher_id, c.subject_id,
                  EXISTS (
                    SELECT 1 FROM exam_attempts a WHERE a.exam_id = e.id
-                 )
+                 ),
+                 e.assessment_type
           FROM exams e
           JOIN classes c ON c.id = e.class_id
           WHERE e.id = @id
@@ -251,10 +454,9 @@ class ExamService {
 
       final cur = found.first;
       final currentClassId = cur[0]! as int;
-      final status = cur[1]! as String;
+      final currentStatus = cur[1]! as String;
       final ownerId = cur[2] as int?;
-      final subjectId = cur[3]! as int;
-      final hasAttempts = cur[4]! as bool;
+      final currentAssessmentType = cur[5]?.toString();
 
       // Same rule as before: admins, or the teacher who owns the exam.
       if (role != 'admin' && ownerId != userId) return null;
@@ -277,13 +479,6 @@ class ExamService {
       if (requested != null &&
           !(requested.length == current.length &&
               requested.containsAll(current))) {
-        if (status != 'draft' || hasAttempts) {
-          throw ExamValidationException(
-            'Sections can only be changed while the exam is a draft '
-            'with no student attempts.',
-          );
-        }
-
         final rows = await tx.execute(
           Sql.named(
             'SELECT id, subject_id, teacher_id FROM classes '
@@ -298,12 +493,9 @@ class ExamService {
           throw ExamValidationException('Section not found.');
         }
 
+        final distinctSubjects = <int>{};
         for (final r in rows) {
-          if ((r[1]! as int) != subjectId) {
-            throw ExamValidationException(
-              'An exam can only be given to sections of the same subject.',
-            );
-          }
+          distinctSubjects.add(r[1]! as int);
           if (role != 'admin' && r[2] != userId) {
             throw ExamValidationException(
               'You are not assigned to one of the selected sections.',
@@ -311,9 +503,18 @@ class ExamService {
           }
         }
 
+        if (distinctSubjects.length > 1) {
+          throw ExamValidationException(
+            'An exam can only be given to sections of the same subject.',
+          );
+        }
+
         final sorted = requested.toList()..sort();
-        newPrimary =
-            requested.contains(currentClassId) ? currentClassId : sorted.first;
+        newPrimary = (classId != null && requested.contains(classId))
+            ? classId
+            : (requested.contains(currentClassId)
+                  ? currentClassId
+                  : sorted.first);
 
         await tx.execute(
           Sql.named('''
@@ -343,6 +544,27 @@ class ExamService {
         finalIds = requested;
       }
 
+      final effectiveType = type ?? currentAssessmentType;
+      final effectiveStatus = requestedStatus ?? currentStatus;
+
+      final validation = await validateExamInDb(
+        tx,
+        id,
+        assessmentType: effectiveType,
+        title: cleanTitle,
+        description: clean(description),
+      );
+
+      // Strict minimum question validation is enforced when publishing or
+      // submitting an assessment (or saving changes to a published assessment).
+      // Incomplete assessments can always remain saved as drafts.
+      if (effectiveStatus == 'published' && !validation.isValid) {
+        throw ExamValidationException(
+          validation.summaryMessage,
+          validation: validation,
+        );
+      }
+
       final updated = await tx.execute(
         Sql.named('''
           UPDATE exams
@@ -352,6 +574,7 @@ class ExamService {
             instructions = @instructions,
             class_id = @class_id,
             assessment_type = COALESCE(@type::text, assessment_type),
+            status = COALESCE(@status::text, status),
             updated_at = NOW()
           WHERE id = @id
           RETURNING
@@ -373,6 +596,7 @@ class ExamService {
           'instructions': clean(instructions),
           'class_id': newPrimary,
           'type': type,
+          'status': requestedStatus,
         },
       );
 
@@ -390,6 +614,7 @@ class ExamService {
         'assessment_type': row[8],
         'version': row[9],
         'class_ids': (finalIds.toList()..sort()),
+        'validation': validation.toJson(),
       };
     });
   }
