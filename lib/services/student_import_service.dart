@@ -10,7 +10,7 @@ import 'api_service.dart';
 // CheckMate — Student Excel import (client-side orchestration)
 //
 // Reuses the EXISTING ApiService methods (getClasses, getStudents,
-// createClass, createStudent) so it works without backend changes.
+// createStudent). Only administrators can create or assign classes/subjects.
 // When a bulk endpoint exists later, replace only `execute()`.
 // =============================================================
 
@@ -28,9 +28,7 @@ class AcademicOptions {
   static List<String> schoolYears() {
     final now = DateTime.now();
     final base = now.month >= 6 ? now.year : now.year - 1;
-    return [
-      for (var y = base - 1; y <= base + 2; y++) '$y-${y + 1}',
-    ];
+    return [for (var y = base - 1; y <= base + 2; y++) '$y-${y + 1}'];
   }
 }
 
@@ -100,7 +98,9 @@ class XlsxIO {
   static String _numberText(String raw) {
     final d = double.tryParse(raw);
     if (d == null) return raw.trim();
-    if (d == d.truncateToDouble() && d.abs() < 1e15) return d.toInt().toString();
+    if (d == d.truncateToDouble() && d.abs() < 1e15) {
+      return d.toInt().toString();
+    }
     return raw.trim();
   }
 
@@ -137,7 +137,9 @@ class XlsxIO {
     final rels = <String, String>{};
     final relsXml = _read(files, 'xl/_rels/workbook.xml.rels');
     if (relsXml != null) {
-      for (final r in XmlDocument.parse(relsXml).findAllElements('Relationship')) {
+      for (final r in XmlDocument.parse(
+        relsXml,
+      ).findAllElements('Relationship')) {
         var target = _attr(r, 'Target');
         if (target.startsWith('/')) {
           target = target.substring(1);
@@ -155,7 +157,9 @@ class XlsxIO {
     }
     if (sheetPaths.isEmpty) {
       sheetPaths.addAll(
-        files.keys.where((k) => RegExp(r'^xl/worksheets/[^/]+\.xml$').hasMatch(k)).toList()
+        files.keys
+            .where((k) => RegExp(r'^xl/worksheets/[^/]+\.xml$').hasMatch(k))
+            .toList()
           ..sort(),
       );
     }
@@ -227,8 +231,7 @@ class XlsxIO {
       .replaceAll('<', '&lt;')
       .replaceAll('>', '&gt;');
 
-  static String _escAttr(String s) =>
-      _esc(s).replaceAll('"', '&quot;');
+  static String _escAttr(String s) => _esc(s).replaceAll('"', '&quot;');
 
   static const _stylesXml =
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -282,17 +285,21 @@ class XlsxIO {
     String listMessage = 'Pick a value from the list.',
   }) {
     const ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
-    const relNs = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-    const pkgRel = 'http://schemas.openxmlformats.org/package/2006/relationships';
+    const relNs =
+        'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+    const pkgRel =
+        'http://schemas.openxmlformats.org/package/2006/relationships';
 
     final cols = StringBuffer();
     if (widths.isNotEmpty) {
       cols.write('<cols>');
       for (var i = 0; i < widths.length; i++) {
         final style = columnStyles[i];
-        cols.write('<col min="${i + 1}" max="${i + 1}" '
-            'width="${widths[i]}" customWidth="1"'
-            '${style == null ? '' : ' style="$style"'}/>');
+        cols.write(
+          '<col min="${i + 1}" max="${i + 1}" '
+          'width="${widths[i]}" customWidth="1"'
+          '${style == null ? '' : ' style="$style"'}/>',
+        );
       }
       cols.write('</cols>');
     }
@@ -307,8 +314,10 @@ class XlsxIO {
         if (cell.text.isEmpty) {
           cells.write('<c r="$ref" s="${cell.style}"/>');
         } else {
-          cells.write('<c r="$ref" s="${cell.style}" t="inlineStr"><is>'
-              '<t xml:space="preserve">${_esc(cell.text)}</t></is></c>');
+          cells.write(
+            '<c r="$ref" s="${cell.style}" t="inlineStr"><is>'
+            '<t xml:space="preserve">${_esc(cell.text)}</t></is></c>',
+          );
         }
       }
       data.write('<row r="${r + 1}">$cells</row>');
@@ -317,43 +326,43 @@ class XlsxIO {
     final validation = listCell == null || listValues.isEmpty
         ? ''
         : '<dataValidations count="1">'
-            '<dataValidation type="list" allowBlank="1" showErrorMessage="1" '
-            'errorStyle="stop" errorTitle="Not in the list" '
-            'error="${_escAttr(listMessage)}" sqref="$listCell">'
-            '<formula1>"${_esc(listValues.join(','))}"</formula1>'
-            '</dataValidation></dataValidations>';
+              '<dataValidation type="list" allowBlank="1" showErrorMessage="1" '
+              'errorStyle="stop" errorTitle="Not in the list" '
+              'error="${_escAttr(listMessage)}" sqref="$listCell">'
+              '<formula1>"${_esc(listValues.join(','))}"</formula1>'
+              '</dataValidation></dataValidations>';
 
     final parts = <String, String>{
       '[Content_Types].xml':
           '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-              '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-              '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-              '<Default Extension="xml" ContentType="application/xml"/>'
-              '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-              '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-              '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
-              '</Types>',
+          '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+          '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+          '<Default Extension="xml" ContentType="application/xml"/>'
+          '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+          '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+          '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+          '</Types>',
       '_rels/.rels':
           '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-              '<Relationships xmlns="$pkgRel">'
-              '<Relationship Id="rId1" Type="$relNs/officeDocument" Target="xl/workbook.xml"/>'
-              '</Relationships>',
+          '<Relationships xmlns="$pkgRel">'
+          '<Relationship Id="rId1" Type="$relNs/officeDocument" Target="xl/workbook.xml"/>'
+          '</Relationships>',
       'xl/workbook.xml':
           '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-              '<workbook xmlns="$ns" xmlns:r="$relNs">'
-              '<sheets><sheet name="${_escAttr(sheetName)}" sheetId="1" r:id="rId1"/></sheets>'
-              '</workbook>',
+          '<workbook xmlns="$ns" xmlns:r="$relNs">'
+          '<sheets><sheet name="${_escAttr(sheetName)}" sheetId="1" r:id="rId1"/></sheets>'
+          '</workbook>',
       'xl/_rels/workbook.xml.rels':
           '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-              '<Relationships xmlns="$pkgRel">'
-              '<Relationship Id="rId1" Type="$relNs/worksheet" Target="worksheets/sheet1.xml"/>'
-              '<Relationship Id="rId2" Type="$relNs/styles" Target="styles.xml"/>'
-              '</Relationships>',
+          '<Relationships xmlns="$pkgRel">'
+          '<Relationship Id="rId1" Type="$relNs/worksheet" Target="worksheets/sheet1.xml"/>'
+          '<Relationship Id="rId2" Type="$relNs/styles" Target="styles.xml"/>'
+          '</Relationships>',
       'xl/styles.xml': _stylesXml,
       'xl/worksheets/sheet1.xml':
           '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-              '<worksheet xmlns="$ns">$cols'
-              '<sheetData>$data</sheetData>$validation</worksheet>',
+          '<worksheet xmlns="$ns">$cols'
+          '<sheetData>$data</sheetData>$validation</worksheet>',
     };
 
     final archive = Archive();
@@ -375,15 +384,19 @@ class XlsxIO {
     List<double> widths = const [],
   }) {
     const ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
-    const relNs = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-    const pkgRel = 'http://schemas.openxmlformats.org/package/2006/relationships';
+    const relNs =
+        'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+    const pkgRel =
+        'http://schemas.openxmlformats.org/package/2006/relationships';
 
     final cols = StringBuffer();
     if (widths.isNotEmpty) {
       cols.write('<cols>');
       for (var i = 0; i < widths.length; i++) {
-        cols.write('<col min="${i + 1}" max="${i + 1}" '
-            'width="${widths[i]}" customWidth="1"/>');
+        cols.write(
+          '<col min="${i + 1}" max="${i + 1}" '
+          'width="${widths[i]}" customWidth="1"/>',
+        );
       }
       cols.write('</cols>');
     }
@@ -391,38 +404,40 @@ class XlsxIO {
     final cells = StringBuffer();
     for (var i = 0; i < header.length; i++) {
       final letter = String.fromCharCode(65 + i);
-      cells.write('<c r="${letter}1" t="inlineStr"><is><t>'
-          '${_esc(header[i])}</t></is></c>');
+      cells.write(
+        '<c r="${letter}1" t="inlineStr"><is><t>'
+        '${_esc(header[i])}</t></is></c>',
+      );
     }
 
     final parts = <String, String>{
       '[Content_Types].xml':
           '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-              '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-              '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-              '<Default Extension="xml" ContentType="application/xml"/>'
-              '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-              '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-              '</Types>',
+          '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+          '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+          '<Default Extension="xml" ContentType="application/xml"/>'
+          '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+          '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+          '</Types>',
       '_rels/.rels':
           '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-              '<Relationships xmlns="$pkgRel">'
-              '<Relationship Id="rId1" Type="$relNs/officeDocument" Target="xl/workbook.xml"/>'
-              '</Relationships>',
+          '<Relationships xmlns="$pkgRel">'
+          '<Relationship Id="rId1" Type="$relNs/officeDocument" Target="xl/workbook.xml"/>'
+          '</Relationships>',
       'xl/workbook.xml':
           '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-              '<workbook xmlns="$ns" xmlns:r="$relNs">'
-              '<sheets><sheet name="${_esc(sheetName)}" sheetId="1" r:id="rId1"/></sheets>'
-              '</workbook>',
+          '<workbook xmlns="$ns" xmlns:r="$relNs">'
+          '<sheets><sheet name="${_esc(sheetName)}" sheetId="1" r:id="rId1"/></sheets>'
+          '</workbook>',
       'xl/_rels/workbook.xml.rels':
           '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-              '<Relationships xmlns="$pkgRel">'
-              '<Relationship Id="rId1" Type="$relNs/worksheet" Target="worksheets/sheet1.xml"/>'
-              '</Relationships>',
+          '<Relationships xmlns="$pkgRel">'
+          '<Relationship Id="rId1" Type="$relNs/worksheet" Target="worksheets/sheet1.xml"/>'
+          '</Relationships>',
       'xl/worksheets/sheet1.xml':
           '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-              '<worksheet xmlns="$ns">$cols'
-              '<sheetData><row r="1">$cells</row></sheetData></worksheet>',
+          '<worksheet xmlns="$ns">$cols'
+          '<sheetData><row r="1">$cells</row></sheetData></worksheet>',
     };
 
     final archive = Archive();
@@ -448,6 +463,7 @@ class ImportRow {
     required this.section,
     required this.firstName,
     required this.lastName,
+    this.subject,
     this.email,
   });
 
@@ -457,6 +473,7 @@ class ImportRow {
   final String section;
   final String firstName;
   final String lastName;
+  final String? subject;
 
   /// Optional — can be added later from the student's info.
   final String? email;
@@ -491,11 +508,11 @@ class ParsedStudentFile {
 
   /// Same file details with different rows (e.g. sections renamed).
   ParsedStudentFile withRows(List<ImportRow> newRows) => ParsedStudentFile(
-        newRows,
-        issues,
-        subject: subject,
-        fileSection: fileSection,
-      );
+    newRows,
+    issues,
+    subject: subject,
+    fileSection: fileSection,
+  );
 
   Map<String, List<ImportRow>> get bySection {
     final map = <String, List<ImportRow>>{};
@@ -517,7 +534,7 @@ class ImportPlanSection {
   });
 
   final String section;
-  final int? existingClassId; // null => class will be created
+  final int? existingClassId; // null => no assigned class found
   final List<ImportRow> toAdd;
   final List<ImportRow> duplicates;
 }
@@ -528,8 +545,7 @@ class ImportPlan {
 
   int get newClasses => sections.where((s) => s.existingClassId == null).length;
   int get studentsToAdd => sections.fold(0, (n, s) => n + s.toAdd.length);
-  List<ImportRow> get duplicates =>
-      [for (final s in sections) ...s.duplicates];
+  List<ImportRow> get duplicates => [for (final s in sections) ...s.duplicates];
 
   /// Plan where duplicates are dropped (they're already excluded from toAdd).
   bool get nothingToDo => studentsToAdd == 0;
@@ -551,18 +567,33 @@ class StudentImportService {
   // ---------- Parsing ----------
 
   static const _numberAliases = {
-    'studentno', 'studentnumber', 'studentid', 'studno', 'idno', 'idnumber',
+    'studentno',
+    'studentnumber',
+    'studentid',
+    'studno',
+    'idno',
+    'idnumber',
   };
   static const _nameAliases = {'name', 'studentname', 'fullname'};
   static const _sectionAliases = {
-    'section', 'class', 'classsection', 'sectionclass',
+    'section',
+    'class',
+    'classsection',
+    'sectionclass',
   };
   static const _subjectAliases = {
-    'subject', 'subjectname', 'subjecttitle', 'course', 'coursename',
+    'subject',
+    'subjectname',
+    'subjecttitle',
+    'course',
+    'coursename',
     'coursetitle',
   };
   static const _emailAliases = {
-    'email', 'emailaddress', 'studentemail', 'emailadd',
+    'email',
+    'emailaddress',
+    'studentemail',
+    'emailadd',
   };
 
   static String _norm(String s) =>
@@ -631,13 +662,14 @@ class StudentImportService {
       }
     }
 
-    int numCol = -1, nameCol = -1, secCol = -1, emailCol = -1;
+    int numCol = -1, nameCol = -1, secCol = -1, subCol = -1, emailCol = -1;
     final header = rows[headerIndex];
     for (var c = 0; c < header.length; c++) {
       final h = _norm(header[c]);
       if (numCol == -1 && _numberAliases.contains(h)) numCol = c;
       if (nameCol == -1 && _nameAliases.contains(h)) nameCol = c;
       if (secCol == -1 && _sectionAliases.contains(h)) secCol = c;
+      if (subCol == -1 && _subjectAliases.contains(h)) subCol = c;
       if (emailCol == -1 && _emailAliases.contains(h)) emailCol = c;
     }
 
@@ -645,6 +677,7 @@ class StudentImportService {
       if (numCol == -1) 'Student No.',
       if (nameCol == -1) 'Name',
       if (secCol == -1 && fileSection.isEmpty) 'Section',
+      if (subCol == -1 && fileSubject.isEmpty) 'Subject',
     ];
     if (missing.isNotEmpty) {
       throw ImportFileException(
@@ -653,8 +686,7 @@ class StudentImportService {
       );
     }
 
-    String at(List<String> row, int col) =>
-        col < row.length ? row[col] : '';
+    String at(List<String> row, int col) => col < row.length ? row[col] : '';
 
     final valid = <ImportRow>[];
     final issues = <ImportIssue>[];
@@ -669,10 +701,21 @@ class StudentImportService {
       // A Section column wins; otherwise the Section at the top of the sheet.
       final ownSection = secCol == -1 ? '' : at(row, secCol);
       final section = ownSection.isEmpty ? fileSection : ownSection;
+      final ownSubject = subCol == -1
+          ? ''
+          : at(row, subCol).replaceAll(RegExp(r'\s+'), ' ').trim();
+      final rowSubject = ownSubject.isEmpty ? fileSubject : ownSubject;
+      if (fileSubject.isEmpty && ownSubject.isNotEmpty) {
+        fileSubject = ownSubject;
+      }
       final email = emailCol == -1 ? '' : at(row, emailCol);
 
       // Fully blank row: ignore silently (not a record).
-      if (number.isEmpty && name.isEmpty && ownSection.isEmpty && email.isEmpty) {
+      if (number.isEmpty &&
+          name.isEmpty &&
+          ownSection.isEmpty &&
+          ownSubject.isEmpty &&
+          email.isEmpty) {
         continue;
       }
 
@@ -680,6 +723,7 @@ class StudentImportService {
       if (number.isEmpty) problems.add('Student No. is empty');
       if (name.isEmpty) problems.add('Name is empty');
       if (section.isEmpty) problems.add('Section is empty');
+      if (rowSubject.isEmpty) problems.add('Subject is empty');
       // Email is optional, but if it is filled in it must be a real address.
       if (email.isNotEmpty && !StudentValidation.isValidEmail(email)) {
         problems.add('Email "$email" is not valid');
@@ -710,15 +754,18 @@ class StudentImportService {
         continue;
       }
 
-      valid.add(ImportRow(
-        rowNumber: excelRow,
-        studentNumber: number,
-        name: name,
-        section: section,
-        firstName: split!.first,
-        lastName: split.last,
-        email: email.isEmpty ? null : email,
-      ));
+      valid.add(
+        ImportRow(
+          rowNumber: excelRow,
+          studentNumber: number,
+          name: '${split!.last}, ${split.first}',
+          section: section,
+          firstName: split.first,
+          lastName: split.last,
+          subject: rowSubject.isEmpty ? null : rowSubject,
+          email: email.isEmpty ? null : email,
+        ),
+      );
     }
 
     if (valid.isEmpty && issues.isEmpty) {
@@ -742,20 +789,34 @@ class StudentImportService {
   }
 
   static const _surnameParticles = {
-    'de', 'del', 'dela', 'delos', 'de la', 'la', 'san', 'santa', 'santo',
-    'van', 'von', 'da', 'di', 'mac', 'bin', 'al',
+    'de',
+    'del',
+    'dela',
+    'delos',
+    'de la',
+    'la',
+    'san',
+    'santa',
+    'santo',
+    'van',
+    'von',
+    'da',
+    'di',
+    'mac',
+    'bin',
+    'al',
   };
 
-  /// "Last, First"  or  "First Middle Last" (keeps particles like
-  /// "Dela Cruz" / "De Leon" together as the surname).
-  /// Returns null if a first+last name cannot be determined.
+  /// Excel files are always written surname first ("LAST, FIRST MIDDLE" or
+  /// "LAST FIRST MIDDLE", keeping particles like "DELA CRUZ" / "DE LEON"
+  /// together as the surname). Always returns uppercase names.
   static ({String first, String last})? splitName(String full) {
     final clean = full.replaceAll(RegExp(r'\s+'), ' ').trim();
 
     if (clean.contains(',')) {
       final i = clean.indexOf(',');
-      final last = clean.substring(0, i).trim();
-      final first = clean.substring(i + 1).trim();
+      final last = clean.substring(0, i).trim().toUpperCase();
+      final first = clean.substring(i + 1).trim().toUpperCase();
       if (last.isEmpty || first.isEmpty) return null;
       return (first: first, last: last);
     }
@@ -763,14 +824,16 @@ class StudentImportService {
     final tokens = clean.split(' ');
     if (tokens.length < 2) return null;
 
-    var lastStart = tokens.length - 1;
-    while (lastStart > 1 &&
-        _surnameParticles.contains(tokens[lastStart - 1].toLowerCase())) {
-      lastStart--;
+    var lastEnd = 1;
+    while (lastEnd < tokens.length - 1 &&
+        _surnameParticles.contains(
+          tokens.sublist(0, lastEnd).join(' ').toLowerCase(),
+        )) {
+      lastEnd++;
     }
     return (
-      first: tokens.sublist(0, lastStart).join(' '),
-      last: tokens.sublist(lastStart).join(' '),
+      first: tokens.sublist(lastEnd).join(' ').toUpperCase(),
+      last: tokens.sublist(0, lastEnd).join(' ').toUpperCase(),
     );
   }
 
@@ -809,8 +872,10 @@ class StudentImportService {
     List<String> sections = const [],
   }) {
     XlsxCell? note(int i) => i < _templateNotes.length
-        ? XlsxCell(_templateNotes[i],
-            i == 0 ? XlsxStyle.noteTitle : XlsxStyle.note)
+        ? XlsxCell(
+            _templateNotes[i],
+            i == 0 ? XlsxStyle.noteTitle : XlsxStyle.note,
+          )
         : null;
 
     const label = XlsxStyle.label;
@@ -847,8 +912,7 @@ class StudentImportService {
       for (final s in sections)
         if (s.trim().isNotEmpty && !s.contains(',') && !s.contains('"'))
           s.trim(),
-    }.toList()
-      ..sort();
+    }.toList()..sort();
     final useList = options.isNotEmpty && options.join(',').length <= 250;
 
     return XlsxIO.writeGrid(
@@ -868,9 +932,48 @@ class StudentImportService {
 
   static int? _id(Object? v) => int.tryParse(v?.toString() ?? '');
 
+  static String _secKey(Object? v) =>
+      (v?.toString() ?? '').toUpperCase().replaceAll(RegExp(r'[\s-]+'), '');
+  static bool _matchesImportSection(
+    Object? importedSection,
+    Object? classSection,
+  ) {
+    final imported = _secKey(importedSection);
+    final actual = _secKey(classSection);
+
+    if (imported == actual) return true;
+
+    final short = RegExp(r'^([A-Z]+)(\d)([A-Z]+)$');
+    final full = RegExp(r'^([A-Z]+)(\d)[12]([A-Z]+)$');
+
+    final shortMatch = short.firstMatch(imported);
+    final fullMatch = full.firstMatch(actual);
+
+    if (shortMatch == null || fullMatch == null) return false;
+
+    return shortMatch.group(1) == fullMatch.group(1) &&
+        shortMatch.group(2) == fullMatch.group(2) &&
+        shortMatch.group(3) == fullMatch.group(3);
+  }
+
+  static int? _semNum(Object? v) {
+    final text = _n(v);
+    if (text.startsWith('1') ||
+        text.startsWith('first') ||
+        text.contains('1')) {
+      return 1;
+    }
+    if (text.startsWith('2') ||
+        text.startsWith('second') ||
+        text.contains('2')) {
+      return 2;
+    }
+    return null;
+  }
+
   /// Class subjects (the teaching "subjects" table) and the Academic
   /// Management catalog use different ids, so ids are not compared directly:
-  /// link id first, then code, then name.
+  /// link id first, then legacy subject id, then code, then name.
   static bool _classHasSubject(
     Map<String, dynamic> c,
     Map<String, dynamic> catalogSubject,
@@ -879,15 +982,30 @@ class StudentImportService {
     if (s is! Map) return false;
 
     final linked = _id(s['academic_subject_id']);
-    final wanted = _id(catalogSubject['id']);
-    if (linked != null && wanted != null) return linked == wanted;
+    final wanted = _id(
+      catalogSubject['academic_subject_id'] ?? catalogSubject['id'],
+    );
+    if (linked != null && wanted != null && linked == wanted) return true;
+
+    final classSubId = _id(s['id'] ?? c['subject_id']);
+    final legacyWanted = _id(
+      catalogSubject['legacy_subject_id'] ?? catalogSubject['subject_id'],
+    );
+    if (classSubId != null &&
+        legacyWanted != null &&
+        classSubId == legacyWanted) {
+      return true;
+    }
 
     final code = _n(s['code']);
     final wantedCode = _n(catalogSubject['code']);
-    if (code.isNotEmpty && wantedCode.isNotEmpty) return code == wantedCode;
+    if (code.isNotEmpty && wantedCode.isNotEmpty && code == wantedCode) {
+      return true;
+    }
 
-    return _norm(s['name']?.toString() ?? '') ==
-        _norm(catalogSubject['name']?.toString() ?? '');
+    final name = _norm(s['name']?.toString() ?? '');
+    final wantedName = _norm(catalogSubject['name']?.toString() ?? '');
+    return name.isNotEmpty && name == wantedName;
   }
 
   static Map<String, dynamic>? _findClass(
@@ -897,13 +1015,28 @@ class StudentImportService {
     required String schoolYear,
     required String semester,
   }) {
+    final wantedSem = _semNum(semester);
+    final wantedYear = _n(schoolYear);
+
     for (final c in classes) {
-      if (_classHasSubject(c, subject) &&
-          _n(c['section']) == _n(section) &&
-          _n(c['school_year']) == _n(schoolYear) &&
-          _n(c['semester']) == _n(semester)) {
-        return c;
+      if (!_classHasSubject(c, subject)) continue;
+      if (!_matchesImportSection(section, c['section'])) continue;
+
+      final cYear = _n(c['school_year']);
+      if (cYear.isNotEmpty && wantedYear.isNotEmpty && cYear != wantedYear) {
+        continue;
       }
+
+      final cSem = _semNum(c['semester']);
+      if (cSem != null && wantedSem != null) {
+        if (cSem != wantedSem) continue;
+      } else if (_n(c['semester']).isNotEmpty &&
+          _n(semester).isNotEmpty &&
+          _n(c['semester']) != _n(semester)) {
+        continue;
+      }
+
+      return c;
     }
     return null;
   }
@@ -946,12 +1079,14 @@ class StudentImportService {
         (existingNumbers.contains(_n(r.studentNumber)) ? dupes : toAdd).add(r);
       }
 
-      sections.add(ImportPlanSection(
-        section: entry.key,
-        existingClassId: classId,
-        toAdd: toAdd,
-        duplicates: dupes,
-      ));
+      sections.add(
+        ImportPlanSection(
+          section: entry.key,
+          existingClassId: classId,
+          toAdd: toAdd,
+          duplicates: dupes,
+        ),
+      );
     }
     return ImportPlan(sections);
   }
@@ -982,52 +1117,17 @@ class StudentImportService {
       var classId = s.existingClassId;
 
       if (classId == null) {
-        try {
-          await ApiService.createClass(
-            token: token,
-            subjectId: subjectId,
-            teacherId: teacherId,
-            section: s.section,
-            schoolYear: schoolYear,
-            semester: semester,
-          );
-          classesCreated++;
-
-          // Re-read instead of assuming createClass's return shape.
-          final classes = await ApiService.getClasses(token);
-          final created = _findClass(
-            classes,
-            subject: subject,
-            section: s.section,
-            schoolYear: schoolYear,
-            semester: semester,
-          );
-          classId = created == null ? null : _id(created['id']);
-        } catch (e) {
-          classId = null;
-          final msg = e.toString().replaceFirst('Exception: ', '');
-          for (final r in s.toAdd) {
-            failures.add(ImportIssue(
+        for (final r in s.toAdd) {
+          failures.add(
+            ImportIssue(
               r.rowNumber,
-              'Could not create class ${s.section}: $msg',
-            ));
-            done++;
-          }
-          onProgress?.call(done, total);
-          continue;
+              'No assigned class found for ${s.section}. Only an administrator can assign subjects and sections.',
+            ),
+          );
+          done++;
         }
-
-        if (classId == null) {
-          for (final r in s.toAdd) {
-            failures.add(ImportIssue(
-              r.rowNumber,
-              'Class ${s.section} was created but could not be found.',
-            ));
-            done++;
-          }
-          onProgress?.call(done, total);
-          continue;
-        }
+        onProgress?.call(done, total);
+        continue;
       }
 
       // Small concurrent batches: fast enough for 50+ students without
@@ -1035,27 +1135,31 @@ class StudentImportService {
       const batch = 5;
       for (var i = 0; i < s.toAdd.length; i += batch) {
         final chunk = s.toAdd.skip(i).take(batch).toList();
-        await Future.wait(chunk.map((r) async {
-          try {
-            await ApiService.createStudent(
-              token: token,
-              classId: classId!,
-              studentNumber: r.studentNumber,
-              firstName: r.firstName,
-              lastName: r.lastName,
-              email: r.email,
-            );
-            added++;
-          } catch (e) {
-            failures.add(ImportIssue(
-              r.rowNumber,
-              '${r.name}: ${e.toString().replaceFirst('Exception: ', '')}',
-            ));
-          } finally {
-            done++;
-            onProgress?.call(done, total);
-          }
-        }));
+        await Future.wait(
+          chunk.map((r) async {
+            try {
+              await ApiService.createStudent(
+                token: token,
+                classId: classId,
+                studentNumber: r.studentNumber,
+                firstName: r.firstName,
+                lastName: r.lastName,
+                email: r.email,
+              );
+              added++;
+            } catch (e) {
+              failures.add(
+                ImportIssue(
+                  r.rowNumber,
+                  '${r.name}: ${e.toString().replaceFirst('Exception: ', '')}',
+                ),
+              );
+            } finally {
+              done++;
+              onProgress?.call(done, total);
+            }
+          }),
+        );
       }
     }
 
@@ -1084,6 +1188,26 @@ class StudentValidation {
     final v = raw.trim();
     if (v.isEmpty) return required ? 'Email is required.' : null;
     return isValidEmail(v) ? null : 'Enter a valid email address.';
+  }
+
+  static final _studentEmailUsernameRe = RegExp(r'^[A-Za-z0-9._%+\-]+$');
+
+  /// Validates the editable username for an STI student email.
+  static String? studentEmailUsername(String raw, {bool required = false}) {
+    final username = raw.trim();
+
+    if (username.isEmpty) {
+      return required ? 'Email username is required.' : null;
+    }
+
+    const domain = '@malolos.sti.edu.ph';
+
+    if (username.length + domain.length > 255 ||
+        !_studentEmailUsernameRe.hasMatch(username)) {
+      return 'Enter a valid email username.';
+    }
+
+    return null;
   }
 
   /// Digits only, 6–15 long, not one repeated digit.

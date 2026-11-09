@@ -5,9 +5,12 @@ import '../services/answer_sheet_pdf_service.dart';
 import '../services/api_service.dart';
 import '../services/assessment_validator.dart';
 import '../services/auth_storage.dart';
+import '../services/question_paper_import_service.dart';
 import '../services/question_paper_pdf_service.dart';
 import 'answer_sheet_preview_screen.dart';
 import 'exam_preview_screen.dart';
+import 'exams_tab.dart'
+    show importParsedSectionsIntoExam, pickAndParseQuestionPaper;
 import 'questions_screen.dart';
 
 class ExamBuilderScreen extends StatefulWidget {
@@ -61,15 +64,33 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
       final exam = matchingExams.first;
 
       final sections = await ApiService.getExamSections(token, widget.examId);
+      sections.sort((a, b) {
+        final oa = int.tryParse(a['section_order']?.toString() ?? '') ?? 0;
+        final ob = int.tryParse(b['section_order']?.toString() ?? '') ?? 0;
+        if (oa != ob) return oa.compareTo(ob);
+        final ida = int.tryParse(a['id']?.toString() ?? '') ?? 0;
+        final idb = int.tryParse(b['id']?.toString() ?? '') ?? 0;
+        return ida.compareTo(idb);
+      });
+
       final questionsMap = <int, List<Map<String, dynamic>>>{};
 
       for (final section in sections) {
         final sectionId = int.tryParse(section['id']?.toString() ?? '');
         if (sectionId == null) continue;
-        questionsMap[sectionId] = await ApiService.getQuestions(
+        final qList = await ApiService.getQuestions(
           token,
           sectionId,
         );
+        qList.sort((a, b) {
+          final na = int.tryParse(a['question_number']?.toString() ?? '') ?? 0;
+          final nb = int.tryParse(b['question_number']?.toString() ?? '') ?? 0;
+          if (na != nb) return na.compareTo(nb);
+          final ida = int.tryParse(a['id']?.toString() ?? '') ?? 0;
+          final idb = int.tryParse(b['id']?.toString() ?? '') ?? 0;
+          return ida.compareTo(idb);
+        });
+        questionsMap[sectionId] = qList;
       }
 
       final students = await ApiService.getExamStudents(token, exam);
@@ -247,7 +268,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
         );
         await Printing.sharePdf(
           bytes: docxBytes,
-          filename: _docFileName('question_paper', exam, 'docx'),
+          filename: _docFileName('questionnaire', exam, 'docx'),
         );
         return;
       }
@@ -261,7 +282,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
       if (download) {
         await Printing.sharePdf(
           bytes: pdfBytes,
-          filename: _pdfFileName('question_paper', exam),
+          filename: _pdfFileName('questionnaire', exam),
         );
       } else {
         await Printing.layoutPdf(
@@ -343,26 +364,89 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
     }
   }
 
-  Future<void> _showAddSectionDialog() async {
-    final nameController = TextEditingController();
-    final pointsController = TextEditingController(text: '1');
-    String questionType = 'multiple_choice';
-    bool saving = false;
-    String? error;
+  Future<void> _importPdfIntoCurrentExam() async {
+    final parsedPaper = await pickAndParseQuestionPaper(context);
+    if (parsedPaper == null || !mounted) return;
+    try {
+      final token = await AuthStorage.getToken();
+      if (token == null || token.isEmpty) {
+        throw Exception('Please log in again.');
+      }
+      final nextOrder =
+          _sections.fold<int>(0, (m, s) {
+            final o = int.tryParse(s['section_order']?.toString() ?? '') ?? 0;
+            return o > m ? o : m;
+          }) +
+          1;
+      final count = await importParsedSectionsIntoExam(
+        token: token,
+        examId: widget.examId,
+        paper: parsedPaper,
+        startingSectionOrder: nextOrder,
+        existingSections: _sections,
+        existingQuestionsBySection: _questions,
+      );
+      await _loadExam();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Imported $count questions from "${parsedPaper.fileName}" organized by test type.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+      );
+    }
+  }
+
+  Future<void> _showSectionDialog({
+    Map<String, dynamic>? section,
+    int? sectionIndex,
+  }) async {
+    final editing = section != null;
+    String questionType =
+        section?['question_type']?.toString() ?? 'multiple_choice';
     final nextOrder =
-        _sections.fold<int>(0, (maxOrder, section) {
+        _sections.fold<int>(0, (maxOrder, sec) {
           final order =
-              int.tryParse(section['section_order']?.toString() ?? '') ?? 0;
+              int.tryParse(sec['section_order']?.toString() ?? '') ?? 0;
           return order > maxOrder ? order : maxOrder;
         }) +
         1;
+    final effectiveOrder = editing
+        ? (int.tryParse(section['section_order']?.toString() ?? '') ??
+              ((sectionIndex ?? 0) + 1))
+        : nextOrder;
+
+    final initialName = editing
+        ? ((section['name']?.toString().trim().isNotEmpty ?? false)
+              ? section['name'].toString().trim()
+              : QuestionPaperImportService.autoSectionName(
+                  effectiveOrder,
+                  questionType,
+                ))
+        : QuestionPaperImportService.autoSectionName(
+            effectiveOrder,
+            questionType,
+          );
+
+    final nameController = TextEditingController(text: initialName);
+    final pointsController = TextEditingController(
+      text: editing ? (section['default_points']?.toString() ?? '1') : '1',
+    );
+    bool saving = false;
+    String? error;
 
     try {
       final created = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => StatefulBuilder(
           builder: (dialogContext, updateDialog) => AlertDialog(
-            title: const Text('Add Exam Section'),
+            title: Text(editing ? 'Edit Exam Section' : 'Add Exam Section'),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -370,10 +454,13 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                   TextField(
                     controller: nameController,
                     enabled: !saving,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Section Name',
-                      hintText: 'e.g. Part I - Multiple Choice',
-                      border: OutlineInputBorder(),
+                      hintText: QuestionPaperImportService.autoSectionName(
+                        effectiveOrder,
+                        questionType,
+                      ),
+                      border: const OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -401,7 +488,14 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                         ? null
                         : (value) {
                             if (value != null) {
-                              updateDialog(() => questionType = value);
+                              updateDialog(() {
+                                questionType = value;
+                                nameController.text =
+                                    QuestionPaperImportService.autoSectionName(
+                                      effectiveOrder,
+                                      value,
+                                    );
+                              });
                             }
                           },
                   ),
@@ -440,14 +534,19 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                 onPressed: saving
                     ? null
                     : () async {
-                        final name = nameController.text.trim();
+                        final rawName = nameController.text.trim();
+                        final name = rawName.isEmpty
+                            ? QuestionPaperImportService.autoSectionName(
+                                effectiveOrder,
+                                questionType,
+                              )
+                            : rawName;
                         final points = num.tryParse(
                           pointsController.text.trim(),
                         );
-                        if (name.isEmpty || points == null || points <= 0) {
+                        if (points == null || points <= 0) {
                           updateDialog(
-                            () => error =
-                                'Enter a section name and points greater than zero.',
+                            () => error = 'Enter points greater than zero.',
                           );
                           return;
                         }
@@ -460,14 +559,30 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                           if (token == null || token.isEmpty) {
                             throw Exception('Please log in again.');
                           }
-                          await ApiService.createExamSection(
-                            token: token,
-                            examId: widget.examId,
-                            name: name,
-                            questionType: questionType,
-                            sectionOrder: nextOrder,
-                            defaultPoints: points,
-                          );
+                          if (editing) {
+                            final sectionId = int.tryParse(
+                              section['id']?.toString() ?? '',
+                            );
+                            if (sectionId == null) {
+                              throw Exception('Invalid section ID.');
+                            }
+                            await ApiService.updateExamSection(
+                              token: token,
+                              sectionId: sectionId,
+                              name: name,
+                              defaultPoints: points,
+                              questionType: questionType,
+                            );
+                          } else {
+                            await ApiService.createExamSection(
+                              token: token,
+                              examId: widget.examId,
+                              name: name,
+                              questionType: questionType,
+                              sectionOrder: nextOrder,
+                              defaultPoints: points,
+                            );
+                          }
                           if (dialogContext.mounted) {
                             Navigator.pop(dialogContext, true);
                           }
@@ -487,7 +602,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text('Save Section'),
+                    : Text(editing ? 'Save Changes' : 'Save Section'),
               ),
             ],
           ),
@@ -688,7 +803,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
 
           _buildValidationCard(),
 
-          // PREVIEW TEST PAPER
+          // PREVIEW QUESTIONNAIRE
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
@@ -700,18 +815,18 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                   ),
                 );
               },
-              child: const Text('Preview Test Paper'),
+              child: const Text('Preview Questionnaire'),
             ),
           ),
 
           const SizedBox(height: 10),
 
-          // GENERATE QUESTION PAPER PDF
+          // PRINT QUESTIONNAIRE PDF
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
               onPressed: _generateQuestionPaperPdf,
-              child: const Text('Print Question Paper'),
+              child: const Text('Print Questionnaire'),
             ),
           ),
 
@@ -723,7 +838,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
               onPressed: () =>
                   _generateQuestionPaperPdf(download: true, asDocx: true),
               icon: const Icon(Icons.description_outlined),
-              label: const Text('Download Question Paper (Word .docx)'),
+              label: const Text('Download Questionnaire (Word .docx)'),
             ),
           ),
 
@@ -734,7 +849,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
             child: OutlinedButton.icon(
               onPressed: () => _generateQuestionPaperPdf(download: true),
               icon: const Icon(Icons.download),
-              label: const Text('Download Question Paper PDF'),
+              label: const Text('Download Questionnaire PDF'),
             ),
           ),
 
@@ -784,18 +899,31 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
 
           const SizedBox(height: 24),
 
-          Row(
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              const Expanded(
-                child: Text(
-                  'Exam Sections',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
+              const Text(
+                'Exam Sections',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
-              FilledButton.icon(
-                onPressed: _showAddSectionDialog,
-                icon: const Icon(Icons.add),
-                label: const Text('Add Section'),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _importPdfIntoCurrentExam,
+                    icon: const Icon(Icons.upload_file_outlined),
+                    label: const Text('Upload PDF'),
+                  ),
+                  FilledButton.icon(
+                    onPressed: () => _showSectionDialog(),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add Section'),
+                  ),
+                ],
               ),
             ],
           ),
@@ -810,57 +938,77 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
               ),
             ),
 
-          ..._sections.map((section) {
-            final type = section['question_type']?.toString() ?? '';
+          for (var idx = 0; idx < _sections.length; idx++)
+            Builder(
+              builder: (context) {
+                final section = _sections[idx];
+                final type = section['question_type']?.toString() ?? '';
+                final sectionId = int.tryParse(
+                  section['id']?.toString() ?? '',
+                );
+                final qCount = sectionId == null
+                    ? 0
+                    : (_questions[sectionId]?.length ?? 0);
 
-            final sectionId = int.tryParse(section['id']?.toString() ?? '');
-            final qCount = sectionId == null
-                ? 0
-                : (_questions[sectionId]?.length ?? 0);
-
-            return Card(
-              margin: const EdgeInsets.only(bottom: 12),
-              child: ListTile(
-                onTap: sectionId == null
-                    ? null
-                    : () async {
-                        await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => QuestionsScreen(
-                              sectionId: sectionId,
-                              sectionName:
-                                  section['name']?.toString() ?? 'Section',
-                              questionType: type,
-                            ),
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: ListTile(
+                    onTap: sectionId == null
+                        ? null
+                        : () async {
+                            await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => QuestionsScreen(
+                                  sectionId: sectionId,
+                                  sectionName:
+                                      section['name']?.toString() ?? 'Section',
+                                  questionType: type,
+                                ),
+                              ),
+                            );
+                            if (mounted) {
+                              await _loadExam();
+                            }
+                          },
+                    leading: CircleAvatar(
+                      child: Text(
+                        section['section_order']?.toString() ?? '${idx + 1}',
+                      ),
+                    ),
+                    title: Text(section['name']?.toString() ?? 'Section'),
+                    subtitle: Text(
+                      '${_formatQuestionType(type)} • '
+                      '${section['default_points'] ?? '1'} pts/item • '
+                      '$qCount/5 min questions',
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'Edit section',
+                          icon: const Icon(Icons.edit_outlined),
+                          onPressed: () => _showSectionDialog(
+                            section: section,
+                            sectionIndex: idx,
                           ),
-                        );
-                        if (mounted) {
-                          await _loadExam();
-                        }
-                      },
-                leading: CircleAvatar(
-                  child: Text(section['section_order']?.toString() ?? '-'),
-                ),
-                title: Text(section['name']?.toString() ?? 'Section'),
-                subtitle: Text(
-                  '${_formatQuestionType(type)} • '
-                  '${section['default_points'] ?? '1'} pts/item • '
-                  '$qCount/5 min questions',
-                ),
-                trailing: IconButton(
-                  tooltip: 'Delete section',
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: sectionId == null
-                      ? null
-                      : () => _deleteSection(
-                          sectionId,
-                          section['name']?.toString() ?? 'Section',
                         ),
-                ),
-              ),
-            );
-          }),
+                        IconButton(
+                          tooltip: 'Delete section',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: sectionId == null
+                              ? null
+                              : () => _deleteSection(
+                                  sectionId,
+                                  section['name']?.toString() ?? 'Section',
+                                ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
         ],
       ),
     );

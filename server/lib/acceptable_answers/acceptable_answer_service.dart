@@ -26,7 +26,7 @@ class AcceptableAnswerService {
       return {
         'id': row[0],
         'question_id': row[1],
-        'answer': row[2],
+        'answer': row[2]?.toString().toUpperCase(),
         'created_at': row[3].toString(),
       };
     }).toList();
@@ -36,7 +36,8 @@ class AcceptableAnswerService {
     required int questionId,
     required String answer,
   }) async {
-    if (answer.trim().isEmpty) {
+    final normalized = answer.trim().toUpperCase();
+    if (normalized.isEmpty) {
       throw Exception(
         'Answer is required.',
       );
@@ -60,7 +61,7 @@ class AcceptableAnswerService {
       '''),
       parameters: {
         'question_id': questionId,
-        'answer': answer.trim(),
+        'answer': normalized,
       },
     );
 
@@ -69,7 +70,7 @@ class AcceptableAnswerService {
     return {
       'id': row[0],
       'question_id': row[1],
-      'answer': row[2],
+      'answer': row[2]?.toString().toUpperCase(),
       'created_at': row[3].toString(),
     };
   }

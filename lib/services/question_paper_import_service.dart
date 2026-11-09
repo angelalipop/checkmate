@@ -71,10 +71,74 @@ class ImportedQuestionPaper {
       sections.fold<int>(0, (sum, s) => sum + s.questions.length);
 }
 
-/// Parses an uploaded Question Paper (`.pdf` or `.docx`) into structured
-/// sections, questions, choices, and header metadata for the Exam Builder.
+/// Parses an uploaded Questionnaire in multiple file formats (`.pdf`, `.docx`,
+/// `.doc`, `.xlsx`, `.csv`, `.tsv`, `.txt`, `.rtf`, `.odt`, `.md`, `.html`)
+/// into structured sections, questions, choices, and header metadata, and
+/// automatically organizes all uploaded questions according to their respective
+/// test types (`multiple_choice`, `true_false`, `identification`).
 class QuestionPaperImportService {
   QuestionPaperImportService._();
+
+  static const List<String> supportedExtensions = <String>[
+    'pdf',
+    'docx',
+    'doc',
+    'xlsx',
+    'csv',
+    'tsv',
+    'txt',
+    'rtf',
+    'odt',
+    'md',
+    'html',
+    'htm',
+  ];
+
+  /// Formats an automatic section name based on 1-based [sectionOrder] and
+  /// [questionType], e.g. `"Part I: Multiple Choice"`, `"Part II: True or False"`.
+  static String autoSectionName(int sectionOrder, String questionType) {
+    return 'Part ${romanNumeral(sectionOrder)}: ${labelForType(questionType)}';
+  }
+
+  static String labelForType(String qType) {
+    switch (qType.trim().toLowerCase()) {
+      case 'multiple_choice':
+        return 'Multiple Choice';
+      case 'true_false':
+        return 'True or False';
+      case 'identification':
+        return 'Identification';
+      default:
+        return 'Multiple Choice';
+    }
+  }
+
+  static String romanNumeral(int n) {
+    const numerals = <String>[
+      'I',
+      'II',
+      'III',
+      'IV',
+      'V',
+      'VI',
+      'VII',
+      'VIII',
+      'IX',
+      'X',
+      'XI',
+      'XII',
+      'XIII',
+      'XIV',
+      'XV',
+      'XVI',
+      'XVII',
+      'XVIII',
+      'XIX',
+      'XX',
+    ];
+    if (n >= 1 && n <= numerals.length) return numerals[n - 1];
+    return '$n';
+  }
 
   static ImportedQuestionPaper parseBytes({
     required Uint8List bytes,
@@ -83,12 +147,53 @@ class QuestionPaperImportService {
     final lowerName = fileName.trim().toLowerCase();
     final isZipHeader =
         bytes.length >= 4 && bytes[0] == 0x50 && bytes[1] == 0x4B;
+    final isPdfHeader =
+        bytes.length >= 4 &&
+        bytes[0] == 0x25 && // %
+        bytes[1] == 0x50 && // P
+        bytes[2] == 0x44 && // D
+        bytes[3] == 0x46; // F
+
+    if (lowerName.endsWith('.xlsx')) {
+      final rows = _extractRowsFromXlsx(bytes);
+      final tabular = _tryParseTabularRows(rows: rows, fileName: fileName);
+      if (tabular != null && tabular.totalQuestions > 0) return tabular;
+      final lines = rows
+          .map((r) => r.where((c) => c.trim().isNotEmpty).join(' '))
+          .where((l) => l.trim().isNotEmpty)
+          .toList();
+      return _parseExtractedLines(lines: lines, fileName: fileName);
+    }
+
+    if (lowerName.endsWith('.csv') || lowerName.endsWith('.tsv')) {
+      final isTsv = lowerName.endsWith('.tsv');
+      final rows = _extractRowsFromDelimitedText(
+        bytes,
+        delimiter: isTsv ? '\t' : ',',
+      );
+      final tabular = _tryParseTabularRows(rows: rows, fileName: fileName);
+      if (tabular != null && tabular.totalQuestions > 0) return tabular;
+      final lines = _extractLinesFromPlainText(bytes);
+      return _parseExtractedLines(lines: lines, fileName: fileName);
+    }
 
     List<String> lines;
-    if (lowerName.endsWith('.docx') || isZipHeader) {
-      lines = _extractLinesFromDocx(bytes);
-    } else {
+    if (lowerName.endsWith('.pdf') || isPdfHeader) {
       lines = _extractLinesFromPdf(bytes);
+    } else if (lowerName.endsWith('.docx')) {
+      lines = _extractLinesFromDocx(bytes);
+    } else if (lowerName.endsWith('.odt')) {
+      lines = _extractLinesFromOdt(bytes);
+    } else if (isZipHeader) {
+      lines = _extractLinesFromZipArchive(bytes, fileName: fileName);
+    } else if (lowerName.endsWith('.rtf')) {
+      lines = _extractLinesFromRtf(bytes);
+    } else if (lowerName.endsWith('.html') || lowerName.endsWith('.htm')) {
+      lines = _extractLinesFromHtml(bytes);
+    } else if (lowerName.endsWith('.doc')) {
+      lines = _extractLinesFromLegacyDoc(bytes);
+    } else {
+      lines = _extractLinesFromPlainText(bytes);
     }
 
     return _parseExtractedLines(lines: lines, fileName: fileName);
@@ -124,9 +229,6 @@ class QuestionPaperImportService {
           continue;
         }
 
-        // Determine where the Student Info row ("Name:___ Section:___ Date:___")
-        // or horizontal divider sits on the page. Everything above it is header;
-        // everything below it may be arranged in two columns.
         double bodyStartY = 0;
         for (final tl in textLines) {
           final t = tl.text.trim();
@@ -139,7 +241,6 @@ class QuestionPaperImportService {
           }
         }
         if (bodyStartY == 0) {
-          // Fallback: top 12% of page is header area if no Name:/Section: line.
           bodyStartY = page.size.height * 0.11;
         }
 
@@ -166,7 +267,7 @@ class QuestionPaperImportService {
           }
         }
 
-        // Check if body items use a two-column layout (STI Question Paper).
+        // Check if body items use a two-column layout (STI Questionnaire).
         final colSplitX = pageWidth * 0.48;
         final leftCol = <TextLine>[];
         final rightCol = <TextLine>[];
@@ -186,10 +287,19 @@ class QuestionPaperImportService {
         }
 
         if (rightCol.length >= 2 && wideBodyLines <= bodyItems.length ~/ 3) {
-          allLines.addAll(_mergeAndSortColumnLines(leftCol));
-          allLines.addAll(_mergeAndSortColumnLines(rightCol));
+          allLines.addAll(
+            _mergeAndSortColumnLines(leftCol, maxHorizontalGap: pageWidth * 0.18),
+          );
+          allLines.addAll(
+            _mergeAndSortColumnLines(rightCol, maxHorizontalGap: pageWidth * 0.18),
+          );
         } else {
-          allLines.addAll(_mergeAndSortColumnLines(bodyItems));
+          allLines.addAll(
+            _mergeAndSortColumnLines(
+              bodyItems,
+              maxHorizontalGap: pageWidth * 0.18,
+            ),
+          );
         }
       }
 
@@ -199,7 +309,10 @@ class QuestionPaperImportService {
     }
   }
 
-  static List<String> _mergeAndSortColumnLines(List<TextLine> items) {
+  static List<String> _mergeAndSortColumnLines(
+    List<TextLine> items, {
+    double maxHorizontalGap = 72.0,
+  }) {
     if (items.isEmpty) return const <String>[];
     final sorted = List<TextLine>.from(items)
       ..sort((a, b) {
@@ -224,7 +337,17 @@ class QuestionPaperImportService {
     for (final item in sorted) {
       final t = item.text.trim();
       if (t.isEmpty) continue;
-      if (prevBounds != null && (item.bounds.top - prevBounds.top).abs() <= 3.5) {
+      final sameRow =
+          prevBounds != null && (item.bounds.top - prevBounds.top).abs() <= 3.5;
+      final horizontalGap = prevBounds == null
+          ? 0.0
+          : (item.bounds.left - prevBounds.right);
+      final startsNewNumberedQuestion = RegExp(r'^\d{1,3}[\.\)]\s+').hasMatch(t);
+
+      // Do not merge across a wide column gap or when a new numbered question starts.
+      if (sameRow &&
+          horizontalGap <= maxHorizontalGap &&
+          !startsNewNumberedQuestion) {
         currentLineBuffer.write(' $t');
         prevBounds = Rect.fromLTRB(
           prevBounds.left,
@@ -243,17 +366,43 @@ class QuestionPaperImportService {
   }
 
   // ===========================================================================
-  // WORD (.DOCX) TEXT EXTRACTION
+  // WORD (.DOCX), ODT, XLSX & ZIP ARCHIVE EXTRACTION
   // ===========================================================================
+
+  static List<String> _extractLinesFromZipArchive(
+    Uint8List bytes, {
+    required String fileName,
+  }) {
+    final archive = ZipDecoder().decodeBytes(bytes);
+    if (archive.findFile('word/document.xml') != null) {
+      return _extractLinesFromDocx(bytes);
+    }
+    if (archive.findFile('content.xml') != null) {
+      return _extractLinesFromOdt(bytes);
+    }
+    if (archive.findFile('xl/workbook.xml') != null) {
+      final rows = _extractRowsFromXlsx(bytes);
+      return rows
+          .map((r) => r.where((c) => c.trim().isNotEmpty).join(' '))
+          .where((l) => l.trim().isNotEmpty)
+          .toList();
+    }
+    throw Exception('Unsupported archive format for "$fileName".');
+  }
 
   static List<String> _extractLinesFromDocx(Uint8List bytes) {
     final archive = ZipDecoder().decodeBytes(bytes);
     final docFile = archive.findFile('word/document.xml');
     if (docFile == null) {
-      throw Exception('Invalid Word document (.docx): word/document.xml missing.');
+      throw Exception(
+        'Invalid Word document (.docx): word/document.xml missing.',
+      );
     }
 
-    final xmlContent = utf8.decode(docFile.content as List<int>, allowMalformed: true);
+    final xmlContent = utf8.decode(
+      docFile.content as List<int>,
+      allowMalformed: true,
+    );
     final doc = XmlDocument.parse(xmlContent);
     final lines = <String>[];
 
@@ -262,8 +411,11 @@ class QuestionPaperImportService {
       for (final node in p.descendants.whereType<XmlElement>()) {
         if (node.name.qualified == 'w:t') {
           sb.write(node.innerText);
-        } else if (node.name.qualified == 'w:br') {
+        } else if (node.name.qualified == 'w:br' ||
+            node.name.qualified == 'w:cr') {
           sb.write('\n');
+        } else if (node.name.qualified == 'w:tab') {
+          sb.write('  ');
         }
       }
       final paragraphText = sb.toString().trim();
@@ -275,6 +427,417 @@ class QuestionPaperImportService {
       }
     }
     return lines;
+  }
+
+  static List<String> _extractLinesFromOdt(Uint8List bytes) {
+    final archive = ZipDecoder().decodeBytes(bytes);
+    final contentFile = archive.findFile('content.xml');
+    if (contentFile == null) {
+      throw Exception('Invalid OpenDocument (.odt): content.xml missing.');
+    }
+
+    final xmlContent = utf8.decode(
+      contentFile.content as List<int>,
+      allowMalformed: true,
+    );
+    final doc = XmlDocument.parse(xmlContent);
+    final lines = <String>[];
+
+    for (final p in doc.findAllElements('text:p')) {
+      final text = p.innerText.trim();
+      if (text.isNotEmpty) {
+        for (final sub in text.split(RegExp(r'\r?\n'))) {
+          final clean = sub.trim();
+          if (clean.isNotEmpty) lines.add(clean);
+        }
+      }
+    }
+    return lines;
+  }
+
+  static List<List<String>> _extractRowsFromXlsx(Uint8List bytes) {
+    final archive = ZipDecoder().decodeBytes(bytes);
+    final sharedStrings = <String>[];
+
+    final sharedFile = archive.findFile('xl/sharedStrings.xml');
+    if (sharedFile != null) {
+      final sharedXml = utf8.decode(
+        sharedFile.content as List<int>,
+        allowMalformed: true,
+      );
+      final doc = XmlDocument.parse(sharedXml);
+      for (final si in doc.findAllElements('si')) {
+        final buf = StringBuffer();
+        for (final t in si.findAllElements('t')) {
+          buf.write(t.innerText);
+        }
+        sharedStrings.add(buf.toString());
+      }
+    }
+
+    final sheetFiles = archive.files
+        .where(
+          (f) =>
+              f.isFile &&
+              f.name.startsWith('xl/worksheets/sheet') &&
+              f.name.endsWith('.xml'),
+        )
+        .toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
+
+    final rows = <List<String>>[];
+    for (final sheetFile in sheetFiles) {
+      final sheetXml = utf8.decode(
+        sheetFile.content as List<int>,
+        allowMalformed: true,
+      );
+      final doc = XmlDocument.parse(sheetXml);
+      for (final rowEl in doc.findAllElements('row')) {
+        final rowCells = <String>[];
+        for (final cEl in rowEl.findElements('c')) {
+          final cellType = cEl.getAttribute('t') ?? '';
+          String value = '';
+          if (cellType == 'inlineStr') {
+            value = cEl
+                .findAllElements('t')
+                .map((e) => e.innerText)
+                .join();
+          } else {
+            final vEl = cEl.findElements('v').firstOrNull;
+            final rawVal = vEl?.innerText.trim() ?? '';
+            if (cellType == 's') {
+              final idx = int.tryParse(rawVal);
+              if (idx != null && idx >= 0 && idx < sharedStrings.length) {
+                value = sharedStrings[idx];
+              }
+            } else {
+              value = rawVal;
+            }
+          }
+          rowCells.add(value.trim());
+        }
+        if (rowCells.any((c) => c.isNotEmpty)) {
+          rows.add(rowCells);
+        }
+      }
+    }
+    return rows;
+  }
+
+  // ===========================================================================
+  // CSV / TSV, RTF, HTML, LEGACY .DOC & PLAIN TEXT EXTRACTION
+  // ===========================================================================
+
+  static String _decodeTextBytes(Uint8List bytes) {
+    if (bytes.length >= 2) {
+      if (bytes[0] == 0xFF && bytes[1] == 0xFE) {
+        final codeUnits = <int>[];
+        for (var i = 2; i + 1 < bytes.length; i += 2) {
+          codeUnits.add(bytes[i] | (bytes[i + 1] << 8));
+        }
+        return String.fromCharCodes(codeUnits);
+      }
+      if (bytes[0] == 0xFE && bytes[1] == 0xFF) {
+        final codeUnits = <int>[];
+        for (var i = 2; i + 1 < bytes.length; i += 2) {
+          codeUnits.add((bytes[i] << 8) | bytes[i + 1]);
+        }
+        return String.fromCharCodes(codeUnits);
+      }
+    }
+    try {
+      return utf8.decode(bytes);
+    } catch (_) {
+      return latin1.decode(bytes);
+    }
+  }
+
+  static List<String> _extractLinesFromPlainText(Uint8List bytes) {
+    final content = _decodeTextBytes(bytes);
+    return content
+        .split(RegExp(r'\r?\n'))
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
+  }
+
+  static List<String> _extractLinesFromRtf(Uint8List bytes) {
+    var text = _decodeTextBytes(bytes);
+    text = text
+        .replaceAll(RegExp(r'\\(par|line|row)\b\s*'), '\n')
+        .replaceAll(RegExp(r'\\tab\b\s*'), '  ')
+        .replaceAllMapped(RegExp(r"\\'([0-9a-fA-F]{2})"), (m) {
+          final code = int.tryParse(m.group(1)!, radix: 16);
+          return code != null ? String.fromCharCode(code) : '';
+        })
+        .replaceAllMapped(RegExp(r'\\u(-?\d+)\??'), (m) {
+          var code = int.tryParse(m.group(1)!) ?? 0;
+          if (code < 0) code += 65536;
+          return code > 0 ? String.fromCharCode(code) : '';
+        })
+        .replaceAll(
+          RegExp(r'\{\\(?:fonttbl|colortbl|stylesheet|info|pict|\*\\[a-z]+)[^}]*\}'),
+          '',
+        )
+        .replaceAll(RegExp(r'\\[a-zA-Z]+-?\d*\s?'), '')
+        .replaceAll(RegExp(r'[{}]'), '');
+    return text
+        .split(RegExp(r'\r?\n'))
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
+  }
+
+  static List<String> _extractLinesFromHtml(Uint8List bytes) {
+    var html = _decodeTextBytes(bytes);
+    html = html
+        .replaceAll(
+          RegExp(r'<(script|style)[^>]*>[\s\S]*?</\1>', caseSensitive: false),
+          '',
+        )
+        .replaceAll(
+          RegExp(
+            r'</?(p|div|br|li|tr|h[1-6]|section|article|header|footer)[^>]*>',
+            caseSensitive: false,
+          ),
+          '\n',
+        )
+        .replaceAll(RegExp(r'</?(td|th)[^>]*>', caseSensitive: false), '  ')
+        .replaceAll(RegExp(r'<[^>]+>'), '')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&apos;', "'");
+    return html
+        .split(RegExp(r'\r?\n'))
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
+  }
+
+  static List<String> _extractLinesFromLegacyDoc(Uint8List bytes) {
+    final asText = _decodeTextBytes(bytes);
+    if (asText.trimLeft().startsWith(r'{\rtf')) {
+      return _extractLinesFromRtf(bytes);
+    }
+    if (asText.contains('<html') || asText.contains('<w:document')) {
+      return _extractLinesFromHtml(bytes);
+    }
+
+    // Extract printable ASCII / UTF-16 text runs from binary OLE .doc files
+    final buffer = StringBuffer();
+    for (var i = 0; i < bytes.length; i++) {
+      final b = bytes[i];
+      if (b == 0x0D || b == 0x0A) {
+        buffer.write('\n');
+      } else if (b >= 32 && b <= 126) {
+        buffer.writeCharCode(b);
+      }
+    }
+    return buffer
+        .toString()
+        .split(RegExp(r'\r?\n'))
+        .map((l) => l.trim())
+        .where(
+          (l) =>
+              l.length >= 3 &&
+              RegExp(r'[A-Za-z]{2,}').hasMatch(l) &&
+              !l.contains('Microsoft Word') &&
+              !l.contains('Normal.dotm') &&
+              !l.contains('SummaryInformation'),
+        )
+        .toList();
+  }
+
+  static List<List<String>> _extractRowsFromDelimitedText(
+    Uint8List bytes, {
+    required String delimiter,
+  }) {
+    final content = _decodeTextBytes(bytes);
+    final rows = <List<String>>[];
+    for (final rawLine in content.split(RegExp(r'\r?\n'))) {
+      if (rawLine.trim().isEmpty) continue;
+      rows.add(_parseDelimitedLine(rawLine, delimiter));
+    }
+    return rows;
+  }
+
+  static List<String> _parseDelimitedLine(String line, String delimiter) {
+    final cells = <String>[];
+    final current = StringBuffer();
+    var inQuotes = false;
+
+    for (var i = 0; i < line.length; i++) {
+      final ch = line[i];
+      if (ch == '"') {
+        if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
+          current.write('"');
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (!inQuotes && ch == delimiter) {
+        cells.add(current.toString().trim());
+        current.clear();
+      } else {
+        current.write(ch);
+      }
+    }
+    cells.add(current.toString().trim());
+    return cells;
+  }
+
+  /// Parses structured spreadsheet tables (CSV / TSV / XLSX) when columns like
+  /// `Question`, `Type`, `Choice A..D`, `Answer`, `Points` are present.
+  static ImportedQuestionPaper? _tryParseTabularRows({
+    required List<List<String>> rows,
+    required String fileName,
+  }) {
+    if (rows.length < 2) return null;
+
+    int headerRowIdx = -1;
+    int colQuestion = -1;
+    int colType = -1;
+    int colChoiceA = -1;
+    int colChoiceB = -1;
+    int colChoiceC = -1;
+    int colChoiceD = -1;
+    int colAnswer = -1;
+    int colPoints = -1;
+
+    for (var r = 0; r < rows.length && r < 10; r++) {
+      final row = rows[r];
+      if (row.length < 2) continue;
+      for (var c = 0; c < row.length; c++) {
+        final h = row[c].trim().toLowerCase();
+        if (h == 'question' ||
+            h == 'question text' ||
+            h == 'question_text' ||
+            h == 'item' ||
+            h == 'stem' ||
+            h == 'prompt') {
+          colQuestion = c;
+        } else if (h == 'type' ||
+            h == 'question type' ||
+            h == 'question_type' ||
+            h == 'test type' ||
+            h == 'exam type') {
+          colType = c;
+        } else if (h == 'a' ||
+            h == 'choice a' ||
+            h == 'option a' ||
+            h == 'choice_a' ||
+            h == 'option_a') {
+          colChoiceA = c;
+        } else if (h == 'b' ||
+            h == 'choice b' ||
+            h == 'option b' ||
+            h == 'choice_b' ||
+            h == 'option_b') {
+          colChoiceB = c;
+        } else if (h == 'c' ||
+            h == 'choice c' ||
+            h == 'option c' ||
+            h == 'choice_c' ||
+            h == 'option_c') {
+          colChoiceC = c;
+        } else if (h == 'd' ||
+            h == 'choice d' ||
+            h == 'option d' ||
+            h == 'choice_d' ||
+            h == 'option_d') {
+          colChoiceD = c;
+        } else if (h == 'answer' ||
+            h == 'correct answer' ||
+            h == 'correct_answer' ||
+            h == 'answer key' ||
+            h == 'key') {
+          colAnswer = c;
+        } else if (h == 'points' || h == 'point' || h == 'pts' || h == 'score') {
+          colPoints = c;
+        }
+      }
+      if (colQuestion >= 0) {
+        headerRowIdx = r;
+        break;
+      }
+    }
+
+    if (headerRowIdx < 0 || colQuestion < 0) return null;
+
+    final parsedQuestions = <ImportedExamQuestion>[];
+    for (var r = headerRowIdx + 1; r < rows.length; r++) {
+      final row = rows[r];
+      String cell(int idx) =>
+          (idx >= 0 && idx < row.length) ? row[idx].trim() : '';
+
+      final qText = _stripLeadingQuestionNumber(cell(colQuestion));
+      if (qText.isEmpty) continue;
+
+      final rawType = cell(colType).toLowerCase();
+      final choiceA = cell(colChoiceA);
+      final choiceB = cell(colChoiceB);
+      final choiceC = cell(colChoiceC);
+      final choiceD = cell(colChoiceD);
+      final rawAnswer = cell(colAnswer);
+      final pts = double.tryParse(cell(colPoints)) ?? 1.0;
+
+      final choices = <String>[choiceA, choiceB, choiceC, choiceD];
+      final nonEmptyChoices = choices.where((c) => c.isNotEmpty).length;
+
+      String qType;
+      if (rawType.contains('multiple') || rawType == 'mc' || rawType == 'mcq') {
+        qType = 'multiple_choice';
+      } else if (rawType.contains('true') ||
+          rawType.contains('false') ||
+          rawType == 'tf' ||
+          rawType == 't/f') {
+        qType = 'true_false';
+      } else if (rawType.contains('ident') || rawType.contains('fill')) {
+        qType = 'identification';
+      } else if (nonEmptyChoices >= 2) {
+        qType = 'multiple_choice';
+      } else if (_isTrueOrFalseAnswer(rawAnswer)) {
+        qType = 'true_false';
+      } else {
+        qType = 'identification';
+      }
+
+      final normalizedAnswer = _normalizeAnswerForType(
+        rawAnswer,
+        qType,
+        choices: choices,
+      );
+
+      parsedQuestions.add(
+        ImportedExamQuestion(
+          questionNumber: parsedQuestions.length + 1,
+          questionText: qText,
+          questionType: qType,
+          points: pts > 0 ? pts : 1.0,
+          choices: qType == 'multiple_choice' ? choices : const <String>[],
+          correctAnswer: normalizedAnswer,
+        ),
+      );
+    }
+
+    if (parsedQuestions.isEmpty) return null;
+
+    final organizedSections = _organizeQuestionsByTestType(parsedQuestions);
+    final totalQ = parsedQuestions.length;
+    final detectedType = totalQ >= 35
+        ? 'prelim'
+        : (totalQ >= 15 ? 'long_quiz' : 'quiz');
+
+    return ImportedQuestionPaper(
+      fileName: fileName,
+      sections: organizedSections,
+      detectedAssessmentType: detectedType,
+      detectedInstructions: QuestionPaperPdfService.defaultInstructionsText,
+    );
   }
 
   // ===========================================================================
@@ -306,11 +869,11 @@ class QuestionPaperImportService {
           lower.startsWith('name:') ||
           lower.startsWith('section:') ||
           lower.startsWith('date:') ||
-          lower.startsWith('notice:')) {
+          lower.startsWith('notice:') ||
+          RegExp(r'^\d{1,3}[\.\)]\s+').hasMatch(line)) {
         break;
       }
 
-      // Page number / Reference number line (e.g. "1000014607 — IT2511", "Page 1")
       if (RegExp(r'^page\s+\d+$', caseSensitive: false).hasMatch(line)) {
         continue;
       }
@@ -331,7 +894,6 @@ class QuestionPaperImportService {
         continue;
       }
 
-      // Day & Date line (e.g. "Day 1: October 6, 2026" or "Day 1 – April 4, 2026")
       final dayMatch = RegExp(
         r'^day\s*(\d+)\s*[:\u2013\u2014\-]\s*(.+)$',
         caseSensitive: false,
@@ -342,7 +904,6 @@ class QuestionPaperImportService {
         continue;
       }
 
-      // Time range line (e.g. "8:00 am – 9:15 am")
       if (RegExp(r'\b\d{1,2}:\d{2}\b').hasMatch(line) &&
           RegExp(r'\b(am|pm)\b', caseSensitive: false).hasMatch(line)) {
         final tParts = line.split(RegExp(r'\s*[\u2013\u2014\-]\s*'));
@@ -353,7 +914,6 @@ class QuestionPaperImportService {
         continue;
       }
 
-      // Term / SY / Examination title
       if (lower.contains('preliminary examination') || lower == 'prelim') {
         detectedType ??= 'prelim';
         continue;
@@ -394,12 +954,17 @@ class QuestionPaperImportService {
         continue;
       }
 
-      // First non-pattern line in header is the Subject Name
-      detectedSubject ??= line;
+      if (!lower.startsWith('part ') &&
+          !lower.startsWith('section ') &&
+          !lower.startsWith('test ') &&
+          !lower.startsWith('read and analyze') &&
+          !lower.startsWith('direction')) {
+        detectedSubject ??= line;
+      }
     }
 
     // 2. Helper to identify repeating page header / boilerplate lines so Page 2+
-    // headers never pollute option D of the last question on Page 1.
+    // headers never pollute option D or question stems.
     bool isRepeatingHeaderOrBoilerplate(String line) {
       final clean = line.trim();
       if (clean.isEmpty) return true;
@@ -467,12 +1032,12 @@ class QuestionPaperImportService {
       return false;
     }
 
-    // 3. Parse Notice, Sections, Questions, and Choices
-    final sectionBuilders = <_SectionBuilder>[];
-    _SectionBuilder? currentSection;
+    // 3. Parse Notice, Questions, Choices, and Inferred Test Types
+    final allParsedQuestions = <ImportedExamQuestion>[];
     _QuestionBuilder? currentQuestion;
     String? currentChoiceLetter;
-    String pendingQuestionType = 'multiple_choice';
+    String? activeSectionType;
+    double activeDefaultPoints = 1.0;
     bool inNotice = false;
 
     void flushQuestion() {
@@ -481,28 +1046,7 @@ class QuestionPaperImportService {
       currentQuestion = null;
       currentChoiceLetter = null;
 
-      final qType = q.choices.length >= 2
-          ? 'multiple_choice'
-          : q.inferredType;
-
-      currentSection ??= _SectionBuilder(
-        name: 'Part I · ${_labelForType(qType)}',
-        questionType: qType,
-        defaultPoints: q.points,
-      );
-      if (currentSection!.questions.isEmpty) {
-        currentSection!.questionType = qType;
-      } else if (currentSection!.questionType != qType) {
-        // Start a new section if question type changed mid-paper without an explicit header
-        sectionBuilders.add(currentSection!);
-        currentSection = _SectionBuilder(
-          name:
-              'Part ${_roman(sectionBuilders.length + 1)} · ${_labelForType(qType)}',
-          questionType: qType,
-          defaultPoints: q.points,
-        );
-      }
-
+      final qType = _resolveQuestionType(q);
       final normalizedChoices = <String>[];
       if (qType == 'multiple_choice') {
         for (final letter in const ['A', 'B', 'C', 'D']) {
@@ -510,35 +1054,43 @@ class QuestionPaperImportService {
         }
       }
 
-      currentSection!.questions.add(
+      final cleanStem = _stripLeadingQuestionNumber(q.stem.toString().trim());
+      if (cleanStem.isEmpty) return;
+
+      final normalizedAnswer = _normalizeAnswerForType(
+        q.correctAnswer,
+        qType,
+        choices: normalizedChoices,
+      );
+
+      allParsedQuestions.add(
         ImportedExamQuestion(
-          questionNumber: currentSection!.questions.length + 1,
-          questionText: q.stem.toString().trim(),
+          questionNumber: q.number,
+          questionText: cleanStem,
           questionType: qType,
-          points: currentSection!.defaultPoints,
+          points: q.points > 0 ? q.points : 1.0,
           choices: normalizedChoices,
-          correctAnswer: q.correctAnswer,
+          correctAnswer: normalizedAnswer,
         ),
       );
     }
 
-    // Regex patterns
-    // Section header like "A.  (35 items x 2 points)" or "Part I. Multiple Choice (2 points each)"
     final stiSectionHeaderRe = RegExp(
       r'^([A-Z]|Part\s+[IVX\d]+)[\.\)]\s*\((\d+)\s*items?\s*(?:[x\u00D7\*]\s*(\d+(?:\.\d+)?)\s*points?)?.*\)',
       caseSensitive: false,
     );
     final genericSectionHeaderRe = RegExp(
-      r'^(?:Part|Section|Test)\s+([IVX\d]+|[A-Z])[\.\:\-\s]+(.+)$',
+      r'^(?:Part|Section|Test)\s+([IVX\d]+|[A-Z])[\.\:\-\u00B7\s]+(.+)$',
       caseSensitive: false,
     );
-    // Question stem like "1.   It consists of..." or "1) It consists of..."
-    final questionStartRe = RegExp(r'^(\d{1,3})[\.\)]\s+(.+)$');
-    // Option line like "A.   Application Layer" or "*A. Application Layer"
-    final choiceStartRe = RegExp(r'^(\*)?([A-Da-d])[\.\)]\s+(.+)$');
-    // Embedded answer line like "Answer: B" or "Correct Answer: TRUE"
+    final standaloneTypeHeaderRe = RegExp(
+      r'^(multiple\s+choice|true\s+or\s+false|modified\s+true\s+or\s+false|identification|fill\s+in\s+the\s+blanks?)(?:\s*\((.+)\))?\s*:?$',
+      caseSensitive: false,
+    );
+    final questionStartRe = RegExp(r'^(\d{1,3})[\.\)]\s*(.+)$');
+    final choiceStartRe = RegExp(r'^(\*)?(?:\()?([A-Da-d])[\.\)]\s+(.+)$');
     final answerLineRe = RegExp(
-      r'^(?:correct\s+)?answer\s*(?:\(true\s*\/\s*false\))?\s*:\s*(.+)$',
+      r'^(?:correct\s+)?(?:answer|ans|key)\s*(\(\s*true\s*\/\s*false\s*\))?\s*[:\-]\s*(.*)$',
       caseSensitive: false,
     );
 
@@ -552,51 +1104,37 @@ class QuestionPaperImportService {
       }
 
       // Notice block before questions start
-      if (currentQuestion == null &&
-          sectionBuilders.isEmpty &&
-          currentSection == null) {
+      if (currentQuestion == null && allParsedQuestions.isEmpty) {
         if (lower == 'notice:' || lower.startsWith('notice:')) {
           inNotice = true;
           noticeLines.add(line);
           continue;
         }
-        if (inNotice && RegExp(r'^[\u2022\-\*]').hasMatch(line)) {
+        if (inNotice &&
+            RegExp(r'^[\u2022\u2023\u25E6\u2043\u2219\-\*]').hasMatch(line)) {
           noticeLines.add(line);
           continue;
         }
       }
 
-      // Check for section-level instruction lines
-      if (lower.contains('choose the letter of the correct answer') ||
-          lower.contains('multiple choice')) {
-        pendingQuestionType = 'multiple_choice';
-        if (inNotice) {
-          noticeLines.add(line);
+      // Detect question-type instructions / headings
+      final detectedHeaderType = _detectTypeFromLine(lower);
+      if (detectedHeaderType != null) {
+        if (lower.startsWith('read and analyze') ||
+            lower.startsWith('direction') ||
+            lower.startsWith('instruction') ||
+            standaloneTypeHeaderRe.hasMatch(line)) {
+          flushQuestion();
+          activeSectionType = detectedHeaderType;
+          final ptsMatch = RegExp(
+            r'(\d+(?:\.\d+)?)\s*(?:pts?|points?)',
+            caseSensitive: false,
+          ).firstMatch(line);
+          if (ptsMatch != null) {
+            activeDefaultPoints =
+                double.tryParse(ptsMatch.group(1)!) ?? activeDefaultPoints;
+          }
           inNotice = false;
-        }
-        if (lower.startsWith('read and analyze') ||
-            lower.startsWith('direction') ||
-            lower.startsWith('instruction')) {
-          continue;
-        }
-      } else if (lower.contains('write true if') ||
-          lower.contains('true or false') ||
-          lower.contains('modified true or false')) {
-        pendingQuestionType = 'true_false';
-        inNotice = false;
-        if (lower.startsWith('read and analyze') ||
-            lower.startsWith('direction') ||
-            lower.startsWith('instruction')) {
-          continue;
-        }
-      } else if (lower.contains('write the correct answer on the space') ||
-          lower.contains('identification') ||
-          lower.contains('fill in the blank')) {
-        pendingQuestionType = 'identification';
-        inNotice = false;
-        if (lower.startsWith('read and analyze') ||
-            lower.startsWith('direction') ||
-            lower.startsWith('instruction')) {
           continue;
         }
       }
@@ -605,51 +1143,54 @@ class QuestionPaperImportService {
       final stiSecMatch = stiSectionHeaderRe.firstMatch(line);
       if (stiSecMatch != null) {
         flushQuestion();
-        if (currentSection != null && currentSection!.questions.isNotEmpty) {
-          sectionBuilders.add(currentSection!);
+        final pts = double.tryParse(stiSecMatch.group(3) ?? '');
+        if (pts != null && pts > 0) {
+          activeDefaultPoints = pts;
         }
-        final secLetter = stiSecMatch.group(1)!.trim();
-        final pts = double.tryParse(stiSecMatch.group(3) ?? '') ?? 1.0;
-        currentSection = _SectionBuilder(
-          name: 'Section $secLetter · ${_labelForType(pendingQuestionType)}',
-          questionType: pendingQuestionType,
-          defaultPoints: pts,
-        );
+        if (detectedHeaderType != null) {
+          activeSectionType = detectedHeaderType;
+        }
         inNotice = false;
         continue;
       }
 
       // Check Generic Section Header: e.g. "Part II: True or False"
       final genSecMatch = genericSectionHeaderRe.firstMatch(line);
-      if (genSecMatch != null && currentQuestion == null) {
+      if (genSecMatch != null) {
         flushQuestion();
-        if (currentSection != null && currentSection!.questions.isNotEmpty) {
-          sectionBuilders.add(currentSection!);
-        }
         final secTitle = line;
         final ptsMatch = RegExp(
           r'(\d+(?:\.\d+)?)\s*(?:pts?|points?)\s*(?:each|/item)?',
           caseSensitive: false,
         ).firstMatch(secTitle);
-        final pts = double.tryParse(ptsMatch?.group(1) ?? '') ?? 1.0;
-        currentSection = _SectionBuilder(
-          name: secTitle,
-          questionType: pendingQuestionType,
-          defaultPoints: pts,
-        );
+        final pts = double.tryParse(ptsMatch?.group(1) ?? '');
+        if (pts != null && pts > 0) {
+          activeDefaultPoints = pts;
+        }
+        final secType = _detectTypeFromLine(secTitle.toLowerCase());
+        if (secType != null) {
+          activeSectionType = secType;
+        }
         inNotice = false;
         continue;
       }
 
-      // Check Embedded Answer Line: e.g. "Answer: B" or "Answer: _____"
+      // Check Embedded Answer Line: e.g. "Answer: B" or "Answer (True / False): _____"
       final ansMatch = answerLineRe.firstMatch(line);
       if (ansMatch != null) {
-        final rawAns = ansMatch.group(1)!.trim();
-        // Ignore blank underline placeholders like "____________"
-        if (!RegExp(r'^_+$').hasMatch(rawAns) && currentQuestion != null) {
-          final cleanAns = rawAns.replaceAll(RegExp(r'^_+|_+$'), '').trim();
-          if (cleanAns.isNotEmpty) {
-            currentQuestion!.correctAnswer = cleanAns;
+        final hasTfMarker = ansMatch.group(1) != null;
+        final rawAns = (ansMatch.group(2) ?? '').trim();
+        if (currentQuestion != null) {
+          if (hasTfMarker) {
+            currentQuestion!.hasTrueFalsePrompt = true;
+          } else {
+            currentQuestion!.hasIdentificationPrompt = true;
+          }
+          if (!RegExp(r'^_+$').hasMatch(rawAns)) {
+            final cleanAns = rawAns.replaceAll(RegExp(r'^_+|_+$'), '').trim();
+            if (cleanAns.isNotEmpty) {
+              currentQuestion!.correctAnswer = cleanAns;
+            }
           }
         }
         continue;
@@ -662,11 +1203,15 @@ class QuestionPaperImportService {
         final letter = choiceMatch.group(2)!.toUpperCase();
         var choiceText = choiceMatch.group(3)!.trim();
 
-        // Handle inline multiple choices on a single line, e.g. "A. Opt1   B. Opt2"
         final inlineChoices = _splitInlineChoices('$letter. $choiceText');
         if (inlineChoices.length > 1) {
           for (final entry in inlineChoices.entries) {
-            currentQuestion!.choices[entry.key] = entry.value;
+            var val = entry.value;
+            if (val.endsWith('*')) {
+              val = val.substring(0, val.length - 1).trim();
+              currentQuestion!.correctAnswer ??= entry.key;
+            }
+            currentQuestion!.choices[entry.key] = val;
             currentChoiceLetter = entry.key;
           }
         } else {
@@ -688,14 +1233,27 @@ class QuestionPaperImportService {
       if (qMatch != null) {
         flushQuestion();
         inNotice = false;
-        final qNum = int.tryParse(qMatch.group(1)!) ?? 1;
-        final qStem = qMatch.group(2)!.trim();
+        final qNum =
+            int.tryParse(qMatch.group(1)!) ?? (allParsedQuestions.length + 1);
+        var qStem = qMatch.group(2)!.trim();
+
+        // Check for inline answer at end of question stem, e.g. "...? [Answer: CPU]"
+        String? inlineAnswer;
+        final bracketAnsMatch = RegExp(
+          r'[\[\(]\s*(?:answer|ans|key)\s*:\s*([^\]\)]+)[\]\)]\s*$',
+          caseSensitive: false,
+        ).firstMatch(qStem);
+        if (bracketAnsMatch != null) {
+          inlineAnswer = bracketAnsMatch.group(1)!.trim();
+          qStem = qStem.substring(0, bracketAnsMatch.start).trim();
+        }
+
         currentQuestion = _QuestionBuilder(
           number: qNum,
           stem: StringBuffer(qStem),
-          inferredType: currentSection?.questionType ?? pendingQuestionType,
-          points: currentSection?.defaultPoints ?? 1.0,
-        );
+          inferredType: activeSectionType,
+          points: activeDefaultPoints,
+        )..correctAnswer = inlineAnswer;
         continue;
       }
 
@@ -712,22 +1270,11 @@ class QuestionPaperImportService {
     }
 
     flushQuestion();
-    if (currentSection != null && currentSection!.questions.isNotEmpty) {
-      sectionBuilders.add(currentSection!);
-    }
 
-    final finalSections = sectionBuilders
-        .map(
-          (b) => ImportedExamSection(
-            name: b.name,
-            questionType: b.questionType,
-            defaultPoints: b.defaultPoints,
-            questions: b.questions,
-          ),
-        )
-        .toList();
+    // Organize all parsed questions by their respective test types and assign
+    // sequential Part I, Part II, Part III section names.
+    final finalSections = _organizeQuestionsByTestType(allParsedQuestions);
 
-    // Infer assessment type from total question count if not explicitly in header
     if (detectedType == null) {
       final totalQ = finalSections.fold<int>(
         0,
@@ -761,6 +1308,182 @@ class QuestionPaperImportService {
     );
   }
 
+  /// Organizes all parsed questions into sections grouped by their respective
+  /// test types (`multiple_choice`, `true_false`, `identification`) in order
+  /// of appearance, preserving question sequence within each type and
+  /// auto-naming sections as `"Part I: Multiple Choice"`, `"Part II: ..."`, etc.
+  static List<ImportedExamSection> _organizeQuestionsByTestType(
+    List<ImportedExamQuestion> questions,
+  ) {
+    if (questions.isEmpty) return const <ImportedExamSection>[];
+
+    final typeOrder = <String>[];
+    final grouped = <String, List<ImportedExamQuestion>>{};
+    final pointsByType = <String, double>{};
+
+    for (final q in questions) {
+      final type = q.questionType;
+      if (!grouped.containsKey(type)) {
+        typeOrder.add(type);
+        grouped[type] = <ImportedExamQuestion>[];
+        pointsByType[type] = q.points > 0 ? q.points : 1.0;
+      }
+      grouped[type]!.add(q);
+    }
+
+    final sections = <ImportedExamSection>[];
+    for (var i = 0; i < typeOrder.length; i++) {
+      final type = typeOrder[i];
+      final rawList = grouped[type]!;
+      final defaultPts = pointsByType[type] ?? 1.0;
+
+      // Renumber sequentially 1..N while maintaining exact relative order.
+      final orderedQuestions = <ImportedExamQuestion>[];
+      for (var idx = 0; idx < rawList.length; idx++) {
+        final item = rawList[idx];
+        orderedQuestions.add(
+          ImportedExamQuestion(
+            questionNumber: idx + 1,
+            questionText: item.questionText,
+            questionType: type,
+            points: item.points > 0 ? item.points : defaultPts,
+            choices: item.choices,
+            correctAnswer: item.correctAnswer,
+          ),
+        );
+      }
+
+      sections.add(
+        ImportedExamSection(
+          name: autoSectionName(i + 1, type),
+          questionType: type,
+          defaultPoints: defaultPts,
+          questions: orderedQuestions,
+        ),
+      );
+    }
+
+    return sections;
+  }
+
+  static String? _detectTypeFromLine(String lower) {
+    if (lower.contains('choose the letter of the correct answer') ||
+        lower.contains('multiple choice') ||
+        lower.contains('multiple-choice')) {
+      return 'multiple_choice';
+    }
+    if (lower.contains('write true if') ||
+        lower.contains('true or false') ||
+        lower.contains('true / false') ||
+        lower.contains('true/false') ||
+        lower.contains('modified true or false')) {
+      return 'true_false';
+    }
+    if (lower.contains('write the correct answer on the space') ||
+        lower.contains('identification') ||
+        lower.contains('fill in the blank')) {
+      return 'identification';
+    }
+    return null;
+  }
+
+  static String _resolveQuestionType(_QuestionBuilder q) {
+    final nonEmptyChoices = q.choices.values
+        .map((v) => v.trim())
+        .where((v) => v.isNotEmpty)
+        .toList();
+
+    // Check if choices are just A. True / B. False
+    if (nonEmptyChoices.length == 2) {
+      final lowerSet = nonEmptyChoices.map((c) => c.toLowerCase()).toSet();
+      if (lowerSet.contains('true') && lowerSet.contains('false')) {
+        return 'true_false';
+      }
+    }
+
+    if (nonEmptyChoices.length >= 2) {
+      return 'multiple_choice';
+    }
+
+    if (q.hasTrueFalsePrompt || _isTrueOrFalseAnswer(q.correctAnswer)) {
+      return 'true_false';
+    }
+
+    final stemLower = q.stem.toString().trim().toLowerCase();
+    if (stemLower.startsWith('(true or false)') ||
+        stemLower.startsWith('[true or false]') ||
+        stemLower.startsWith('(true/false)') ||
+        stemLower.startsWith('[true/false]') ||
+        stemLower.endsWith('(true or false)') ||
+        stemLower.endsWith('(true/false)')) {
+      return 'true_false';
+    }
+
+    if (q.inferredType == 'true_false') {
+      return 'true_false';
+    }
+
+    // Any question without 2+ multiple choice options that is not True/False
+    // is an Identification question.
+    return 'identification';
+  }
+
+  static bool _isTrueOrFalseAnswer(String? raw) {
+    if (raw == null) return false;
+    final clean = raw.trim().toLowerCase();
+    return clean == 'true' || clean == 'false';
+  }
+
+  static String? _normalizeAnswerForType(
+    String? rawAnswer,
+    String qType, {
+    List<String> choices = const <String>[],
+  }) {
+    if (rawAnswer == null) return null;
+    final clean = rawAnswer.trim();
+    if (clean.isEmpty || RegExp(r'^_+$').hasMatch(clean)) return null;
+
+    if (qType == 'multiple_choice') {
+      final upper = clean.toUpperCase();
+      if (const ['A', 'B', 'C', 'D'].contains(upper)) {
+        return upper;
+      }
+      final letterMatch = RegExp(r'^([A-Da-d])[\.\)]?$').firstMatch(clean);
+      if (letterMatch != null) {
+        return letterMatch.group(1)!.toUpperCase();
+      }
+      // Match against option text if full choice text was given as the answer
+      for (var i = 0; i < choices.length && i < 4; i++) {
+        if (choices[i].trim().toLowerCase() == clean.toLowerCase()) {
+          return String.fromCharCode(65 + i);
+        }
+      }
+      return upper;
+    }
+
+    if (qType == 'true_false') {
+      final lower = clean.toLowerCase();
+      if (lower == 'true' || lower == 't') return 'True';
+      if (lower == 'false' || lower == 'f') return 'False';
+      return clean;
+    }
+
+    if (qType == 'identification') {
+      return clean.toUpperCase();
+    }
+
+    return clean;
+  }
+
+  static String _stripLeadingQuestionNumber(String text) {
+    var clean = text.trim();
+    // Strip any accidental duplicate leading question number (e.g. "2. Which...")
+    while (RegExp(r'^\d{1,3}[\.\)]\s+').hasMatch(clean)) {
+      clean = clean.replaceFirst(RegExp(r'^\d{1,3}[\.\)]\s+'), '').trim();
+    }
+    return clean;
+  }
+
   static Map<String, String> _splitInlineChoices(String line) {
     final matches = RegExp(r'(?:^|\s{2,})([A-Da-d])[\.\)]\s+')
         .allMatches(line)
@@ -777,38 +1500,6 @@ class QuestionPaperImportService {
     }
     return result;
   }
-
-  static String _labelForType(String qType) {
-    switch (qType) {
-      case 'multiple_choice':
-        return 'Multiple Choice';
-      case 'true_false':
-        return 'True or False';
-      case 'identification':
-        return 'Identification';
-      default:
-        return 'Questions';
-    }
-  }
-
-  static String _roman(int n) {
-    const numerals = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
-    if (n >= 1 && n <= numerals.length) return numerals[n - 1];
-    return '$n';
-  }
-}
-
-class _SectionBuilder {
-  _SectionBuilder({
-    required this.name,
-    required this.questionType,
-    required this.defaultPoints,
-  });
-
-  String name;
-  String questionType;
-  double defaultPoints;
-  final List<ImportedExamQuestion> questions = <ImportedExamQuestion>[];
 }
 
 class _QuestionBuilder {
@@ -821,8 +1512,10 @@ class _QuestionBuilder {
 
   final int number;
   final StringBuffer stem;
-  final String inferredType;
+  final String? inferredType;
   final double points;
   final Map<String, String> choices = <String, String>{};
   String? correctAnswer;
+  bool hasTrueFalsePrompt = false;
+  bool hasIdentificationPrompt = false;
 }

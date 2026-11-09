@@ -1,8 +1,7 @@
 import 'dart:math' as math;
-import 'dart:typed_data';
-
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:printing/printing.dart';
 
 import '../services/answer_sheet_pdf_service.dart';
@@ -20,14 +19,30 @@ import 'login_screen.dart' show CmColors;
 //   Exam list  ->  "Open builder"  ->  Exam builder (in place)
 //
 // Builder: sections are collapsible and hold their questions inline
-// (no separate Questions screen). "Preview" for the question paper and
+// (no separate Questions screen). "Preview" for the questionnaire and
 // answer sheet opens a popup (no separate preview screens).
-//
-// Existing ApiService calls are reused. Editing uses the new PATCH
-// endpoints (updateExam / updateExamSection / updateQuestion).
 // =============================================================
 
 typedef _Json = Map<String, dynamic>;
+
+/// Forces all input text into CAPITAL LETTERS (used for Identification answers).
+class _UpperCaseTextFormatter extends TextInputFormatter {
+  const _UpperCaseTextFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final upper = newValue.text.toUpperCase();
+    if (upper == newValue.text) return newValue;
+    return newValue.copyWith(
+      text: upper,
+      selection: newValue.selection,
+      composing: TextRange.empty,
+    );
+  }
+}
 
 /// CheckMate teacher palette (same values as the sidebar palette in
 /// teacher_dashboard.dart).
@@ -83,6 +98,27 @@ String _typeLabel(String t) {
     default:
       return t;
   }
+}
+
+String _autoSectionName(int sectionOrder, String questionType) {
+  return QuestionPaperImportService.autoSectionName(sectionOrder, questionType);
+}
+
+String _normalizeAnswerByType(String rawAnswer, String questionType) {
+  final clean = rawAnswer.trim();
+  if (clean.isEmpty) return '';
+  if (questionType == 'identification') {
+    return clean.toUpperCase();
+  }
+  if (questionType == 'multiple_choice') {
+    return clean.toUpperCase();
+  }
+  if (questionType == 'true_false') {
+    final lower = clean.toLowerCase();
+    if (lower.startsWith('t')) return 'True';
+    if (lower.startsWith('f')) return 'False';
+  }
+  return clean;
 }
 
 double _num(dynamic v) => double.tryParse(v?.toString() ?? '') ?? 0;
@@ -233,6 +269,15 @@ final ButtonStyle _amberStyle = FilledButton.styleFrom(
   textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
 );
 
+final ButtonStyle _greenSaveStyle = FilledButton.styleFrom(
+  backgroundColor: CmColors.green,
+  foregroundColor: Colors.white,
+  minimumSize: const Size(0, 38),
+  padding: const EdgeInsets.symmetric(horizontal: 14),
+  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+  textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+);
+
 final ButtonStyle _outlineStyle = OutlinedButton.styleFrom(
   foregroundColor: _Brand.ink,
   side: const BorderSide(color: _Brand.mist),
@@ -291,7 +336,7 @@ class _Field extends StatelessWidget {
 }
 
 class _Spin extends StatelessWidget {
-  const _Spin() : color = Colors.white;
+  const _Spin({this.color = Colors.white});
   final Color color;
 
   @override
@@ -688,8 +733,8 @@ Future<ImportedQuestionPaper?> pickAndParseQuestionPaper(
   BuildContext context,
 ) async {
   const typeGroup = XTypeGroup(
-    label: 'Question Paper (PDF or Word)',
-    extensions: <String>['pdf', 'docx'],
+    label: 'Questionnaire (PDF, Word, Excel, CSV, TXT, RTF, ODT, HTML)',
+    extensions: QuestionPaperImportService.supportedExtensions,
   );
   final file = await openFile(acceptedTypeGroups: const <XTypeGroup>[typeGroup]);
   if (file == null) return null;
@@ -717,8 +762,8 @@ Future<ImportedQuestionPaper?> pickAndParseQuestionPaper(
             child: Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Text(
-                'Could not find numbered questions (e.g. "1. ...") in "${file.name}". '
-                'Please make sure the PDF or Word document contains selectable text with numbered items.',
+                'Could not find numbered questions (e.g. "1. ...") or tabular question rows in "${file.name}". '
+                'Please make sure the uploaded file contains selectable text with numbered items or question columns.',
                 style: const TextStyle(fontSize: 13.5, color: _Brand.ink),
               ),
             ),
@@ -730,43 +775,108 @@ Future<ImportedQuestionPaper?> pickAndParseQuestionPaper(
     return parsed;
   } catch (e) {
     if (context.mounted) {
-      _toast(context, 'Failed to read question paper: ${_err(e)}');
+      _toast(context, 'Failed to read questionnaire: ${_err(e)}');
     }
     return null;
   }
 }
 
+/// Imports parsed sections and questions into [examId], automatically
+/// organizing questions according to their respective test types (`multiple_choice`,
+/// `true_false`, `identification`) and naming sections sequentially
+/// (`Part I: Multiple Choice`, `Part II: True or False`, etc.).
 Future<int> importParsedSectionsIntoExam({
   required String token,
   required int examId,
   required ImportedQuestionPaper paper,
   int startingSectionOrder = 1,
+  List<_Json>? existingSections,
+  Map<int, List<_Json>>? existingQuestionsBySection,
 }) async {
   var importedCount = 0;
-  var order = startingSectionOrder;
+  final currentSections = List<_Json>.from(existingSections ?? const <_Json>[]);
+  var order = currentSections.isEmpty
+      ? startingSectionOrder
+      : (currentSections.fold<int>(0, (m, s) {
+            final o = int.tryParse(s['section_order']?.toString() ?? '') ?? 0;
+            return o > m ? o : m;
+          }) +
+          1);
+
   for (final sec in paper.sections) {
     if (sec.questions.isEmpty) continue;
-    final createdSec = await ApiService.createExamSection(
-      token: token,
-      examId: examId,
-      name: sec.name,
-      questionType: sec.questionType,
-      sectionOrder: order++,
-      defaultPoints: sec.defaultPoints,
-    );
-    final sectionId = _id(createdSec['id']);
+
+    // Check if a section for this questionType already exists in the exam
+    int? sectionId;
+    int existingQuestionMax = 0;
+
+    for (var idx = 0; idx < currentSections.length; idx++) {
+      final existingSec = currentSections[idx];
+      final existingType =
+          (existingSec['question_type']?.toString() ?? '').trim().toLowerCase();
+      if (existingType == sec.questionType) {
+        sectionId = _id(existingSec['id']);
+        if (sectionId != null) {
+          final secOrder =
+              int.tryParse(existingSec['section_order']?.toString() ?? '') ??
+              (idx + 1);
+          final expectedName = _autoSectionName(secOrder, sec.questionType);
+          if ((existingSec['name']?.toString() ?? '') != expectedName) {
+            try {
+              await ApiService.updateExamSection(
+                token: token,
+                sectionId: sectionId,
+                name: expectedName,
+                defaultPoints: _num(existingSec['default_points']) > 0
+                    ? _num(existingSec['default_points'])
+                    : sec.defaultPoints,
+                questionType: sec.questionType,
+              );
+            } catch (_) {}
+          }
+          final existingQs =
+              existingQuestionsBySection?[sectionId] ?? const <_Json>[];
+          for (final eq in existingQs) {
+            final qn = int.tryParse(eq['question_number']?.toString() ?? '') ?? 0;
+            if (qn > existingQuestionMax) existingQuestionMax = qn;
+          }
+        }
+        break;
+      }
+    }
+
+    if (sectionId == null) {
+      final secOrder = order++;
+      final autoName = _autoSectionName(secOrder, sec.questionType);
+      final createdSec = await ApiService.createExamSection(
+        token: token,
+        examId: examId,
+        name: autoName,
+        questionType: sec.questionType,
+        sectionOrder: secOrder,
+        defaultPoints: sec.defaultPoints,
+      );
+      sectionId = _id(createdSec['id']);
+      currentSections.add(createdSec);
+    }
+
     if (sectionId == null) continue;
 
     for (var i = 0; i < sec.questions.length; i++) {
       final q = sec.questions[i];
+      final normalizedAnswer = q.correctAnswer == null
+          ? null
+          : _normalizeAnswerByType(q.correctAnswer!, sec.questionType);
       await ApiService.createQuestion(
         token: token,
         sectionId: sectionId,
-        questionNumber: i + 1,
+        questionNumber: existingQuestionMax + i + 1,
         questionText: q.questionText,
         points: q.points > 0 ? q.points : sec.defaultPoints,
-        choices: q.questionType == 'multiple_choice' ? q.choices : null,
-        correctAnswer: q.correctAnswer,
+        choices: sec.questionType == 'multiple_choice' ? q.choices : null,
+        correctAnswer: (normalizedAnswer == null || normalizedAnswer.isEmpty)
+            ? null
+            : normalizedAnswer,
       );
       importedCount++;
     }
@@ -802,7 +912,8 @@ Future<int?> showExamDetailsModal(
     for (final g in subjectGroups) {
       final gName = g.name.toLowerCase();
       final gCode = g.code.toLowerCase();
-      if ((gName.isNotEmpty && (detSubj.contains(gName) || gName.contains(detSubj))) ||
+      if ((gName.isNotEmpty &&
+              (detSubj.contains(gName) || gName.contains(detSubj))) ||
           (gCode.isNotEmpty && detSubj.contains(gCode))) {
         activeGroup = g;
         break;
@@ -833,7 +944,8 @@ Future<int?> showExamDetailsModal(
 
   // Determine initial Type.
   String type = AssessmentValidator.normalizeAssessmentType(
-    exam?['assessment_type']?.toString() ?? importedPaper?.detectedAssessmentType,
+    exam?['assessment_type']?.toString() ??
+        importedPaper?.detectedAssessmentType,
     title: exam?['title']?.toString() ?? importedPaper?.detectedQuizTitle,
     description: exam?['description']?.toString(),
   );
@@ -1269,7 +1381,7 @@ Future<int?> showExamDetailsModal(
           title: editing
               ? 'Edit Exam Details'
               : (importedPaper != null
-                    ? 'Upload Question Paper'
+                    ? 'Upload Questionnaire'
                     : 'Create Exam'),
           subtitle: subtitle,
           maxWidth: 500,
@@ -1326,7 +1438,7 @@ Future<int?> showExamDetailsModal(
                   child: Row(
                     children: [
                       const Icon(
-                        Icons.picture_as_pdf_outlined,
+                        Icons.upload_file_outlined,
                         size: 20,
                         color: _Brand.ink,
                       ),
@@ -1347,8 +1459,9 @@ Future<int?> showExamDetailsModal(
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              '${importedPaper!.totalQuestions} questions in ${importedPaper!.sections.length} '
-                              '${importedPaper!.sections.length == 1 ? "section" : "sections"} ready to import into Exam Builder.',
+                              '${importedPaper!.totalQuestions} questions automatically organized into '
+                              '${importedPaper!.sections.length} '
+                              '${importedPaper!.sections.length == 1 ? "section" : "sections"} by test type.',
                               style: const TextStyle(
                                 fontSize: 11.5,
                                 color: CmColors.slate,
@@ -1483,7 +1596,7 @@ Future<int?> showExamDetailsModal(
                   style: _inputText,
                   decoration: _floatingDeco(
                     'Quiz name',
-                    hint: 'e.g. Long Quiz 1 – Loops',
+                    hint: 'e.g. Long Quiz 1 - Loops',
                   ),
                 ),
               ] else ...[
@@ -1546,7 +1659,7 @@ Future<int?> showExamDetailsModal(
                   style: _inputText,
                   decoration: _floatingDeco(
                     'Reference no.',
-                    hint: '1000014607 — IT2511',
+                    hint: '1000014607 - IT2511',
                   ),
                 ),
                 const SizedBox(height: 14),
@@ -1656,6 +1769,7 @@ class _ExamsTabState extends State<ExamsTab> {
 
   String? _selectedSection;
   int? _openExamId;
+  bool _openedFromUpload = false;
 
   bool _loading = true;
   String? _error;
@@ -1780,7 +1894,7 @@ class _ExamsTabState extends State<ExamsTab> {
                 ),
                 title: const Text('Upload Question Paper PDF'),
                 subtitle: const Text(
-                  'Use an existing PDF and configure its answer key.',
+                  'Upload a PDF, Word, Excel, CSV, or text file and configure its answer key.',
                 ),
                 onTap: () => Navigator.pop(sheetContext, 'pdf'),
               ),
@@ -1817,6 +1931,12 @@ class _ExamsTabState extends State<ExamsTab> {
       if (createdId != null) {
         await _loadData();
         if (!mounted) return;
+        if (createdId > 0) {
+          setState(() {
+            _openedFromUpload = false;
+            _openExamId = createdId;
+          });
+        }
         _toast(context, 'Exam added successfully.');
       }
     } else if (choice == 'pdf') {
@@ -1850,10 +1970,14 @@ class _ExamsTabState extends State<ExamsTab> {
         await _loadData();
         if (!mounted) return;
         if (createdId > 0) {
-          setState(() => _openExamId = createdId);
+          setState(() {
+            _openedFromUpload = true;
+            _openExamId = createdId;
+          });
           _toast(
             context,
-            'Imported ${parsedPaper.totalQuestions} questions. Select the answer key for each item below.',
+            'Imported ${parsedPaper.totalQuestions} questions organized by test type. '
+            'Select the answer keys and click "Save Questions and Answers".',
           );
         } else {
           _toast(context, 'Exam imported successfully.');
@@ -1868,7 +1992,10 @@ class _ExamsTabState extends State<ExamsTab> {
       _toast(context, 'Invalid exam ID.');
       return;
     }
-    setState(() => _openExamId = id);
+    setState(() {
+      _openedFromUpload = false;
+      _openExamId = id;
+    });
   }
 
   void _closeBuilder() {
@@ -1877,14 +2004,16 @@ class _ExamsTabState extends State<ExamsTab> {
       exit();
       return;
     }
-    setState(() => _openExamId = null);
+    setState(() {
+      _openExamId = null;
+      _openedFromUpload = false;
+    });
     _loadData();
   }
 
   @override
   Widget build(BuildContext context) {
     final openId = _openExamId;
-    // System back (Android / browser) returns to the exam list first.
     return PopScope(
       canPop: openId == null,
       onPopInvokedWithResult: (didPop, result) {
@@ -1892,9 +2021,10 @@ class _ExamsTabState extends State<ExamsTab> {
       },
       child: openId != null
           ? _ExamBuilderPane(
-              key: ValueKey(openId),
+              key: ValueKey('$openId-$_openedFromUpload'),
               examId: openId,
               classes: _classes,
+              initialBulkMode: _openedFromUpload,
               onBack: _closeBuilder,
             )
           : _buildList(),
@@ -2155,6 +2285,52 @@ class _ExamsTabState extends State<ExamsTab> {
 }
 
 // =============================================================
+// PERSISTENT DRAFT ENTRY MODEL FOR BULK QUESTION ENTRY
+// =============================================================
+
+class _DraftQuestionEntry {
+  _DraftQuestionEntry({
+    required this.uid,
+    required this.sectionId,
+    required this.questionType,
+  }) : textController = TextEditingController(),
+       answerController = TextEditingController(),
+       choiceControllers = List<TextEditingController>.generate(
+         4,
+         (_) => TextEditingController(),
+       );
+
+  final String uid;
+  final int sectionId;
+  final String questionType;
+  final TextEditingController textController;
+  final TextEditingController answerController;
+  final List<TextEditingController> choiceControllers;
+  String? pickedAnswer;
+  String? errorMessage;
+
+  String get resolvedCorrectAnswer {
+    if (questionType == 'identification') {
+      return answerController.text.trim().toUpperCase();
+    }
+    return (pickedAnswer ?? '').trim();
+  }
+
+  List<String>? get resolvedChoices {
+    if (questionType != 'multiple_choice') return null;
+    return choiceControllers.map((c) => c.text.trim()).toList();
+  }
+
+  void dispose() {
+    textController.dispose();
+    answerController.dispose();
+    for (final c in choiceControllers) {
+      c.dispose();
+    }
+  }
+}
+
+// =============================================================
 // EXAM BUILDER (in place)
 // =============================================================
 
@@ -2164,11 +2340,13 @@ class _ExamBuilderPane extends StatefulWidget {
     required this.examId,
     required this.classes,
     required this.onBack,
+    this.initialBulkMode = false,
   });
 
   final int examId;
   final List<_Json> classes;
   final VoidCallback onBack;
+  final bool initialBulkMode;
 
   @override
   State<_ExamBuilderPane> createState() => _ExamBuilderPaneState();
@@ -2176,6 +2354,7 @@ class _ExamBuilderPane extends StatefulWidget {
 
 class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
   bool _loading = true;
+  bool _savingBulk = false;
   String? _error;
 
   _Json? _exam;
@@ -2188,16 +2367,69 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
   /// Accordion: only one section open at a time.
   int? _expandedId;
 
-  /// Unsaved question editors, per section id.
-  final Map<int, List<Key>> _drafts = {};
+  /// Unsaved bulk draft questions per section id.
+  final Map<int, List<_DraftQuestionEntry>> _drafts = {};
 
-  /// Id of the saved question currently open in the inline editor.
+  /// Pending answer-key changes on existing/uploaded questions (questionId -> newAnswer).
+  final Map<int, String> _pendingAnswerKeys = {};
+
+  /// Persistent TextEditingControllers for saved Identification questions,
+  /// keyed by questionId so typing in Question 3 and navigating to Question 10
+  /// never loses state or shifts question positions.
+  final Map<int, TextEditingController> _identificationAnswerControllers = {};
+
+  /// Whether newly uploaded questions are awaiting centralized bulk save.
+  bool _awaitingUploadedSave = false;
+
+  /// Id of the saved question currently open in the per-question inline editor.
   int? _editingQuestionId;
+
+  int _draftCounter = 0;
 
   @override
   void initState() {
     super.initState();
+    _awaitingUploadedSave = widget.initialBulkMode;
     _load();
+  }
+
+  @override
+  void dispose() {
+    for (final list in _drafts.values) {
+      for (final d in list) {
+        d.dispose();
+      }
+    }
+    for (final c in _identificationAnswerControllers.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  List<_Json> _sortSections(List<_Json> raw) {
+    final copy = List<_Json>.from(raw);
+    copy.sort((a, b) {
+      final oa = int.tryParse(a['section_order']?.toString() ?? '') ?? 0;
+      final ob = int.tryParse(b['section_order']?.toString() ?? '') ?? 0;
+      if (oa != ob) return oa.compareTo(ob);
+      final ida = _id(a['id']) ?? 0;
+      final idb = _id(b['id']) ?? 0;
+      return ida.compareTo(idb);
+    });
+    return copy;
+  }
+
+  List<_Json> _sortQuestions(List<_Json> raw) {
+    final copy = List<_Json>.from(raw);
+    copy.sort((a, b) {
+      final na = int.tryParse(a['question_number']?.toString() ?? '') ?? 0;
+      final nb = int.tryParse(b['question_number']?.toString() ?? '') ?? 0;
+      if (na != nb) return na.compareTo(nb);
+      final ida = _id(a['id']) ?? 0;
+      final idb = _id(b['id']) ?? 0;
+      return ida.compareTo(idb);
+    });
+    return copy;
   }
 
   Future<void> _load({bool silent = false}) async {
@@ -2216,20 +2448,63 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
       );
       if (match.isEmpty) throw Exception('Exam not found.');
 
-      final sections = await ApiService.getExamSections(token, widget.examId);
+      final rawSections = await ApiService.getExamSections(
+        token,
+        widget.examId,
+      );
+      final sections = _sortSections(rawSections);
 
       final qs = <int, List<_Json>>{};
       final acc = <int, List<_Json>>{};
+      var anyMissingKey = false;
+
       for (final s in sections) {
         final sid = _id(s['id']);
         if (sid == null) continue;
-        final list = await ApiService.getQuestions(token, sid);
+        final rawList = await ApiService.getQuestions(token, sid);
+        final list = _sortQuestions(rawList);
+        final qType = (s['question_type']?.toString() ?? '').trim();
+
+        for (var idx = 0; idx < list.length; idx++) {
+          final q = list[idx];
+          // Ensure question_number is always present and sequential
+          q['question_number'] ??= idx + 1;
+          final rawAns = (q['correct_answer']?.toString() ?? '').trim();
+          if (rawAns.isEmpty || rawAns.toLowerCase() == 'null') {
+            anyMissingKey = true;
+          } else if (qType == 'identification') {
+            q['correct_answer'] = rawAns.toUpperCase();
+          }
+
+          final qid = _id(q['id']);
+          if (qid != null && qType == 'identification') {
+            final effectiveAns =
+                _pendingAnswerKeys[qid] ??
+                ((rawAns.toLowerCase() == 'null') ? '' : rawAns.toUpperCase());
+            final existingCtrl = _identificationAnswerControllers[qid];
+            if (existingCtrl == null) {
+              _identificationAnswerControllers[qid] = TextEditingController(
+                text: effectiveAns,
+              );
+            } else if (!_pendingAnswerKeys.containsKey(qid) &&
+                existingCtrl.text != effectiveAns) {
+              existingCtrl.text = effectiveAns;
+            }
+          }
+        }
+
         qs[sid] = list;
-        if (s['question_type']?.toString() == 'identification') {
+        if (qType == 'identification') {
           for (final q in list) {
             final qid = _id(q['id']);
             if (qid == null) continue;
-            acc[qid] = await ApiService.getAcceptableAnswers(token, qid);
+            final rawAcc = await ApiService.getAcceptableAnswers(token, qid);
+            for (final a in rawAcc) {
+              if (a['answer'] != null) {
+                a['answer'] = a['answer'].toString().toUpperCase();
+              }
+            }
+            acc[qid] = rawAcc;
           }
         }
       }
@@ -2250,6 +2525,9 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
           ..clear()
           ..addAll(acc);
         _students = students;
+        if (anyMissingKey) {
+          _awaitingUploadedSave = true;
+        }
         _loading = false;
       });
     } catch (e) {
@@ -2266,6 +2544,33 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
   }
 
   // ---------- derived ----------
+
+  int get _totalDraftCount =>
+      _drafts.values.fold<int>(0, (sum, list) => sum + list.length);
+
+  bool get _hasAnyMissingAnswerKey {
+    for (final list in _questions.values) {
+      for (final q in list) {
+        final qid = _id(q['id']);
+        final pending = qid != null ? _pendingAnswerKeys[qid] : null;
+        final saved = (q['correct_answer']?.toString() ?? '').trim();
+        final effective = (pending ?? saved).trim();
+        if (effective.isEmpty || effective.toLowerCase() == 'null') {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /// Controls visibility of the centralized "Save Questions and Answers" button.
+  /// Visible while creating/entering new draft questions, editing answer keys
+  /// in bulk, or configuring uploaded questions; hidden once everything is saved.
+  bool get _showCentralizedSaveButton =>
+      _totalDraftCount > 0 ||
+      _pendingAnswerKeys.isNotEmpty ||
+      _awaitingUploadedSave ||
+      _hasAnyMissingAnswerKey;
 
   int get _totalQuestions => _questions.values.fold(0, (a, l) => a + l.length);
 
@@ -2290,6 +2595,11 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
   }
 
   Future<void> _setStatus(String targetStatus) async {
+    if (_showCentralizedSaveButton) {
+      final savedOk = await _saveAllQuestionsAndAnswers();
+      if (!savedOk) return;
+    }
+
     final exam = _exam;
     if (exam == null || _updatingStatus) return;
 
@@ -2381,7 +2691,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         );
         await Printing.sharePdf(
           bytes: docxBytes,
-          filename: _docFileName('question_paper', 'docx'),
+          filename: _docFileName('questionnaire', 'docx'),
         );
       }
     } catch (e) {
@@ -2416,20 +2726,12 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     if (updatedId != null) await _load(silent: true);
   }
 
-  // ---------- sections ----------
+  // ---------- sections (with automatic Part I / Part II section naming) ----------
 
-  Future<void> _showSectionDialog({_Json? section}) async {
+  Future<void> _showSectionDialog({_Json? section, int? sectionIndex}) async {
     final editing = section != null;
-    final nameC = TextEditingController(
-      text: section?['name']?.toString() ?? '',
-    );
-    final ptsC = TextEditingController(
-      text: editing ? _trim(_num(section['default_points'])) : '1',
-    );
     var type = section?['question_type']?.toString() ?? 'multiple_choice';
     if (!_kTypes.contains(type)) type = 'multiple_choice';
-    bool saving = false;
-    String? error;
 
     final nextOrder =
         _sections.fold<int>(0, (m, s) {
@@ -2438,17 +2740,37 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         }) +
         1;
 
+    final effectiveOrder = editing
+        ? (int.tryParse(section['section_order']?.toString() ?? '') ??
+              ((sectionIndex ?? 0) + 1))
+        : nextOrder;
+
+    final initialName = editing
+        ? ((section['name']?.toString().trim().isNotEmpty ?? false)
+              ? section['name'].toString().trim()
+              : _autoSectionName(effectiveOrder, type))
+        : _autoSectionName(effectiveOrder, type);
+
+    final nameC = TextEditingController(text: initialName);
+    final ptsC = TextEditingController(
+      text: editing ? _trim(_num(section['default_points'])) : '1',
+    );
+    bool saving = false;
+    String? error;
+
     final created = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setS) {
           Future<void> save() async {
-            final name = nameC.text.trim();
+            final rawName = nameC.text.trim();
+            final name = rawName.isEmpty
+                ? _autoSectionName(effectiveOrder, type)
+                : rawName;
             final points = num.tryParse(ptsC.text.trim());
-            if (name.isEmpty || points == null || points <= 0) {
+            if (points == null || points <= 0) {
               setS(
-                () => error =
-                    'Enter a section name and points greater than zero.',
+                () => error = 'Enter default points greater than zero.',
               );
               return;
             }
@@ -2469,7 +2791,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                   questionType: type,
                 );
               } else {
-                await ApiService.createExamSection(
+                final createdSec = await ApiService.createExamSection(
                   token: token,
                   examId: widget.examId,
                   name: name,
@@ -2477,6 +2799,10 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                   sectionOrder: nextOrder,
                   defaultPoints: points,
                 );
+                final newSid = _id(createdSec['id']);
+                if (newSid != null) {
+                  _expandedId = newSid;
+                }
               }
               if (dialogContext.mounted) Navigator.pop(dialogContext, true);
             } catch (e) {
@@ -2514,9 +2840,8 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                   TextField(
                     controller: nameC,
                     enabled: !saving,
-                    autofocus: !editing,
                     style: _inputText,
-                    decoration: _deco('e.g. Part II · Identification'),
+                    decoration: _deco(_autoSectionName(effectiveOrder, type)),
                   ),
                 ),
                 _Field(
@@ -2533,7 +2858,17 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                     onChanged: saving
                         ? null
                         : (v) {
-                            if (v != null) setS(() => type = v);
+                            if (v != null) {
+                              setS(() {
+                                type = v;
+                                // Automatically generate section name based on
+                                // the selected exam type and section sequence.
+                                nameC.text = _autoSectionName(
+                                  effectiveOrder,
+                                  v,
+                                );
+                              });
+                            }
                           },
                   ),
                 ),
@@ -2573,8 +2908,42 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
       final token = await _token();
       await ApiService.deleteExamSection(token: token, sectionId: sectionId);
       if (!mounted) return;
-      _drafts.remove(sectionId);
+      final removedDrafts = _drafts.remove(sectionId);
+      if (removedDrafts != null) {
+        for (final d in removedDrafts) {
+          d.dispose();
+        }
+      }
       if (_expandedId == sectionId) _expandedId = null;
+
+      // Re-sequence remaining sections' auto-generated Part I, Part II names
+      final remaining = await ApiService.getExamSections(token, widget.examId);
+      final sortedRemaining = _sortSections(remaining);
+      for (var i = 0; i < sortedRemaining.length; i++) {
+        final s = sortedRemaining[i];
+        final sid = _id(s['id']);
+        if (sid == null) continue;
+        final qType = s['question_type']?.toString() ?? 'multiple_choice';
+        final currentName = (s['name']?.toString() ?? '').trim();
+        if (RegExp(r'^Part\s+[IVX\d]+\s*[:\u00B7\-]', caseSensitive: false)
+            .hasMatch(currentName)) {
+          final updatedName = _autoSectionName(i + 1, qType);
+          if (currentName != updatedName) {
+            try {
+              await ApiService.updateExamSection(
+                token: token,
+                sectionId: sid,
+                name: updatedName,
+                defaultPoints: _num(s['default_points']) > 0
+                    ? _num(s['default_points'])
+                    : 1,
+                questionType: qType,
+              );
+            } catch (_) {}
+          }
+        }
+      }
+
       await _load(silent: true);
       if (!mounted) return;
       _toast(context, 'Section deleted.');
@@ -2583,54 +2952,277 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     }
   }
 
-  // ---------- questions ----------
+  // ---------- questions, bulk save & shuffling ----------
 
-  void _addDraft(int sectionId) {
+  void _addDraft(int sectionId, String questionType) {
     setState(() {
       _expandedId = sectionId;
-      _drafts.putIfAbsent(sectionId, () => []).add(UniqueKey());
+      final entry = _DraftQuestionEntry(
+        uid: 'draft_${++_draftCounter}',
+        sectionId: sectionId,
+        questionType: questionType,
+      );
+      _drafts.putIfAbsent(sectionId, () => []).add(entry);
     });
   }
 
-  void _discardDraft(int sectionId, Key key) {
-    setState(() => _drafts[sectionId]?.remove(key));
+  void _discardDraft(int sectionId, _DraftQuestionEntry entry) {
+    setState(() {
+      _drafts[sectionId]?.remove(entry);
+      entry.dispose();
+    });
   }
 
-  Future<void> _saveQuestion(
-    int sectionId,
-    Key key,
-    String text,
-    List<String>? choices,
-    String correct,
-  ) async {
-    final token = await _token();
-    final existing = _questions[sectionId] ?? const <_Json>[];
-    final next =
-        existing.fold<int>(0, (m, q) {
+  /// Centralized bulk save for all unsaved draft questions and all pending
+  /// answer key changes across all sections in the exam.
+  Future<bool> _saveAllQuestionsAndAnswers() async {
+    if (_savingBulk) return false;
+
+    // 1. Validate all draft questions across all sections
+    for (final sec in _sections) {
+      final sid = _id(sec['id']);
+      if (sid == null) continue;
+      final secName = sec['name']?.toString() ?? 'Section';
+      final secType = sec['question_type']?.toString() ?? 'multiple_choice';
+      final savedQs = _questions[sid] ?? const <_Json>[];
+      final draftList = _drafts[sid] ?? const <_DraftQuestionEntry>[];
+
+      // Validate existing/uploaded questions in this section have answer keys
+      for (var i = 0; i < savedQs.length; i++) {
+        final q = savedQs[i];
+        final qid = _id(q['id']);
+        final qNum = q['question_number']?.toString() ?? '${i + 1}';
+        final pendingAns = qid != null ? _pendingAnswerKeys[qid] : null;
+        final savedAns = (q['correct_answer']?.toString() ?? '').trim();
+        final effectiveAns = (pendingAns ?? savedAns).trim();
+        if (effectiveAns.isEmpty || effectiveAns.toLowerCase() == 'null') {
+          setState(() => _expandedId = sid);
+          _toast(
+            context,
+            'Please provide the correct answer for Question $qNum in $secName before saving.',
+          );
+          return false;
+        }
+      }
+
+      // Validate new draft questions in this section
+      for (var i = 0; i < draftList.length; i++) {
+        final d = draftList[i];
+        final qNum = savedQs.length + i + 1;
+        final text = d.textController.text.trim();
+        if (text.isEmpty) {
+          setState(() {
+            _expandedId = sid;
+            d.errorMessage = 'Question text is required.';
+          });
+          _toast(
+            context,
+            'Question $qNum in $secName is missing question text.',
+          );
+          return false;
+        }
+        if (secType == 'multiple_choice') {
+          final choices = d.resolvedChoices ?? const <String>[];
+          if (choices.any((c) => c.isEmpty)) {
+            setState(() {
+              _expandedId = sid;
+              d.errorMessage = 'Please fill in all four options (A, B, C, D).';
+            });
+            _toast(
+              context,
+              'Please fill in all four options for Question $qNum in $secName.',
+            );
+            return false;
+          }
+        }
+        final correct = d.resolvedCorrectAnswer;
+        if (correct.isEmpty) {
+          setState(() {
+            _expandedId = sid;
+            d.errorMessage = 'Correct answer is required.';
+          });
+          _toast(
+            context,
+            'Please select or enter the correct answer for Question $qNum in $secName.',
+          );
+          return false;
+        }
+        d.errorMessage = null;
+      }
+    }
+
+    setState(() => _savingBulk = true);
+    try {
+      final token = await _token();
+
+      // 2. Save all pending answer-key updates on existing/uploaded questions
+      // in their exact question order without changing their question_number.
+      for (final sec in _sections) {
+        final sid = _id(sec['id']);
+        if (sid == null) continue;
+        final secType = sec['question_type']?.toString() ?? 'multiple_choice';
+        final savedQs = _sortQuestions(_questions[sid] ?? const <_Json>[]);
+
+        for (final q in savedQs) {
+          final qid = _id(q['id']);
+          if (qid == null || !_pendingAnswerKeys.containsKey(qid)) continue;
+          final newAns = _normalizeAnswerByType(
+            _pendingAnswerKeys[qid]!,
+            secType,
+          );
+          if (newAns.isEmpty) continue;
+
+          await ApiService.updateQuestion(
+            token: token,
+            questionId: qid,
+            questionText: q['question_text']?.toString() ?? '',
+            points: _num(q['points']) > 0 ? _num(q['points']) : 1.0,
+            choices: q['choices'],
+            correctAnswer: newAns,
+          );
+          q['correct_answer'] = newAns;
+        }
+      }
+
+      // 3. Create all new draft questions sequentially per section
+      for (final sec in _sections) {
+        final sid = _id(sec['id']);
+        if (sid == null) continue;
+        final secType = sec['question_type']?.toString() ?? 'multiple_choice';
+        final defaultPoints = _num(sec['default_points']) > 0
+            ? _num(sec['default_points'])
+            : 1.0;
+        final existing = _sortQuestions(_questions[sid] ?? const <_Json>[]);
+        var nextQuestionNumber = existing.fold<int>(0, (m, q) {
           final n = int.tryParse(q['question_number']?.toString() ?? '') ?? 0;
           return n > m ? n : m;
-        }) +
-        1;
+        });
 
-    final section = _sections.firstWhere(
-      (s) => _id(s['id']) == sectionId,
-      orElse: () => <String, dynamic>{},
-    );
-    final defaultPoints = _num(section['default_points']);
+        final draftList = List<_DraftQuestionEntry>.from(
+          _drafts[sid] ?? const <_DraftQuestionEntry>[],
+        );
+        for (final d in draftList) {
+          nextQuestionNumber++;
+          final normalizedCorrect = _normalizeAnswerByType(
+            d.resolvedCorrectAnswer,
+            secType,
+          );
+          await ApiService.createQuestion(
+            token: token,
+            sectionId: sid,
+            questionNumber: nextQuestionNumber,
+            questionText: d.textController.text.trim(),
+            points: defaultPoints,
+            choices: d.resolvedChoices,
+            correctAnswer: normalizedCorrect,
+          );
+          d.dispose();
+        }
+        _drafts.remove(sid);
+      }
 
-    await ApiService.createQuestion(
-      token: token,
-      sectionId: sectionId,
-      questionNumber: next,
-      questionText: text,
-      points: defaultPoints > 0 ? defaultPoints : 1.0,
-      choices: choices,
-      correctAnswer: correct,
-    );
+      _pendingAnswerKeys.clear();
+      _awaitingUploadedSave = false;
 
-    _drafts[sectionId]?.remove(key);
-    await _load(silent: true);
-    if (mounted) _toast(context, 'Question added successfully.');
+      await _load(silent: true);
+      if (mounted) {
+        _toast(context, 'All questions and answers saved successfully.');
+      }
+      return true;
+    } catch (e) {
+      if (mounted) _toast(context, _err(e));
+      return false;
+    } finally {
+      if (mounted) setState(() => _savingBulk = false);
+    }
+  }
+
+  /// Shuffles the questions within [sectionId] while preserving sequential
+  /// 1..N question numbers and their corresponding answers.
+  Future<void> _shuffleSectionQuestions(int sectionId) async {
+    final savedQs = _sortQuestions(_questions[sectionId] ?? const <_Json>[]);
+    final draftList = _drafts[sectionId] ?? <_DraftQuestionEntry>[];
+
+    if (savedQs.length + draftList.length < 2) {
+      _toast(context, 'Add at least 2 questions to shuffle this section.');
+      return;
+    }
+
+    final rng = math.Random();
+    if (draftList.length >= 2) {
+      setState(() {
+        draftList.shuffle(rng);
+      });
+    }
+
+    if (savedQs.length >= 2) {
+      try {
+        final token = await _token();
+        final section = _sections.firstWhere(
+          (s) => _id(s['id']) == sectionId,
+          orElse: () => <String, dynamic>{},
+        );
+        final secType =
+            section['question_type']?.toString() ?? 'multiple_choice';
+
+        // Snapshot each question's payload (text, points, choices, answer)
+        final payloads = savedQs.map((q) {
+          final qid = _id(q['id']);
+          final pendingAns = qid != null ? _pendingAnswerKeys[qid] : null;
+          final rawAns =
+              pendingAns ?? (q['correct_answer']?.toString() ?? '').trim();
+          return <String, dynamic>{
+            'question_text': q['question_text']?.toString() ?? '',
+            'points': _num(q['points']) > 0 ? _num(q['points']) : 1.0,
+            'choices': q['choices'],
+            'correct_answer': rawAns.toLowerCase() == 'null'
+                ? ''
+                : _normalizeAnswerByType(rawAns, secType),
+          };
+        }).toList()
+          ..shuffle(rng);
+
+        for (var i = 0; i < savedQs.length; i++) {
+          final targetQ = savedQs[i];
+          final qid = _id(targetQ['id']);
+          if (qid == null) continue;
+          final p = payloads[i];
+          final ans = (p['correct_answer'] as String).trim();
+
+          targetQ['question_text'] = p['question_text'];
+          targetQ['points'] = p['points'];
+          targetQ['choices'] = p['choices'];
+          targetQ['correct_answer'] = ans;
+
+          if (_identificationAnswerControllers.containsKey(qid)) {
+            _identificationAnswerControllers[qid]!.text = ans.toUpperCase();
+          }
+          if (_pendingAnswerKeys.containsKey(qid)) {
+            _pendingAnswerKeys[qid] = ans;
+          }
+
+          if (ans.isNotEmpty) {
+            await ApiService.updateQuestion(
+              token: token,
+              questionId: qid,
+              questionText: p['question_text'] as String,
+              points: p['points'] as num,
+              choices: p['choices'],
+              correctAnswer: ans,
+            );
+          }
+        }
+
+        await _load(silent: true);
+        if (mounted) {
+          _toast(context, 'Questions shuffled successfully.');
+        }
+      } catch (e) {
+        if (mounted) _toast(context, _err(e));
+      }
+    } else {
+      _toast(context, 'Questions shuffled.');
+    }
   }
 
   Future<void> _importPdfIntoCurrentExam() async {
@@ -2638,7 +3230,8 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     if (parsedPaper == null || !mounted) return;
     try {
       final token = await _token();
-      final nextOrder = _sections.fold<int>(0, (m, s) {
+      final nextOrder =
+          _sections.fold<int>(0, (m, s) {
             final o = int.tryParse(s['section_order']?.toString() ?? '') ?? 0;
             return o > m ? o : m;
           }) +
@@ -2648,12 +3241,16 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         examId: widget.examId,
         paper: parsedPaper,
         startingSectionOrder: nextOrder,
+        existingSections: _sections,
+        existingQuestionsBySection: _questions,
       );
+      setState(() => _awaitingUploadedSave = true);
       await _load(silent: true);
       if (mounted) {
         _toast(
           context,
-          'Imported $count questions from "${parsedPaper.fileName}". Set the answer key below.',
+          'Imported $count questions from "${parsedPaper.fileName}" organized by test type. '
+          'Set the answer keys and click "Save Questions and Answers".',
         );
       }
     } catch (e) {
@@ -2661,49 +3258,44 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     }
   }
 
-  Future<void> _quickSetAnswerKey(_Json q, String newAnswer) async {
+  /// Sets or updates the answer key for an existing/uploaded question [q] in
+  /// local state (preserving exact question order) and exposes the centralized
+  /// "Save Questions and Answers" button.
+  void _setSavedQuestionAnswerKey(_Json q, String newAnswer, String type) {
     final qid = _id(q['id']);
     if (qid == null) return;
-    final clean = newAnswer.trim();
-    if (clean.isEmpty) return;
-    final prev = q['correct_answer'];
-    setState(() => q['correct_answer'] = clean);
-    try {
-      final token = await _token();
-      await ApiService.updateQuestion(
-        token: token,
-        questionId: qid,
-        questionText: q['question_text']?.toString() ?? '',
-        points: _num(q['points']),
-        choices: q['choices'],
-        correctAnswer: clean,
-      );
-    } catch (e) {
-      if (mounted) {
-        setState(() => q['correct_answer'] = prev);
-        _toast(context, _err(e));
-      }
-    }
+    final normalized = _normalizeAnswerByType(newAnswer, type);
+    setState(() {
+      q['correct_answer'] = normalized;
+      _pendingAnswerKeys[qid] = normalized;
+    });
   }
 
-  Future<void> _updateQuestion(
+  Future<void> _updateSingleSavedQuestion(
     _Json q,
     String text,
     List<String>? choices,
     String correct,
+    String type,
   ) async {
     final qid = _id(q['id']);
     if (qid == null) throw Exception('Invalid question ID.');
     final token = await _token();
+    final normalizedCorrect = _normalizeAnswerByType(correct, type);
 
     await ApiService.updateQuestion(
       token: token,
       questionId: qid,
       questionText: text,
-      points: _num(q['points']),
+      points: _num(q['points']) > 0 ? _num(q['points']) : 1.0,
       choices: choices,
-      correctAnswer: correct,
+      correctAnswer: normalizedCorrect,
     );
+
+    if (_identificationAnswerControllers.containsKey(qid)) {
+      _identificationAnswerControllers[qid]!.text = normalizedCorrect;
+    }
+    _pendingAnswerKeys.remove(qid);
 
     if (mounted) setState(() => _editingQuestionId = null);
     await _load(silent: true);
@@ -2720,6 +3312,8 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     try {
       final token = await _token();
       await ApiService.deleteQuestion(token: token, questionId: questionId);
+      _pendingAnswerKeys.remove(questionId);
+      _identificationAnswerControllers.remove(questionId)?.dispose();
       if (!mounted) return;
       await _load(silent: true);
       if (!mounted) return;
@@ -2739,7 +3333,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setS) {
           Future<void> save() async {
-            final answer = c.text.trim();
+            final answer = c.text.trim().toUpperCase();
             if (answer.isEmpty) {
               setS(() => error = 'Acceptable answer is required.');
               return;
@@ -2766,7 +3360,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
 
           return _CmDialog(
             title: 'Add acceptable answer',
-            subtitle: 'Another answer that earns full credit',
+            subtitle: 'Another answer in CAPITAL LETTERS that earns full credit',
             maxWidth: 400,
             actions: [
               OutlinedButton(
@@ -2786,13 +3380,15 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _Field(
-                  'Answer',
+                  'Answer (CAPITAL LETTERS)',
                   TextField(
                     controller: c,
                     enabled: !saving,
                     autofocus: true,
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: const [_UpperCaseTextFormatter()],
                     style: _inputText,
-                    decoration: _deco('Example: dart'),
+                    decoration: _deco('Example: DART'),
                   ),
                 ),
                 if (error != null) _ErrorText(error!),
@@ -3249,39 +3845,66 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
   // ---------- sections column ----------
 
   Widget _sectionsColumn() {
+    final showSaveAll = _showCentralizedSaveButton;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          runSpacing: 8,
           children: [
-            const Text(
-              'Exam Sections',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: _Brand.ink,
-              ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Exam Sections',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: _Brand.ink,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  '(${_sections.length})',
+                  style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
+                ),
+              ],
             ),
-            const SizedBox(width: 6),
-            Text(
-              '(${_sections.length})',
-              style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
-            ),
-            const Spacer(),
-            OutlinedButton.icon(
-              style: _outlineStyle.copyWith(
-                minimumSize: const WidgetStatePropertyAll(Size(0, 38)),
-              ),
-              onPressed: _importPdfIntoCurrentExam,
-              icon: const Icon(Icons.upload_file_outlined, size: 17),
-              label: const Text('Upload PDF'),
-            ),
-            const SizedBox(width: 8),
-            FilledButton.icon(
-              style: _amberStyle,
-              onPressed: () => _showSectionDialog(),
-              icon: const Icon(Icons.add, size: 18),
-              label: const Text('Add section'),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                if (showSaveAll)
+                  FilledButton.icon(
+                    style: _greenSaveStyle,
+                    onPressed: _savingBulk
+                        ? null
+                        : _saveAllQuestionsAndAnswers,
+                    icon: _savingBulk
+                        ? const _Spin()
+                        : const Icon(Icons.check_circle_outline, size: 17),
+                    label: const Text('Save Questions and Answers'),
+                  ),
+                OutlinedButton.icon(
+                  style: _outlineStyle.copyWith(
+                    minimumSize: const WidgetStatePropertyAll(Size(0, 38)),
+                  ),
+                  onPressed: _savingBulk ? null : _importPdfIntoCurrentExam,
+                  icon: const Icon(Icons.upload_file_outlined, size: 17),
+                  label: const Text('Upload PDF'),
+                ),
+                FilledButton.icon(
+                  style: _amberStyle,
+                  onPressed: _savingBulk ? null : () => _showSectionDialog(),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Add section'),
+                ),
+              ],
             ),
           ],
         ),
@@ -3310,14 +3933,20 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
 
   Widget _sectionCard(_Json section, int index) {
     final sid = _id(section['id']);
-    final type = section['question_type']?.toString() ?? '';
-    final qs = sid == null ? <_Json>[] : (_questions[sid] ?? <_Json>[]);
-    final drafts = sid == null ? <Key>[] : (_drafts[sid] ?? <Key>[]);
+    final type = section['question_type']?.toString() ?? 'multiple_choice';
+    final qs = sid == null
+        ? <_Json>[]
+        : _sortQuestions(_questions[sid] ?? <_Json>[]);
+    final drafts = sid == null
+        ? <_DraftQuestionEntry>[]
+        : (_drafts[sid] ?? <_DraftQuestionEntry>[]);
     final expanded = sid != null && _expandedId == sid;
     final order = section['section_order']?.toString() ?? '${index + 1}';
-    final name = section['name']?.toString() ?? 'Section';
+    final name = section['name']?.toString() ?? _autoSectionName(index + 1, type);
+    final totalInSection = qs.length + drafts.length;
 
     return Padding(
+      key: ValueKey('section-${sid ?? index}'),
       padding: const EdgeInsets.only(bottom: 12),
       child: _Card(
         padding: 0,
@@ -3350,7 +3979,8 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                           Text(
                             '${_typeLabel(type)} · '
                             '${_fixed2(_num(section['default_points']))} pts/item · '
-                            '${qs.length} ${qs.length == 1 ? 'question' : 'questions'}',
+                            '${qs.length} ${qs.length == 1 ? 'question' : 'questions'}'
+                            '${drafts.isNotEmpty ? ' (+${drafts.length} unsaved)' : ''}',
                             style: const TextStyle(
                               fontSize: 11.5,
                               color: CmColors.slate,
@@ -3359,13 +3989,27 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                         ],
                       ),
                     ),
+                    if (totalInSection >= 2 && sid != null)
+                      IconButton(
+                        tooltip: 'Shuffle questions',
+                        visualDensity: VisualDensity.compact,
+                        iconSize: 18,
+                        color: CmColors.slate,
+                        icon: const Icon(Icons.shuffle),
+                        onPressed: _savingBulk
+                            ? null
+                            : () => _shuffleSectionQuestions(sid),
+                      ),
                     IconButton(
                       tooltip: 'Edit section',
                       visualDensity: VisualDensity.compact,
                       iconSize: 18,
                       color: CmColors.slate,
                       icon: const Icon(Icons.edit_outlined),
-                      onPressed: () => _showSectionDialog(section: section),
+                      onPressed: () => _showSectionDialog(
+                        section: section,
+                        sectionIndex: index,
+                      ),
                     ),
                     IconButton(
                       tooltip: 'Delete section',
@@ -3389,7 +4033,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 ),
               ),
             ),
-            if (expanded) ...[
+            if (expanded && sid != null) ...[
               const Divider(height: 1, color: CmColors.line),
               Padding(
                 padding: const EdgeInsets.all(16),
@@ -3422,30 +4066,49 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                     for (var i = 0; i < qs.length; i++)
                       _savedQuestion(qs[i], i, type),
                     for (var i = 0; i < drafts.length; i++)
-                      _DraftQuestion(
-                        key: drafts[i],
+                      _buildBulkDraftQuestionCard(
+                        entry: drafts[i],
                         number: qs.length + i + 1,
-                        type: type,
-                        onDiscard: () => _discardDraft(sid, drafts[i]),
-                        onSave: (text, choices, correct) => _saveQuestion(
-                          sid,
-                          drafts[i],
-                          text,
-                          choices,
-                          correct,
-                        ),
+                        pointsLabel: _trim(_num(section['default_points'])),
                       ),
                     const SizedBox(height: 4),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        style: _outlineStyle.copyWith(
-                          backgroundColor: WidgetStatePropertyAll(CmColors.bg),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            style: _outlineStyle.copyWith(
+                              backgroundColor: WidgetStatePropertyAll(
+                                CmColors.bg,
+                              ),
+                            ),
+                            onPressed: _savingBulk
+                                ? null
+                                : () => _addDraft(sid, type),
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text('Add question'),
+                          ),
                         ),
-                        onPressed: () => _addDraft(sid),
-                        icon: const Icon(Icons.add, size: 16),
-                        label: const Text('Add question'),
-                      ),
+                        if (_showCentralizedSaveButton) ...[
+                          const SizedBox(width: 10),
+                          FilledButton.icon(
+                            style: _greenSaveStyle.copyWith(
+                              minimumSize: const WidgetStatePropertyAll(
+                                Size(0, 40),
+                              ),
+                            ),
+                            onPressed: _savingBulk
+                                ? null
+                                : _saveAllQuestionsAndAnswers,
+                            icon: _savingBulk
+                                ? const _Spin()
+                                : const Icon(
+                                    Icons.check_circle_outline,
+                                    size: 17,
+                                  ),
+                            label: const Text('Save Questions and Answers'),
+                          ),
+                        ],
+                      ],
                     ),
                   ],
                 ),
@@ -3457,32 +4120,294 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     );
   }
 
+  /// Renders a bulk-entry draft question card (no individual "Save question"
+  /// button—saved together with all other questions via "Save Questions and Answers").
+  Widget _buildBulkDraftQuestionCard({
+    required _DraftQuestionEntry entry,
+    required int number,
+    required String pointsLabel,
+  }) {
+    final type = entry.questionType;
+    final currentAnswer = entry.resolvedCorrectAnswer;
+    final missingKey = currentAnswer.isEmpty;
+
+    Widget choiceInputRow(int idx) {
+      final letter = String.fromCharCode(65 + idx);
+      final isSelected =
+          !missingKey && currentAnswer.toUpperCase() == letter;
+      return Row(
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(7),
+            onTap: _savingBulk
+                ? null
+                : () => setState(() {
+                    entry.pickedAnswer = letter;
+                    entry.errorMessage = null;
+                  }),
+            child: Container(
+              width: 26,
+              height: 26,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: isSelected ? CmColors.green : CmColors.bg,
+                borderRadius: BorderRadius.circular(7),
+              ),
+              child: Text(
+                letter,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                  color: isSelected ? Colors.white : _Brand.ink,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: entry.choiceControllers[idx],
+              enabled: !_savingBulk,
+              onChanged: (_) {
+                if (entry.errorMessage != null) {
+                  setState(() => entry.errorMessage = null);
+                }
+              },
+              style: _inputText,
+              decoration: _deco('Option $letter').copyWith(
+                fillColor: isSelected
+                    ? CmColors.green.withValues(alpha: 0.08)
+                    : Colors.white,
+                enabledBorder: _ob(
+                  isSelected ? CmColors.green : _Brand.mist,
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    Widget answerKeySelector() {
+      if (type == 'multiple_choice') {
+        return _buildMultipleChoiceKeyTiles(
+          selectedLetter: missingKey ? null : currentAnswer.toUpperCase(),
+          enabled: !_savingBulk,
+          onSelect: (letter) => setState(() {
+            entry.pickedAnswer = letter;
+            entry.errorMessage = null;
+          }),
+        );
+      }
+      if (type == 'true_false') {
+        return _buildTrueFalseKeyButtons(
+          selectedValue: missingKey ? null : currentAnswer,
+          enabled: !_savingBulk,
+          onSelect: (val) => setState(() {
+            entry.pickedAnswer = val;
+            entry.errorMessage = null;
+          }),
+        );
+      }
+      return SizedBox(
+        width: 240,
+        child: TextField(
+          controller: entry.answerController,
+          enabled: !_savingBulk,
+          textCapitalization: TextCapitalization.characters,
+          inputFormatters: const [_UpperCaseTextFormatter()],
+          onChanged: (_) => setState(() {
+            entry.errorMessage = null;
+          }),
+          style: _inputText.copyWith(fontWeight: FontWeight.w700),
+          decoration: _deco('ENTER ANSWER IN CAPS').copyWith(
+            fillColor: !missingKey
+                ? CmColors.green.withValues(alpha: 0.08)
+                : Colors.white,
+            enabledBorder: _ob(!missingKey ? CmColors.green : _Brand.mist),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      key: ValueKey('draft-card-${entry.uid}'),
+      padding: const EdgeInsets.only(bottom: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                'Question $number',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: _Brand.ink,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '$pointsLabel ${pointsLabel == '1' ? 'pt' : 'pts'}',
+                style: const TextStyle(fontSize: 11.5, color: CmColors.slate),
+              ),
+              if (missingKey) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _Brand.amber.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    'Answer key needed',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: _Brand.ink,
+                    ),
+                  ),
+                ),
+              ],
+              const Spacer(),
+              IconButton(
+                tooltip: 'Discard question',
+                visualDensity: VisualDensity.compact,
+                iconSize: 17,
+                color: CmColors.slate,
+                icon: const Icon(Icons.delete_outline),
+                onPressed: _savingBulk
+                    ? null
+                    : () => _discardDraft(entry.sectionId, entry),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          TextField(
+            controller: entry.textController,
+            enabled: !_savingBulk,
+            minLines: 2,
+            maxLines: 5,
+            onChanged: (_) {
+              if (entry.errorMessage != null) {
+                setState(() => entry.errorMessage = null);
+              }
+            },
+            style: _inputText,
+            decoration: _deco('Enter your question'),
+          ),
+          if (type == 'multiple_choice') ...[
+            const SizedBox(height: 10),
+            LayoutBuilder(
+              builder: (context, box) {
+                if (box.maxWidth >= 480) {
+                  return Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(child: choiceInputRow(0)),
+                          const SizedBox(width: 12),
+                          Expanded(child: choiceInputRow(1)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(child: choiceInputRow(2)),
+                          const SizedBox(width: 12),
+                          Expanded(child: choiceInputRow(3)),
+                        ],
+                      ),
+                    ],
+                  );
+                }
+                return Column(
+                  children: [
+                    for (var k = 0; k < 4; k++)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: choiceInputRow(k),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ],
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    missingKey ? Icons.key_outlined : Icons.check,
+                    size: 16,
+                    color: missingKey ? _Brand.amber : CmColors.green,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    missingKey ? 'Select answer key:' : 'Correct answer:',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: missingKey ? _Brand.ink : CmColors.green,
+                    ),
+                  ),
+                ],
+              ),
+              answerKeySelector(),
+            ],
+          ),
+          if (entry.errorMessage != null) ...[
+            const SizedBox(height: 8),
+            _ErrorText(entry.errorMessage!),
+          ],
+          const SizedBox(height: 8),
+          const Divider(height: 1, color: CmColors.line),
+        ],
+      ),
+    );
+  }
+
   // A saved question, shown in the same layout as the editor. The pencil
-  // swaps it for the inline editor (prefilled).
+  // swaps it for the inline per-question editor (prefilled) while preserving
+  // its exact position and question_number.
   Widget _savedQuestion(_Json q, int i, String type) {
     final qid = _id(q['id']);
     final number = q['question_number']?.toString() ?? '${i + 1}';
 
     if (qid != null && _editingQuestionId == qid) {
       return _DraftQuestion(
-        key: ValueKey('edit-$qid'),
+        key: ValueKey('edit-saved-$qid'),
         number: int.tryParse(number) ?? i + 1,
         type: type,
         initial: q,
         saveLabel: 'Save changes',
         onDiscard: () => setState(() => _editingQuestionId = null),
         onSave: (text, choices, correct) =>
-            _updateQuestion(q, text, choices, correct),
+            _updateSingleSavedQuestion(q, text, choices, correct, type),
       );
     }
 
     final text = q['question_text']?.toString() ?? '';
     final points = _trim(_num(q['points']));
     final choices = q['choices'];
-    final correct = (q['correct_answer']?.toString() ?? '').trim();
+    final pendingAns = qid != null ? _pendingAnswerKeys[qid] : null;
+    final rawCorrect = pendingAns ?? (q['correct_answer']?.toString() ?? '');
+    final correct = rawCorrect.trim().toLowerCase() == 'null'
+        ? ''
+        : (type == 'identification'
+              ? rawCorrect.trim().toUpperCase()
+              : rawCorrect.trim());
     final answers = qid == null ? <_Json>[] : (_acceptable[qid] ?? <_Json>[]);
 
-    final missingKey = correct.isEmpty || correct.toLowerCase() == 'null';
+    final missingKey = correct.isEmpty;
 
     Widget choiceBox(int idx) {
       final letter = String.fromCharCode(65 + idx);
@@ -3495,7 +4420,9 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
               (correct.isNotEmpty && correct == value));
       return InkWell(
         borderRadius: BorderRadius.circular(8),
-        onTap: qid == null ? null : () => _quickSetAnswerKey(q, letter),
+        onTap: qid == null
+            ? null
+            : () => _setSavedQuestionAnswerKey(q, letter, type),
         child: Row(
           children: [
             Container(
@@ -3524,104 +4451,61 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
 
     Widget answerKeySelector() {
       if (type == 'multiple_choice') {
-        return Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: [
-            for (final letter in const ['A', 'B', 'C', 'D'])
-              InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: qid == null ? null : () => _quickSetAnswerKey(q, letter),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 7,
-                  ),
-                  decoration: BoxDecoration(
-                    color: (!missingKey && correct.toUpperCase() == letter)
-                        ? CmColors.green
-                        : CmColors.bg,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: (!missingKey && correct.toUpperCase() == letter)
-                          ? CmColors.green
-                          : CmColors.line,
-                    ),
-                  ),
-                  child: Text(
-                    letter,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w800,
-                      color: (!missingKey && correct.toUpperCase() == letter)
-                          ? Colors.white
-                          : _Brand.ink,
-                    ),
-                  ),
-                ),
-              ),
-          ],
+        return _buildMultipleChoiceKeyTiles(
+          selectedLetter: missingKey ? null : correct.toUpperCase(),
+          enabled: qid != null && !_savingBulk,
+          onSelect: (letter) => _setSavedQuestionAnswerKey(q, letter, type),
         );
       }
       if (type == 'true_false') {
-        return Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: [
-            for (final opt in const ['True', 'False'])
-              InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: qid == null ? null : () => _quickSetAnswerKey(q, opt),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 7,
-                  ),
-                  decoration: BoxDecoration(
-                    color: (!missingKey &&
-                            correct.toLowerCase() == opt.toLowerCase())
-                        ? CmColors.green
-                        : CmColors.bg,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: (!missingKey &&
-                              correct.toLowerCase() == opt.toLowerCase())
-                          ? CmColors.green
-                          : CmColors.line,
-                    ),
-                  ),
-                  child: Text(
-                    opt,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: (!missingKey &&
-                              correct.toLowerCase() == opt.toLowerCase())
-                          ? Colors.white
-                          : _Brand.ink,
-                    ),
-                  ),
-                ),
-              ),
-          ],
+        return _buildTrueFalseKeyButtons(
+          selectedValue: missingKey ? null : correct,
+          enabled: qid != null && !_savingBulk,
+          onSelect: (opt) => _setSavedQuestionAnswerKey(q, opt, type),
         );
       }
-      return InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: qid == null
-            ? null
-            : () => setState(() => _editingQuestionId = qid),
-        child: SizedBox(
-          width: 200,
-          child: _ReadBox(
-            missingKey ? 'Click to set answer key' : correct,
-            highlight: !missingKey,
+
+      // Identification: persistent inline CAPITAL LETTERS answer key field
+      // keyed by qid so typing in Question 3 and navigating to Question 10
+      // never shifts question order or loses the typed answer.
+      if (qid != null) {
+        final ctrl = _identificationAnswerControllers.putIfAbsent(
+          qid,
+          () => TextEditingController(text: correct),
+        );
+        return SizedBox(
+          width: 240,
+          child: TextField(
+            key: ValueKey('id-ans-field-$qid'),
+            controller: ctrl,
+            enabled: !_savingBulk,
+            textCapitalization: TextCapitalization.characters,
+            inputFormatters: const [_UpperCaseTextFormatter()],
+            onChanged: (val) {
+              _setSavedQuestionAnswerKey(q, val.toUpperCase(), type);
+            },
+            style: _inputText.copyWith(fontWeight: FontWeight.w700),
+            decoration: _deco('ENTER ANSWER IN CAPS').copyWith(
+              fillColor: !missingKey
+                  ? CmColors.green.withValues(alpha: 0.08)
+                  : Colors.white,
+              enabledBorder: _ob(!missingKey ? CmColors.green : _Brand.mist),
+            ),
           ),
+        );
+      }
+
+      return SizedBox(
+        width: 200,
+        child: _ReadBox(
+          missingKey ? 'Click to set answer key' : correct.toUpperCase(),
+          highlight: !missingKey,
         ),
       );
     }
 
     return Padding(
+      key: ValueKey('saved-question-${qid ?? i}'),
       padding: const EdgeInsets.only(bottom: 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3770,7 +4654,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                     backgroundColor: CmColors.bg,
                     side: const BorderSide(color: CmColors.line),
                     label: Text(
-                      a['answer']?.toString() ?? '',
+                      (a['answer']?.toString() ?? '').toUpperCase(),
                       style: const TextStyle(fontSize: 12, color: _Brand.ink),
                     ),
                   ),
@@ -3814,7 +4698,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         const SizedBox(height: 12),
         _paperCard(
           icon: Icons.description_outlined,
-          title: 'Question paper',
+          title: 'Questionnaire',
           answerSheet: false,
         ),
         const SizedBox(height: 12),
@@ -3940,6 +4824,115 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
   }
 }
 
+// =============================================================
+// SHARED ANSWER KEY TILE & BUTTON SELECTORS
+// =============================================================
+
+Widget _buildMultipleChoiceKeyTiles({
+  required String? selectedLetter,
+  required bool enabled,
+  required ValueChanged<String> onSelect,
+}) {
+  return Wrap(
+    spacing: 6,
+    runSpacing: 6,
+    children: [
+      for (final letter in const ['A', 'B', 'C', 'D'])
+        Builder(
+          builder: (context) {
+            final isSelected =
+                selectedLetter != null &&
+                selectedLetter.toUpperCase() == letter;
+            return InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: enabled ? () => onSelect(letter) : null,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  color: isSelected ? CmColors.green : CmColors.bg,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isSelected ? CmColors.green : CmColors.line,
+                  ),
+                ),
+                child: Text(
+                  letter,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    color: isSelected ? Colors.white : _Brand.ink,
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+    ],
+  );
+}
+
+Widget _buildTrueFalseKeyButtons({
+  required String? selectedValue,
+  required bool enabled,
+  required ValueChanged<String> onSelect,
+}) {
+  return Wrap(
+    spacing: 6,
+    runSpacing: 6,
+    children: [
+      for (final opt in const ['True', 'False'])
+        Builder(
+          builder: (context) {
+            final isSelected =
+                selectedValue != null &&
+                selectedValue.trim().toLowerCase() == opt.toLowerCase();
+            return InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: enabled ? () => onSelect(opt) : null,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  color: isSelected ? CmColors.green : CmColors.bg,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isSelected ? CmColors.green : CmColors.line,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (isSelected) ...[
+                      const Icon(
+                        Icons.check,
+                        size: 14,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(width: 5),
+                    ],
+                    Text(
+                      opt,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: isSelected ? Colors.white : _Brand.ink,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+    ],
+  );
+}
+
 /// Read-only value box that matches the editor fields.
 class _ReadBox extends StatelessWidget {
   const _ReadBox(this.text, {this.highlight = false});
@@ -3967,7 +4960,7 @@ class _ReadBox extends StatelessWidget {
 }
 
 // =============================================================
-// DRAFT QUESTION (inline editor for a not-yet-saved question)
+// PER-QUESTION INLINE EDITOR (used when clicking Edit on a saved question)
 // =============================================================
 
 class _DraftQuestion extends StatefulWidget {
@@ -3978,7 +4971,7 @@ class _DraftQuestion extends StatefulWidget {
     required this.onSave,
     required this.onDiscard,
     this.initial,
-    this.saveLabel = 'Save question',
+    this.saveLabel = 'Save changes',
   });
 
   final int number;
@@ -4027,9 +5020,10 @@ class _DraftQuestionState extends State<_DraftQuestion> {
     }
 
     final correct = (q['correct_answer']?.toString() ?? '').trim();
-    final upper = correct.toUpperCase();
+    final cleanCorrect = correct.toLowerCase() == 'null' ? '' : correct;
+    final upper = cleanCorrect.toUpperCase();
     if (widget.type == 'identification') {
-      _answer.text = correct;
+      _answer.text = upper;
     } else if (widget.type == 'true_false') {
       _picked = upper.startsWith('T')
           ? 'True'
@@ -4066,7 +5060,7 @@ class _DraftQuestionState extends State<_DraftQuestion> {
     }
 
     final correct = widget.type == 'identification'
-        ? _answer.text.trim()
+        ? _answer.text.trim().toUpperCase()
         : (_picked ?? '');
     if (correct.isEmpty) {
       setState(() => _error = 'Correct answer is required.');
@@ -4090,16 +5084,42 @@ class _DraftQuestionState extends State<_DraftQuestion> {
 
   Widget _choiceField(int i) {
     final letter = String.fromCharCode(65 + i);
+    final isSelected = _picked != null && _picked!.toUpperCase() == letter;
     return Row(
       children: [
-        _Badge(letter),
+        InkWell(
+          borderRadius: BorderRadius.circular(7),
+          onTap: _saving ? null : () => setState(() => _picked = letter),
+          child: Container(
+            width: 26,
+            height: 26,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: isSelected ? CmColors.green : CmColors.bg,
+              borderRadius: BorderRadius.circular(7),
+            ),
+            child: Text(
+              letter,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w800,
+                color: isSelected ? Colors.white : _Brand.ink,
+              ),
+            ),
+          ),
+        ),
         const SizedBox(width: 8),
         Expanded(
           child: TextField(
             controller: _choices[i],
             enabled: !_saving,
             style: _inputText,
-            decoration: _deco('Option $letter'),
+            decoration: _deco('Option $letter').copyWith(
+              fillColor: isSelected
+                  ? CmColors.green.withValues(alpha: 0.08)
+                  : Colors.white,
+              enabledBorder: _ob(isSelected ? CmColors.green : _Brand.mist),
+            ),
           ),
         ),
       ],
@@ -4109,26 +5129,29 @@ class _DraftQuestionState extends State<_DraftQuestion> {
   Widget _correctControl() {
     switch (widget.type) {
       case 'identification':
-        return TextField(
-          controller: _answer,
-          enabled: !_saving,
-          style: _inputText,
-          decoration: _deco('Accepted answer'),
+        return SizedBox(
+          width: 240,
+          child: TextField(
+            controller: _answer,
+            enabled: !_saving,
+            textCapitalization: TextCapitalization.characters,
+            inputFormatters: const [_UpperCaseTextFormatter()],
+            onChanged: (_) => setState(() {}),
+            style: _inputText.copyWith(fontWeight: FontWeight.w700),
+            decoration: _deco('ENTER ANSWER IN CAPS'),
+          ),
         );
       case 'true_false':
+        return _buildTrueFalseKeyButtons(
+          selectedValue: _picked,
+          enabled: !_saving,
+          onSelect: (v) => setState(() => _picked = v),
+        );
       case 'multiple_choice':
-        final options = widget.type == 'true_false'
-            ? const ['True', 'False']
-            : const ['A', 'B', 'C', 'D'];
-        return DropdownButtonFormField<String>(
-          initialValue: _picked,
-          isExpanded: true,
-          style: _inputText,
-          decoration: _deco('Select answer'),
-          items: [
-            for (final o in options) DropdownMenuItem(value: o, child: Text(o)),
-          ],
-          onChanged: _saving ? null : (v) => setState(() => _picked = v),
+        return _buildMultipleChoiceKeyTiles(
+          selectedLetter: _picked,
+          enabled: !_saving,
+          onSelect: (v) => setState(() => _picked = v),
         );
       default:
         return const SizedBox.shrink();
@@ -4137,6 +5160,10 @@ class _DraftQuestionState extends State<_DraftQuestion> {
 
   @override
   Widget build(BuildContext context) {
+    final hasKey = widget.type == 'identification'
+        ? _answer.text.trim().isNotEmpty
+        : (_picked != null && _picked!.isNotEmpty);
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 18),
       child: Column(
@@ -4222,19 +5249,23 @@ class _DraftQuestionState extends State<_DraftQuestion> {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.check, size: 16, color: CmColors.green),
+                  Icon(
+                    hasKey ? Icons.check : Icons.key_outlined,
+                    size: 16,
+                    color: hasKey ? CmColors.green : _Brand.amber,
+                  ),
                   const SizedBox(width: 6),
                   Text(
-                    'Correct answer',
+                    hasKey ? 'Correct answer:' : 'Select answer key:',
                     style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w700,
-                      color: CmColors.green,
+                      color: hasKey ? CmColors.green : _Brand.ink,
                     ),
                   ),
                 ],
               ),
-              SizedBox(width: 170, child: _correctControl()),
+              _correctControl(),
             ],
           ),
           if (_error != null) ...[
@@ -4242,15 +5273,25 @@ class _DraftQuestionState extends State<_DraftQuestion> {
             _ErrorText(_error!),
           ],
           const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerRight,
-            child: FilledButton(
-              style: _primaryStyle.copyWith(
-                minimumSize: const WidgetStatePropertyAll(Size(0, 36)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              OutlinedButton(
+                style: _outlineStyle.copyWith(
+                  minimumSize: const WidgetStatePropertyAll(Size(0, 36)),
+                ),
+                onPressed: _saving ? null : widget.onDiscard,
+                child: const Text('Cancel'),
               ),
-              onPressed: _saving ? null : _submit,
-              child: _saving ? const _Spin() : Text(widget.saveLabel),
-            ),
+              const SizedBox(width: 8),
+              FilledButton(
+                style: _primaryStyle.copyWith(
+                  minimumSize: const WidgetStatePropertyAll(Size(0, 36)),
+                ),
+                onPressed: _saving ? null : _submit,
+                child: _saving ? const _Spin() : Text(widget.saveLabel),
+              ),
+            ],
           ),
         ],
       ),
@@ -4259,7 +5300,7 @@ class _DraftQuestionState extends State<_DraftQuestion> {
 }
 
 // =============================================================
-// PAPER PREVIEW POPUP (question paper + answer sheet)
+// PAPER PREVIEW POPUP (questionnaire + answer sheet)
 //
 // Renders the exact PDF that Print / Download produce, so what the
 // teacher previews is what comes out of the printer.
@@ -4392,7 +5433,7 @@ class _PaperPreviewDialogState extends State<_PaperPreviewDialog> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         _tab(
-                          'Question paper',
+                          'Questionnaire',
                           Icons.description_outlined,
                           !_answerSheet,
                           () => setState(() => _answerSheet = false),

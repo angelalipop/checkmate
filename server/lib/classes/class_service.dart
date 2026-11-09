@@ -9,6 +9,22 @@ class ClassService {
     return match == null ? null : int.parse(match.group(0)!);
   }
 
+  /// "BSIT:3:1,BSIT:3:2" -> [{program: BSIT, year_level: 3, term: 1}, ...]
+  static List<Map<String, dynamic>> _parsePlacements(Object? raw) {
+    final text = raw?.toString() ?? '';
+    if (text.isEmpty) return [];
+    final out = <Map<String, dynamic>>[];
+    for (final part in text.split(',')) {
+      final bits = part.split(':');
+      if (bits.length != 3) continue;
+      final year = int.tryParse(bits[1]);
+      final term = int.tryParse(bits[2]);
+      if (year == null || term == null) continue;
+      out.add({'program': bits[0], 'year_level': year, 'term': term});
+    }
+    return out;
+  }
+
   /// When [teacherId] is given, only that teacher's sections are returned.
   static Future<List<Map<String, dynamic>>> getAll({int? teacherId}) async {
     final result = await Database.pool.execute(
@@ -19,20 +35,51 @@ class ClassService {
           c.school_year,
           c.semester,
           c.subject_id,
-          s.name AS subject_name,
-          s.code AS subject_code,
+          COALESCE(a.name, s.name) AS subject_name,
+          COALESCE(a.code, s.code) AS subject_code,
           c.teacher_id,
           u.name AS teacher_name,
           c.created_at,
           c.year_level,
-          s.academic_subject_id,
+          COALESCE(s.academic_subject_id, a.id) AS academic_subject_id,
           (
             SELECT COUNT(DISTINCT LOWER(BTRIM(st.student_number)))
             FROM students st
             WHERE st.class_id = c.id
-          ) AS student_count
+          ) AS student_count,
+          (
+            SELECT string_agg(
+                     DISTINCT p.code || ':' || cs.year_level::text
+                              || ':' || cs.term::text,
+                     ','
+                   )
+            FROM curriculum_subjects cs
+            JOIN curricula cu
+              ON cu.id = cs.curriculum_id AND cu.is_deleted = FALSE
+            JOIN academic_programs p
+              ON p.id = cu.program_id AND p.is_deleted = FALSE
+            WHERE cs.subject_id = COALESCE(s.academic_subject_id, a.id)
+              AND cs.is_deleted = FALSE
+          ) AS placements
         FROM classes c
         JOIN subjects s ON s.id = c.subject_id
+        LEFT JOIN LATERAL (
+          SELECT ac.id, ac.code, ac.name
+          FROM academic_subjects ac
+          WHERE ac.is_deleted = FALSE
+            AND (
+              ac.id = s.academic_subject_id
+              OR (
+                s.academic_subject_id IS NULL
+                AND (
+                  (s.code IS NOT NULL AND ac.code IS NOT NULL AND LOWER(ac.code) = LOWER(s.code))
+                  OR LOWER(ac.name) = LOWER(s.name)
+                )
+              )
+            )
+          ORDER BY (ac.id = s.academic_subject_id) DESC, ac.id
+          LIMIT 1
+        ) a ON TRUE
         LEFT JOIN users u ON u.id = c.teacher_id
         ${teacherId == null ? '' : 'WHERE c.teacher_id = @teacher_id'}
         ORDER BY c.id
@@ -50,8 +97,9 @@ class ClassService {
           'id': row[4],
           'name': row[5],
           'code': row[6],
-          // Link to the Academic Management subject (null if not linked).
+          // Link to the Academic Management subject (resolved from 003_academic_module).
           'academic_subject_id': row[11],
+          'placements': _parsePlacements(row[13]),
         },
         'teacher': {
           'id': row[7],
@@ -59,7 +107,7 @@ class ClassService {
         },
         'created_at': row[9].toString(),
         'year_level': row[10],
-        // Number of distinct students enrolled in this section.
+        // Number of distinct students enrolled in this class.
         'student_count': row[12],
       };
     }).toList();

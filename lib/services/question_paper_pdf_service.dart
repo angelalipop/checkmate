@@ -9,7 +9,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'assessment_validator.dart';
 import 'sti_logo_data.dart';
 
-/// Shared layout model and generator for CheckMate STI College Question Papers.
+/// Shared layout model and generator for CheckMate STI College Questionnaires.
 ///
 /// Supports two distinct STI College assessment layouts based on the uploaded
 /// reference documents:
@@ -60,7 +60,33 @@ class QuestionPaperPdfService {
       '\u2022 Mobile phone calculators and calculator sharing are strictly prohibited.\n\n'
       'Read and analyze each item. Choose the letter of the CORRECT answer.';
 
-  /// Generates the assessment-specific Question Paper PDF bytes used by both
+  /// Normalizes Unicode punctuation (en-dash, em-dash, curly quotes, bullets,
+  /// ellipses, non-breaking spaces, etc.) into standard Latin-1 / ASCII
+  /// characters supported by built-in PDF Type1 fonts (`Times` and `Helvetica`)
+  /// so preview and print never render boxed tofu characters (`☒`).
+  static String _sanitizePdfText(String input) {
+    if (input.isEmpty) return input;
+    return input
+        // Dashes & minus signs -> standard hyphen-minus
+        .replaceAll(
+          RegExp(r'[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]'),
+          '-',
+        )
+        // Bullets & middle dots in plain text -> hyphen or middot
+        .replaceAll(RegExp(r'[\u2022\u2023\u25E6\u2043\u2219\u25AA\u25CF]'), '-')
+        // Smart single quotes / primes -> straight apostrophe
+        .replaceAll(RegExp(r'[\u2018\u2019\u201A\u201B\u2032\u02BC]'), "'")
+        // Smart double quotes / double primes -> straight quote
+        .replaceAll(RegExp(r'[\u201C\u201D\u201E\u201F\u2033]'), '"')
+        // Ellipsis -> three dots
+        .replaceAll('\u2026', '...')
+        // Non-breaking and special spaces -> standard space
+        .replaceAll(RegExp(r'[\u00A0\u2000-\u200A\u202F\u205F\u3000]'), ' ')
+        // Zero-width characters -> remove
+        .replaceAll(RegExp(r'[\u200B-\u200D\uFEFF]'), '');
+  }
+
+  /// Generates the assessment-specific Questionnaire PDF bytes used by both
   /// `PdfPreview` (in the Paper Preview modal/screen) and `Printing.layoutPdf`.
   static Future<Uint8List> generate({
     required Map<String, dynamic> exam,
@@ -165,7 +191,7 @@ class QuestionPaperPdfService {
     return pdf.save();
   }
 
-  /// Generates a Microsoft Word (`.docx`) Question Paper using the exact same
+  /// Generates a Microsoft Word (`.docx`) Questionnaire using the exact same
   /// assessment-specific [_QuestionPaperPlan] as [generate], preserving
   /// identical pages, columns, STI College logo, typography, and tables.
   static Future<Uint8List> generateDocx({
@@ -216,9 +242,20 @@ class QuestionPaperPdfService {
       questions: questions,
     );
 
+    // Sort sections by section_order, id
+    final sortedSections = List<Map<String, dynamic>>.from(sections)
+      ..sort((a, b) {
+        final oa = int.tryParse(a['section_order']?.toString() ?? '') ?? 0;
+        final ob = int.tryParse(b['section_order']?.toString() ?? '') ?? 0;
+        if (oa != ob) return oa.compareTo(ob);
+        final ida = int.tryParse(a['id']?.toString() ?? '') ?? 0;
+        final idb = int.tryParse(b['id']?.toString() ?? '') ?? 0;
+        return ida.compareTo(idb);
+      });
+
     // Determine active sections & their questions
     final activeSections = <Map<String, dynamic>>[];
-    for (final s in sections) {
+    for (final s in sortedSections) {
       final sid = int.tryParse(s['id']?.toString() ?? '');
       if (sid == null) continue;
       final qList = questions[sid] ?? const <Map<String, dynamic>>[];
@@ -253,7 +290,7 @@ class QuestionPaperPdfService {
       ),
     );
 
-    // 2. Active sections & their questions
+    // 2. Active sections & their questions (strictly ordered by question_number)
     var globalQuestionNumber = 0;
 
     for (var sIdx = 0; sIdx < activeSections.length; sIdx++) {
@@ -262,7 +299,17 @@ class QuestionPaperPdfService {
       final qType = AssessmentValidator.normalizeQuestionType(
         section['question_type']?.toString() ?? section['type']?.toString(),
       );
-      final sectionQuestions = questions[sid] ?? const <Map<String, dynamic>>[];
+      final rawSectionQuestions =
+          questions[sid] ?? const <Map<String, dynamic>>[];
+      final sectionQuestions =
+          List<Map<String, dynamic>>.from(rawSectionQuestions)..sort((a, b) {
+            final na = int.tryParse(a['question_number']?.toString() ?? '') ?? 0;
+            final nb = int.tryParse(b['question_number']?.toString() ?? '') ?? 0;
+            if (na != nb) return na.compareTo(nb);
+            final ida = int.tryParse(a['id']?.toString() ?? '') ?? 0;
+            final idb = int.tryParse(b['id']?.toString() ?? '') ?? 0;
+            return ida.compareTo(idb);
+          });
 
       final sectionLetter = String.fromCharCode(65 + (sIdx % 26));
       final instructionText = _instructionForQuestionType(
@@ -414,7 +461,9 @@ class QuestionPaperPdfService {
           l.trim().toLowerCase().startsWith('notice:'),
     );
     final hasBulletLine = lines.any(
-      (l) => RegExp(r'^[\u2022\-\*]\s*').hasMatch(l.trim()),
+      (l) => RegExp(r'^[\u2022\u2023\u25E6\u2043\u2219\-\*]\s*').hasMatch(
+        l.trim(),
+      ),
     );
 
     if (hasNoticeHeader || hasBulletLine) {
@@ -429,12 +478,17 @@ class QuestionPaperPdfService {
         if (lower.startsWith('notice:')) {
           final after = line.substring('notice:'.length).trim();
           if (after.isNotEmpty) {
-            final cleanAfter = after.replaceFirst(RegExp(r'^[\u2022\-\*]\s*'), '');
+            final cleanAfter = after.replaceFirst(
+              RegExp(r'^[\u2022\u2023\u25E6\u2043\u2219\-\*]\s*'),
+              '',
+            );
             parsedBullets.add(cleanAfter);
           }
           continue;
         }
-        final bulletMatch = RegExp(r'^[\u2022\-\*]\s*(.+)$').firstMatch(line);
+        final bulletMatch = RegExp(
+          r'^[\u2022\u2023\u25E6\u2043\u2219\-\*]\s*(.+)$',
+        ).firstMatch(line);
         if (bulletMatch != null) {
           parsedBullets.add(bulletMatch.group(1)!.trim());
           continue;
@@ -580,7 +634,7 @@ class QuestionPaperPdfService {
         if (subjectCode.isNotEmpty) {
           courseCodeParts.add(subjectCode);
         }
-        rightCodeLine = courseCodeParts.join(' \u2014 ');
+        rightCodeLine = courseCodeParts.join(' - ');
       }
     }
 
@@ -733,7 +787,7 @@ class QuestionPaperPdfService {
   }) {
     final centerChildren = <pw.Widget>[
       pw.Text(
-        meta.subjectName,
+        _sanitizePdfText(meta.subjectName),
         textAlign: pw.TextAlign.center,
         style: pw.TextStyle(
           font: timesBoldFont,
@@ -747,7 +801,7 @@ class QuestionPaperPdfService {
       if (meta.scheduleDateLine.isNotEmpty) {
         centerChildren.add(
           pw.Text(
-            meta.scheduleDateLine,
+            _sanitizePdfText(meta.scheduleDateLine),
             textAlign: pw.TextAlign.center,
             style: pw.TextStyle(font: timesFont, fontSize: 10),
           ),
@@ -756,7 +810,7 @@ class QuestionPaperPdfService {
       if (meta.scheduleTimeLine.isNotEmpty) {
         centerChildren.add(
           pw.Text(
-            meta.scheduleTimeLine,
+            _sanitizePdfText(meta.scheduleTimeLine),
             textAlign: pw.TextAlign.center,
             style: pw.TextStyle(font: timesFont, fontSize: 10),
           ),
@@ -771,7 +825,7 @@ class QuestionPaperPdfService {
       if (meta.termAndSyLine.isNotEmpty) {
         centerChildren.add(
           pw.Text(
-            meta.termAndSyLine,
+            _sanitizePdfText(meta.termAndSyLine),
             textAlign: pw.TextAlign.center,
             style: pw.TextStyle(
               font: timesBoldFont,
@@ -783,7 +837,7 @@ class QuestionPaperPdfService {
       }
       centerChildren.add(
         pw.Text(
-          meta.assessmentTitle,
+          _sanitizePdfText(meta.assessmentTitle),
           textAlign: pw.TextAlign.center,
           style: pw.TextStyle(
             font: timesBoldFont,
@@ -796,7 +850,7 @@ class QuestionPaperPdfService {
       centerChildren.add(pw.SizedBox(height: 10));
       centerChildren.add(
         pw.Text(
-          meta.assessmentTitle,
+          _sanitizePdfText(meta.assessmentTitle),
           textAlign: pw.TextAlign.center,
           style: pw.TextStyle(
             font: timesBoldFont,
@@ -840,7 +894,7 @@ class QuestionPaperPdfService {
             children: [
               if (meta.rightCodeLine.isNotEmpty)
                 pw.Text(
-                  meta.rightCodeLine,
+                  _sanitizePdfText(meta.rightCodeLine),
                   textAlign: pw.TextAlign.right,
                   style: pw.TextStyle(
                     font: arialBoldFont,
@@ -919,16 +973,34 @@ class QuestionPaperPdfService {
                   children: [
                     pw.SizedBox(
                       width: 10,
-                      child: pw.Text('\u2022', style: regStyle),
+                      child: pw.Padding(
+                        padding: const pw.EdgeInsets.only(top: 3.8, left: 1.5),
+                        child: pw.Align(
+                          alignment: pw.Alignment.topLeft,
+                          child: pw.Container(
+                            width: 3.2,
+                            height: 3.2,
+                            decoration: const pw.BoxDecoration(
+                              color: PdfColors.black,
+                              shape: pw.BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
-                    pw.Expanded(child: pw.Text(b, style: regStyle)),
+                    pw.Expanded(
+                      child: pw.Text(_sanitizePdfText(b), style: regStyle),
+                    ),
                   ],
                 ),
               ),
               if (block.customInstructions.isNotEmpty) ...[
                 if (block.showNoticeHeading || block.bullets.isNotEmpty)
                   pw.SizedBox(height: 3),
-                pw.Text(block.customInstructions, style: regStyle),
+                pw.Text(
+                  _sanitizePdfText(block.customInstructions),
+                  style: regStyle,
+                ),
               ],
             ],
           ),
@@ -944,10 +1016,16 @@ class QuestionPaperPdfService {
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
               if (block.instructionText.isNotEmpty) ...[
-                pw.Text(block.instructionText, style: regStyle),
+                pw.Text(
+                  _sanitizePdfText(block.instructionText),
+                  style: regStyle,
+                ),
                 pw.SizedBox(height: 7),
               ],
-              pw.Text(block.pointsHeader, style: boldStyle),
+              pw.Text(
+                _sanitizePdfText(block.pointsHeader),
+                style: boldStyle,
+              ),
             ],
           ),
         );
@@ -969,7 +1047,10 @@ class QuestionPaperPdfService {
                     child: pw.Text('${block.questionNumber}.', style: regStyle),
                   ),
                   pw.Expanded(
-                    child: pw.Text(block.questionText, style: regStyle),
+                    child: pw.Text(
+                      _sanitizePdfText(block.questionText),
+                      style: regStyle,
+                    ),
                   ),
                 ],
               ),
@@ -989,7 +1070,10 @@ class QuestionPaperPdfService {
                           ),
                         ),
                         pw.Expanded(
-                          child: pw.Text(block.choices[i], style: regStyle),
+                          child: pw.Text(
+                            _sanitizePdfText(block.choices[i]),
+                            style: regStyle,
+                          ),
                         ),
                       ],
                     ),
@@ -997,12 +1081,18 @@ class QuestionPaperPdfService {
               ] else if (block.questionType == 'true_false') ...[
                 pw.Padding(
                   padding: const pw.EdgeInsets.only(left: 25.2, top: 2),
-                  child: pw.Text('Answer (True / False): ____________', style: regStyle),
+                  child: pw.Text(
+                    'Answer (True / False): ____________',
+                    style: regStyle,
+                  ),
                 ),
               ] else if (block.questionType == 'identification') ...[
                 pw.Padding(
                   padding: const pw.EdgeInsets.only(left: 25.2, top: 2),
-                  child: pw.Text('Answer: ________________________', style: regStyle),
+                  child: pw.Text(
+                    'Answer: ________________________',
+                    style: regStyle,
+                  ),
                 ),
               ],
             ],

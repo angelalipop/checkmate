@@ -146,3 +146,12 @@ app.*.map.json
 /Web Data
 /Web Data-journal
 /debug_android_application.stamp
+server/lib/students/student_service.dart.before-section-regex
+lib/services/student_import_service.dart.before-section-regex
+import_screen_diff.txt
+student_import_service_diff.txt
+student_service_diff.txt
+
+# Local backup files
+*.bak
+*.before-*

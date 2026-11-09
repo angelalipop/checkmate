@@ -3,76 +3,83 @@ import 'package:dart_frog/dart_frog.dart';
 import 'package:server/auth/exam_access.dart';
 import 'package:server/students/student_service.dart';
 
-/// PUT /students/{id}  body: {"email": "..."}
-/// The app only edits a student's email. The parent folder's authMiddleware
-/// verifies the login; ownership is checked in the query.
+/// A student's details can be edited ONCE (name, student number, email).
+/// After that they are locked. A student cannot be deleted from a section.
 Future<Response> onRequest(RequestContext context, String id) async {
-  if (context.request.method != HttpMethod.put) {
-    return Response.json(
-      statusCode: 405,
-      body: {'status': 'error', 'message': 'Method not allowed'},
-    );
-  }
-
-  final studentId = int.tryParse(id);
-
-  if (studentId == null || studentId < 1) {
-    return Response.json(
-      statusCode: 400,
-      body: {'status': 'error', 'message': 'Invalid student id'},
-    );
-  }
-
   final actor = ExamActor.fromContext(context);
 
   if (actor == null) {
     return ExamAccess.deny(403, 'Teacher or administrator access required.');
   }
 
+  switch (context.request.method) {
+    case HttpMethod.put:
+    case HttpMethod.patch:
+      return _edit(context, id);
+    case HttpMethod.delete:
+      return Response.json(
+        statusCode: 403,
+        body: {
+          'status': 'error',
+          'message':
+              'Once added, you cannot delete this student from this section.',
+        },
+      );
+    // ignore: no_default_cases
+    default:
+      return Response.json(
+        statusCode: 405,
+        body: {'status': 'error', 'message': 'Method not allowed'},
+      );
+  }
+}
+
+Future<Response> _edit(RequestContext context, String idText) async {
+  final studentId = int.tryParse(idText);
+  if (studentId == null) {
+    return ExamAccess.deny(400, 'Invalid student id.');
+  }
+
   try {
     final body = await context.request.json();
-
     if (body is! Map) {
-      return Response.json(
-        statusCode: 400,
-        body: {'status': 'error', 'message': 'Invalid request body'},
-      );
+      return ExamAccess.deny(400, 'Invalid request body');
     }
 
-    final student = await StudentService.updateEmail(
-      studentId,
-      userId: actor.id,
-      role: actor.role,
+    final existing = await StudentService.findById(studentId);
+    if (existing == null) {
+      return ExamAccess.deny(404, 'Student not found.');
+    }
+
+    // A teacher can only edit students of a class assigned to them.
+    final denied = await ExamAccess.guardClass(
+      context,
+      existing['class_id']! as int,
+    );
+    if (denied != null) return denied;
+
+    final student = await StudentService.updateOnce(
+      id: studentId,
+      studentNumber: body['student_number']?.toString() ?? '',
+      firstName: body['first_name']?.toString() ?? '',
+      lastName: body['last_name']?.toString() ?? '',
       email: body['email']?.toString(),
     );
 
-    if (student == null) {
-      return Response.json(
-        statusCode: 404,
-        body: {
-          'status': 'error',
-          'message': 'Student not found or update not permitted.',
-        },
-      );
-    }
-
     return Response.json(
-      body: {'status': 'ok', 'student': student},
+      body: {
+        'status': 'ok',
+        'student': student,
+      },
     );
-  } on FormatException {
-    return Response.json(
-      statusCode: 400,
-      body: {'status': 'error', 'message': 'Invalid JSON request body'},
-    );
+  } on StudentEditException catch (e) {
+    return ExamAccess.deny(e.statusCode, e.message);
   } catch (e) {
     // ignore: avoid_print
-    print('PUT STUDENT ERROR: $e');
-    return Response.json(
-      statusCode: 500,
-      body: {
-        'status': 'error',
-        'message': e.toString().replaceFirst('Exception: ', ''),
-      },
+    print('STUDENT EDIT ERROR: $e');
+    return ExamAccess.deny(
+      500,
+      e.toString().replaceFirst('Exception: ', ''),
     );
   }
 }

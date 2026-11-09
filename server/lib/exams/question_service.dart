@@ -11,17 +11,19 @@ class QuestionService {
     final result = await Database.pool.execute(
       Sql.named('''
         SELECT
-          id,
-          section_id,
-          question_number,
-          question_text,
-          points,
-          choices,
-          correct_answer,
-          created_at
-        FROM questions
-        WHERE section_id = @section_id
-        ORDER BY question_number, id
+          q.id,
+          q.section_id,
+          q.question_number,
+          q.question_text,
+          q.points,
+          q.choices,
+          q.correct_answer,
+          q.created_at,
+          s.question_type
+        FROM questions q
+        JOIN exam_sections s ON s.id = q.section_id
+        WHERE q.section_id = @section_id
+        ORDER BY q.question_number ASC, q.id ASC
       '''),
       parameters: {
         'section_id': sectionId,
@@ -29,6 +31,12 @@ class QuestionService {
     );
 
     return result.map((row) {
+      final qType = row[8]?.toString() ?? '';
+      final rawCorrect = row[6]?.toString();
+      final normalizedCorrect =
+          (rawCorrect != null && qType == 'identification')
+              ? rawCorrect.trim().toUpperCase()
+              : rawCorrect;
       return {
         'id': row[0],
         'section_id': row[1],
@@ -36,7 +44,7 @@ class QuestionService {
         'question_text': row[3],
         'points': row[4],
         'choices': row[5],
-        'correct_answer': row[6],
+        'correct_answer': normalizedCorrect,
         'created_at': row[7].toString(),
       };
     }).toList();
@@ -51,6 +59,25 @@ class QuestionService {
     String? correctAnswer,
   }) async {
     final choicesJson = choices == null ? null : jsonEncode(choices);
+
+    final secRows = await Database.pool.execute(
+      Sql.named('''
+        SELECT question_type
+        FROM exam_sections
+        WHERE id = @section_id
+      '''),
+      parameters: {'section_id': sectionId},
+    );
+    final qType = secRows.isNotEmpty
+        ? (secRows.first[0]?.toString().trim().toLowerCase() ?? '')
+        : '';
+
+    var normalizedAnswer = correctAnswer?.trim();
+    if (normalizedAnswer != null &&
+        normalizedAnswer.isNotEmpty &&
+        qType == 'identification') {
+      normalizedAnswer = normalizedAnswer.toUpperCase();
+    }
 
     final result = await Database.pool.execute(
       Sql.named('''
@@ -86,7 +113,7 @@ class QuestionService {
         'question_text': questionText.trim(),
         'points': points,
         'choices': choicesJson,
-        'correct_answer': correctAnswer?.trim(),
+        'correct_answer': normalizedAnswer,
       },
     );
 

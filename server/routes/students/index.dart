@@ -13,6 +13,22 @@ Future<Response> onRequest(RequestContext context) async {
   try {
     switch (context.request.method) {
       case HttpMethod.get:
+        final excludeSection =
+            context.request.uri.queryParameters['exclude_section']?.trim();
+
+        if (excludeSection != null && excludeSection.isNotEmpty) {
+          final conflicts = await StudentService.getDifferentSectionStudents(
+            section: excludeSection,
+            teacherId: actor.isAdmin ? null : actor.id,
+          );
+          return Response.json(
+            body: {
+              'status': 'ok',
+              'students': conflicts,
+            },
+          );
+        }
+
         final classIdText =
             context.request.uri.queryParameters['class_id'];
 
@@ -149,11 +165,14 @@ Future<Response> onRequest(RequestContext context) async {
         );
     }
   } catch (e) {
+    final msg = e.toString().replaceFirst('Exception: ', '');
+    final isConflict =
+        msg.contains('already exists') || msg.contains('already uploaded');
     return Response.json(
-      statusCode: 500,
+      statusCode: isConflict ? 409 : 500,
       body: {
         'status': 'error',
-        'message': e.toString(),
+        'message': msg,
       },
     );
   }

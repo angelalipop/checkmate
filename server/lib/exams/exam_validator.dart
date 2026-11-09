@@ -265,9 +265,8 @@ class ExamValidator {
   /// - `question_count`: int (or `questions`: List)
   static ExamValidationResult validate({
     required String? assessmentType,
-    String? title,
+    required List<Map<String, dynamic>> sections, String? title,
     String? description,
-    required List<Map<String, dynamic>> sections,
     Map<int, List<Map<String, dynamic>>>? questionsBySectionId,
   }) {
     final normalizedAssessment = normalizeAssessmentType(

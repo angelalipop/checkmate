@@ -236,10 +236,15 @@ class ApiService {
   static Future<List<Map<String, dynamic>>> getStudents(
     String token, {
     int? classId,
+    String? excludeSection,
   }) async {
-    final uri = classId == null
-        ? Uri.parse('$baseUrl/students')
-        : Uri.parse('$baseUrl/students?class_id=$classId');
+    final params = <String, String>{
+      if (classId != null) 'class_id': '$classId',
+      if (excludeSection != null && excludeSection.trim().isNotEmpty)
+        'exclude_section': excludeSection.trim(),
+    };
+    final uri = Uri.parse('$baseUrl/students')
+        .replace(queryParameters: params.isEmpty ? null : params);
 
     final response = await http.get(
       uri,
@@ -407,55 +412,84 @@ class ApiService {
   }
 
   // =========================
-  // UPDATE STUDENT
+  // UPDATE STUDENT (ONE TIME ONLY)
   // =========================
 
+  /// Edits a student's name, student number and email. The server allows this
+  /// only once per student and rejects any later attempt.
   static Future<Map<String, dynamic>> updateStudent({
     required String token,
     required int studentId,
+    required String studentNumber,
+    required String firstName,
+    required String lastName,
     String? email,
   }) async {
-    final response = await http.put(
+    final response = await http.patch(
       Uri.parse('$baseUrl/students/$studentId'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      },
-      body: jsonEncode({'email': email}),
+      headers: _authHeaders(token),
+      body: jsonEncode({
+        'student_number': studentNumber,
+        'first_name': firstName,
+        'last_name': lastName,
+        'email': email,
+      }),
     );
 
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = _decodeBody(response);
 
     if (response.statusCode != 200) {
-      throw Exception(data['message'] ?? 'Failed to update student');
+      throw Exception(
+        _extractErrorMessage(data, 'Failed to update student.'),
+      );
     }
 
     final student = data['student'];
 
-    if (student is! Map) {
-      throw Exception('Invalid student data received.');
+    return student is Map ? Map<String, dynamic>.from(student) : data;
+  }
+
+    // =========================
+  // BULK UPDATE STUDENT EMAILS
+  // =========================
+
+  /// Saves email changes for students in one assigned section.
+  static Future<Map<String, dynamic>> updateStudentEmails({
+    required String token,
+    required String section,
+    required List<Map<String, dynamic>> updates,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/student-emails'),
+      headers: _authHeaders(token),
+      body: jsonEncode({
+        'section': section,
+        'updates': updates,
+      }),
+    );
+
+    final data = _decodeBody(response);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        _extractErrorMessage(data, 'Failed to save student emails.'),
+      );
     }
 
-    return Map<String, dynamic>.from(student);
+    return data;
   }
 
   // =========================
-  // DELETE STUDENT
+  // DELETE STUDENT (DISABLED)
   // =========================
 
   static Future<void> deleteStudent({
     required String token,
     required int studentId,
   }) async {
-    final response = await http.delete(
-      Uri.parse('$baseUrl/students/$studentId'),
-      headers: {'Authorization': 'Bearer $token'},
+    throw Exception(
+      'Once added, you cannot delete this student from this section.',
     );
-
-    if (response.statusCode != 200) {
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      throw Exception(data['message'] ?? 'Failed to delete student');
-    }
   }
 
   // =========================

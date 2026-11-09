@@ -605,7 +605,7 @@ class MySubjectsService {
 
         String status;
         num? score;
-        num? maxScore = a['total_points'] as num?;
+        var maxScore = a['total_points'] as num?;
 
         if (attempt != null) {
           final gs = attempt['grading_status'];

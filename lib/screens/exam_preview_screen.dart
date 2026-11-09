@@ -80,6 +80,14 @@ class _ExamPreviewScreenState extends State<ExamPreviewScreen> {
           token,
           sectionId,
         );
+        questions.sort((a, b) {
+          final na = int.tryParse(a['question_number']?.toString() ?? '') ?? 0;
+          final nb = int.tryParse(b['question_number']?.toString() ?? '') ?? 0;
+          if (na != nb) return na.compareTo(nb);
+          final ida = int.tryParse(a['id']?.toString() ?? '') ?? 0;
+          final idb = int.tryParse(b['id']?.toString() ?? '') ?? 0;
+          return ida.compareTo(idb);
+        });
 
         questionsBySection[sectionId] = questions;
       }
@@ -122,7 +130,7 @@ class _ExamPreviewScreenState extends State<ExamPreviewScreen> {
         .trim()
         .replaceAll(RegExp(r'[^A-Za-z0-9]+'), '_')
         .replaceAll(RegExp(r'^_+|_+$'), '');
-    return 'question_paper_${title.isEmpty ? 'exam' : title}.$extension';
+    return 'questionnaire_${title.isEmpty ? 'exam' : title}.$extension';
   }
 
   Future<void> _printPaper() async {
@@ -162,16 +170,16 @@ class _ExamPreviewScreenState extends State<ExamPreviewScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Exam Preview'),
+        title: const Text('Questionnaire Preview'),
         actions: [
           if (!_isLoading && _errorMessage == null) ...[
             IconButton(
-              tooltip: 'Print Question Paper',
+              tooltip: 'Print Questionnaire',
               onPressed: _printPaper,
               icon: const Icon(Icons.print_outlined),
             ),
             IconButton(
-              tooltip: 'Download Question Paper (.docx)',
+              tooltip: 'Download Questionnaire (.docx)',
               onPressed: _downloadDocx,
               icon: const Icon(Icons.file_download_outlined),
             ),
