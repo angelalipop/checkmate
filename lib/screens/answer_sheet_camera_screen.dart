@@ -4,20 +4,27 @@ import 'package:camera/camera.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
-import 'package:checkmate/services/answer_sheet_processor.dart';
 import 'package:checkmate/screens/answer_sheet_upload_screen.dart';
-import 'package:checkmate/services/document_scanner_models.dart';
-import 'package:checkmate/services/document_scanner_service.dart';
-import 'package:checkmate/services/opencv_omr_service.dart';
+
+const Color _kNavy = Color(0xFF1E293B);
+const Color _kNavyDark = Color(0xFF162137);
+const Color _kSlate = Color(0xFF64748B);
+const Color _kEmerald = Color(0xFF10B981);
 
 class AnswerSheetCameraScreen extends StatefulWidget {
   final int examId;
+  final Map<String, dynamic>? exam;
   final List<Map<String, dynamic>> sections;
+  final List<Map<String, dynamic>> students;
+  final VoidCallback? onViewInMySubjects;
 
   const AnswerSheetCameraScreen({
     super.key,
     required this.examId,
     required this.sections,
+    this.exam,
+    this.students = const [],
+    this.onViewInMySubjects,
   });
 
   @override
@@ -27,30 +34,19 @@ class AnswerSheetCameraScreen extends StatefulWidget {
 
 class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
   CameraController? _cameraController;
+  final TransformationController _zoomController = TransformationController();
 
   bool _isInitializing = true;
   bool _isTakingPicture = false;
   bool _isProcessing = false;
-
   bool _hasError = false;
-
   String? _errorMessage;
 
   Uint8List? _capturedImageBytes;
-  Uint8List? _smartAlignedImageBytes;
-  Uint8List? _correctedImageBytes;
-  Uint8List? _openCVThresholdImageBytes;
-  OpenCVOMRResult? _openCVOmrResult;
-  bool _showThresholdPreview = false;
-  bool _showOmrDebugPreview = false;
-
-  List<RegistrationPoint> _detectedMarkers = <RegistrationPoint>[];
+  String _capturedFileName = 'Camera capture.jpg';
+  double _zoomScale = 1.0;
 
   FlashMode _flashMode = FlashMode.off;
-
-  // ============================================================
-  // INITIALIZE CAMERA
-  // ============================================================
 
   @override
   void initState() {
@@ -83,7 +79,6 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
       );
 
       await controller.initialize();
-
       await controller.setFlashMode(_flashMode);
 
       if (!mounted) {
@@ -107,45 +102,30 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
     }
   }
 
-  // ============================================================
-  // FLASH
-  // ============================================================
-
   Future<void> _toggleFlash() async {
     final controller = _cameraController;
-
-    if (controller == null || !controller.value.isInitialized) {
-      return;
-    }
+    if (controller == null || !controller.value.isInitialized) return;
 
     try {
-      final FlashMode newFlashMode = _flashMode == FlashMode.off
-          ? FlashMode.torch
-          : FlashMode.off;
+      final FlashMode newFlashMode =
+          _flashMode == FlashMode.off ? FlashMode.torch : FlashMode.off;
 
       await controller.setFlashMode(newFlashMode);
-
       if (!mounted) return;
-
-      setState(() {
-        _flashMode = newFlashMode;
-      });
+      setState(() => _flashMode = newFlashMode);
     } catch (e) {
       if (!mounted) return;
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Unable to change flash: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to change flash: $e')),
+      );
     }
   }
-
-  // ============================================================
-  // CHOOSE FROM GALLERY
-  // ============================================================
 
   Future<void> _chooseFromGallery() async {
     try {
       const XTypeGroup imageTypeGroup = XTypeGroup(
         label: 'Images',
+        extensions: <String>['jpg', 'jpeg', 'png'],
         uniformTypeIdentifiers: <String>[
           'public.jpeg',
           'public.png',
@@ -157,34 +137,19 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
         acceptedTypeGroups: <XTypeGroup>[imageTypeGroup],
       );
 
-      if (image == null) {
-        return;
-      }
+      if (image == null) return;
 
       final Uint8List imageBytes = await image.readAsBytes();
+      if (!mounted) return;
 
-      if (!mounted) {
-        return;
-      }
-
+      _resetZoom();
       setState(() {
         _capturedImageBytes = imageBytes;
-
-        // Reset previous processing results.
-        _smartAlignedImageBytes = null;
-        _correctedImageBytes = null;
-        _openCVThresholdImageBytes = null;
-        _openCVOmrResult = null;
-        _showThresholdPreview = false;
-        _showOmrDebugPreview = false;
-        _detectedMarkers = <RegistrationPoint>[];
+        _capturedFileName = image.name.isNotEmpty ? image.name : 'Gallery.jpg';
         _isProcessing = false;
       });
     } catch (e) {
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 5),
@@ -194,13 +159,8 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
     }
   }
 
-  // ============================================================
-  // TAKE PICTURE
-  // ============================================================
-
   Future<void> _takePicture() async {
     final controller = _cameraController;
-
     if (controller == null ||
         !controller.value.isInitialized ||
         _isTakingPicture) {
@@ -208,407 +168,106 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
     }
 
     try {
-      setState(() {
-        _isTakingPicture = true;
-      });
+      setState(() => _isTakingPicture = true);
 
       final XFile image = await controller.takePicture();
-
       final Uint8List imageBytes = await image.readAsBytes();
 
       if (!mounted) return;
 
+      _resetZoom();
       setState(() {
         _capturedImageBytes = imageBytes;
-        _smartAlignedImageBytes = null;
-        _correctedImageBytes = null;
-        _openCVThresholdImageBytes = null;
-        _openCVOmrResult = null;
-        _showThresholdPreview = false;
-        _showOmrDebugPreview = false;
-        _detectedMarkers = <RegistrationPoint>[];
+        _capturedFileName = 'Camera capture.jpg';
         _isTakingPicture = false;
       });
     } catch (e) {
       if (!mounted) return;
-
-      setState(() {
-        _isTakingPicture = false;
-      });
-
+      setState(() => _isTakingPicture = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to capture answer sheet: $e')),
       );
     }
   }
 
-  // Continue into the same review/verification workflow used on Chrome.
-  // The image is processed there; no OMR debug overlay is shown.
-  void _openUploadVerification() {
+  void _resetZoom() {
+    _zoomScale = 1.0;
+    _zoomController.value = Matrix4.identity();
+  }
+
+  void _toggleInspectZoom() {
+    setState(() {
+      if (_zoomScale == 1.0) {
+        _zoomScale = 2.0;
+        _zoomController.value = Matrix4.identity()..scaleByDouble(2.0, 2.0, 1.0, 1.0);
+      } else {
+        _zoomScale = 1.0;
+        _zoomController.value = Matrix4.identity();
+      }
+    });
+  }
+
+  Future<void> _openUploadVerification() async {
     final bytes = _capturedImageBytes;
     if (bytes == null || _isProcessing) return;
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
+
+    final result = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(
         builder: (_) => AnswerSheetUploadScreen(
           examId: widget.examId,
+          exam: widget.exam,
           sections: widget.sections,
+          students: widget.students,
           initialImageBytes: bytes,
-          initialFileName: 'Camera capture.jpg',
+          initialFileName: _capturedFileName,
+          autoProcessOnStart: true,
+          onViewInMySubjects: () {
+            Navigator.of(context).pop();
+            widget.onViewInMySubjects?.call();
+          },
         ),
       ),
     );
+
+    if (!mounted) return;
+    if (result == 'scan_next') {
+      _retakePicture();
+    }
   }
 
-  // ============================================================
-  // RETAKE
-  // ============================================================
-
   void _retakePicture() {
+    _resetZoom();
     setState(() {
       _capturedImageBytes = null;
-      _smartAlignedImageBytes = null;
-      _correctedImageBytes = null;
-      _openCVThresholdImageBytes = null;
-      _openCVOmrResult = null;
-      _showThresholdPreview = false;
-      _showOmrDebugPreview = false;
-      _detectedMarkers = <RegistrationPoint>[];
       _isProcessing = false;
     });
   }
 
-  // ============================================================
-  // PROCESS IMAGE
-  // ============================================================
-
-  Future<void> _continueWithImage() async {
-    if (_capturedImageBytes == null || _isProcessing) {
-      return;
-    }
-
-    setState(() {
-      _isProcessing = true;
-      _smartAlignedImageBytes = null;
-      _correctedImageBytes = null;
-      _openCVThresholdImageBytes = null;
-      _openCVOmrResult = null;
-      _showThresholdPreview = false;
-      _showOmrDebugPreview = false;
-      _detectedMarkers = <RegistrationPoint>[];
-    });
-
-    try {
-      Uint8List markerInputBytes = _capturedImageBytes!;
-      bool usedSmartAlignment = false;
-
-      // Stage 1: try coarse paper-boundary normalization first.
-      // Failure here is NOT fatal. CheckMate can still use its four
-      // registration markers directly from the original image.
-      try {
-        final DocumentScanResult scanResult =
-            await DocumentScannerService.process(_capturedImageBytes!);
-
-        markerInputBytes = scanResult.correctedImageBytes;
-        usedSmartAlignment = true;
-
-        if (mounted) {
-          setState(() {
-            _smartAlignedImageBytes = scanResult.correctedImageBytes;
-          });
-        }
-      } catch (e) {
-        markerInputBytes = _capturedImageBytes!;
-      }
-
-      // Stage 2: always use the existing CheckMate registration-marker
-      // processor for the precise 1500 x 2129 normalization.
-      final AnswerSheetProcessingResult result =
-          await AnswerSheetProcessor.processAnswerSheet(markerInputBytes);
-
-      // Stage 3: keep the existing OpenCV OMR algorithm unchanged.
-      final OpenCVOMRResult omrResult = await OpenCVOMRService.process(
-        result.correctedImageBytes,
-        sections: widget.sections,
-      );
-
-      if (!mounted) return;
-
-      setState(() {
-        _correctedImageBytes = result.correctedImageBytes;
-        _detectedMarkers = result.markers;
-        _openCVOmrResult = omrResult;
-        _isProcessing = false;
-        _showThresholdPreview = false;
-        _showOmrDebugPreview = false;
-      });
-
-      final String alignmentMessage = usedSmartAlignment
-          ? 'Paper alignment + registration-marker correction complete.'
-          : 'Paper boundary was skipped; registration-marker fallback succeeded.';
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 5),
-          content: Text(
-            '$alignmentMessage '
-            'Detected ${result.markers.length} registration markers.',
-          ),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        _isProcessing = false;
-        _correctedImageBytes = null;
-        _openCVThresholdImageBytes = null;
-        _openCVOmrResult = null;
-        _detectedMarkers = <RegistrationPoint>[];
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 7),
-          content: Text('Answer sheet processing failed:\n$e'),
-        ),
-      );
-    }
-  }
-
-  Uint8List? _currentPreviewBytes() {
-    final bool hasCorrectedImage = _correctedImageBytes != null;
-
-    if (hasCorrectedImage &&
-        _showOmrDebugPreview &&
-        _openCVOmrResult?.debugImageBytes != null) {
-      return _openCVOmrResult!.debugImageBytes;
-    }
-
-    if (hasCorrectedImage &&
-        _showThresholdPreview &&
-        _openCVThresholdImageBytes != null) {
-      return _openCVThresholdImageBytes;
-    }
-
-    if (hasCorrectedImage) {
-      return _correctedImageBytes;
-    }
-
-    if (_smartAlignedImageBytes != null) {
-      return _smartAlignedImageBytes;
-    }
-
-    return _capturedImageBytes;
-  }
-
-  void _openFullscreenPreview() {
-    final Uint8List? imageBytes = _currentPreviewBytes();
-    if (imageBytes == null) return;
-
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => _FullscreenImagePreview(
-          imageBytes: imageBytes,
-          title: _showOmrDebugPreview
-              ? 'OMR Debug Overlay'
-              : _showThresholdPreview
-              ? 'OpenCV Threshold'
-              : _smartAlignedImageBytes != null
-              ? 'Smart-Aligned Answer Sheet'
-              : 'Original Answer Sheet',
-        ),
-      ),
-    );
-  }
-
-  // ============================================================
-  // OMR ANSWER CLASSIFICATION
-  // ============================================================
-
-  /// Classifies one MC/TF row without changing the OpenCV measurement logic.
-  ///
-  /// The classifier intentionally uses BOTH an absolute darkness check and
-  /// the gap between the strongest and second-strongest bubble. This keeps a
-  /// blank row from becoming an answer just because one printed bubble outline
-  /// happens to be slightly darker than its neighbours.
-  _OMRAnswerClassification _classifyQuestion(dynamic question) {
-    final bubbles = List<dynamic>.from(question.bubbles);
-
-    if (bubbles.isEmpty) {
-      return const _OMRAnswerClassification(
-        status: _OMRAnswerStatus.blank,
-        labels: <String>[],
-        strongest: 0,
-        secondStrongest: 0,
-      );
-    }
-
-    final sorted = List<dynamic>.from(
-      bubbles,
-    )..sort((a, b) => (b.fillRatio as double).compareTo(a.fillRatio as double));
-
-    final double strongest = sorted.first.fillRatio as double;
-    final double secondStrongest = sorted.length > 1
-        ? sorted[1].fillRatio as double
-        : 0.0;
-    final double gap = strongest - secondStrongest;
-
-    // These are deliberately conservative starting values based on the
-    // current CheckMate sheet measurements. They can be tuned later after
-    // testing more blank and answered sheets under different lighting.
-    const double clearMarkMinimum = 0.52;
-    const double possibleMarkMinimum = 0.46;
-    const double clearWinnerGap = 0.12;
-    const double ambiguousWinnerGap = 0.07;
-    const double multipleMarkMinimum = 0.52;
-    const double multiplePairGap = 0.10;
-
-    final strongBubbles = bubbles
-        .where((bubble) => (bubble.fillRatio as double) >= multipleMarkMinimum)
-        .toList();
-
-    if (strongBubbles.length >= 2) {
-      strongBubbles.sort(
-        (a, b) => (b.fillRatio as double).compareTo(a.fillRatio as double),
-      );
-
-      final double first = strongBubbles[0].fillRatio as double;
-      final double second = strongBubbles[1].fillRatio as double;
-
-      if ((first - second).abs() <= multiplePairGap) {
-        return _OMRAnswerClassification(
-          status: _OMRAnswerStatus.multiple,
-          labels: strongBubbles
-              .map<String>((bubble) => bubble.label.toString())
-              .toList(),
-          strongest: strongest,
-          secondStrongest: secondStrongest,
-        );
-      }
-    }
-
-    if (strongest >= clearMarkMinimum && gap >= clearWinnerGap) {
-      return _OMRAnswerClassification(
-        status: _OMRAnswerStatus.answered,
-        labels: <String>[sorted.first.label.toString()],
-        strongest: strongest,
-        secondStrongest: secondStrongest,
-      );
-    }
-
-    // A reasonably dark bubble with a smaller-than-normal lead is not trusted
-    // automatically. It is surfaced for manual verification instead.
-    if (strongest >= possibleMarkMinimum && gap >= ambiguousWinnerGap) {
-      return _OMRAnswerClassification(
-        status: _OMRAnswerStatus.ambiguous,
-        labels: <String>[sorted.first.label.toString()],
-        strongest: strongest,
-        secondStrongest: secondStrongest,
-      );
-    }
-
-    // If the strongest bubble is dark but has almost no separation from the
-    // runner-up, treat the row as ambiguous rather than guessing.
-    if (strongest >= clearMarkMinimum) {
-      return _OMRAnswerClassification(
-        status: _OMRAnswerStatus.ambiguous,
-        labels: <String>[sorted.first.label.toString()],
-        strongest: strongest,
-        secondStrongest: secondStrongest,
-      );
-    }
-
-    return _OMRAnswerClassification(
-      status: _OMRAnswerStatus.blank,
-      labels: const <String>[],
-      strongest: strongest,
-      secondStrongest: secondStrongest,
-    );
-  }
-
-  Widget _buildClassificationBadge(_OMRAnswerClassification result) {
-    final IconData icon;
-    final String text;
-    final Color color;
-
-    switch (result.status) {
-      case _OMRAnswerStatus.answered:
-        icon = Icons.check_circle_outline;
-        text = result.labels.first;
-        color = Colors.greenAccent;
-        break;
-      case _OMRAnswerStatus.blank:
-        icon = Icons.remove_circle_outline;
-        text = 'Blank';
-        color = Colors.white60;
-        break;
-      case _OMRAnswerStatus.multiple:
-        icon = Icons.warning_amber_rounded;
-        text = 'Multiple: ${result.labels.join(', ')}';
-        color = Colors.orangeAccent;
-        break;
-      case _OMRAnswerStatus.ambiguous:
-        icon = Icons.help_outline;
-        text = result.labels.isEmpty
-            ? 'Ambiguous'
-            : 'Ambiguous: ${result.labels.first}';
-        color = Colors.amberAccent;
-        break;
-    }
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 16, color: color),
-        const SizedBox(width: 5),
-        Flexible(
-          child: Text(
-            text,
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w600,
-              fontSize: 12,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ============================================================
-  // DISPOSE
-  // ============================================================
-
   @override
   void dispose() {
     _cameraController?.dispose();
+    _zoomController.dispose();
     super.dispose();
   }
-
-  // ============================================================
-  // BUILD
-  // ============================================================
 
   @override
   Widget build(BuildContext context) {
     if (_capturedImageBytes != null) {
-      return _buildPreviewScreen();
+      return _buildReviewScreen();
     }
-
     return _buildCameraScreen();
   }
-
-  // ============================================================
-  // CAMERA SCREEN
-  // ============================================================
 
   Widget _buildCameraScreen() {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        backgroundColor: Colors.black,
+        backgroundColor: _kNavyDark,
         foregroundColor: Colors.white,
-        title: const Text('Scan Answer Sheet'),
+        title: const Text(
+          'Scan Answer Sheet',
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17),
+        ),
         actions: [
           if (!_isInitializing && !_hasError)
             IconButton(
@@ -625,18 +284,13 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
       body: _isInitializing
           ? const Center(child: CircularProgressIndicator(color: Colors.white))
           : _hasError
-          ? _buildCameraError()
-          : _buildCameraPreview(),
+              ? _buildCameraError()
+              : _buildCameraPreview(),
     );
   }
 
-  // ============================================================
-  // CAMERA PREVIEW
-  // ============================================================
-
   Widget _buildCameraPreview() {
     final controller = _cameraController;
-
     if (controller == null || !controller.value.isInitialized) {
       return _buildCameraError();
     }
@@ -645,9 +299,7 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
       fit: StackFit.expand,
       children: [
         CameraPreview(controller),
-
         CustomPaint(painter: ScannerOverlayPainter()),
-
         Positioned(
           top: 20,
           left: 20,
@@ -655,101 +307,119 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.65),
-              borderRadius: BorderRadius.circular(12),
+              color: _kNavyDark.withValues(alpha: 0.85),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white24),
             ),
             child: const Column(
               children: [
                 Text(
-                  'Position the answer sheet inside the frame',
+                  'Align sheet corners within the frame',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 15,
-                    fontWeight: FontWeight.bold,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
                 SizedBox(height: 4),
                 Text(
-                  'Make sure all four corners are visible',
+                  'Keep all four black corner registration markers visible',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white70, fontSize: 13),
+                  style: TextStyle(color: Colors.white70, fontSize: 12.5),
                 ),
               ],
             ),
           ),
         ),
-
         Positioned(
           left: 0,
           right: 0,
           bottom: 0,
           child: Container(
-            padding: const EdgeInsets.only(top: 18, bottom: 28),
+            padding: const EdgeInsets.only(top: 20, bottom: 28, left: 20, right: 20),
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
                   Colors.transparent,
-                  Colors.black.withValues(alpha: 0.9),
+                  _kNavyDark.withValues(alpha: 0.94),
                 ],
               ),
             ),
-            child: Column(
-              children: [
-                const Text(
-                  'Keep the sheet flat and well lit',
-                  style: TextStyle(color: Colors.white, fontSize: 13),
-                ),
-                const SizedBox(height: 14),
-
-                GestureDetector(
-                  onTap: _isTakingPicture ? null : _takePicture,
-                  child: Container(
-                    width: 78,
-                    height: 78,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white,
-                      border: Border.all(color: Colors.white, width: 5),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.4),
-                          blurRadius: 8,
-                        ),
-                      ],
-                    ),
-                    child: _isTakingPicture
-                        ? const Padding(
-                            padding: EdgeInsets.all(20),
-                            child: CircularProgressIndicator(),
-                          )
-                        : const Icon(
-                            Icons.camera_alt,
-                            color: Colors.black,
-                            size: 32,
-                          ),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Keep the sheet flat and well lit',
+                    style: TextStyle(color: Colors.white70, fontSize: 13),
                   ),
-                ),
-                const SizedBox(height: 12),
-                TextButton.icon(
-                  onPressed: _isTakingPicture ? null : _chooseFromGallery,
-                  icon: const Icon(Icons.photo_library_outlined),
-                  label: const Text('Choose From Gallery'),
-                  style: TextButton.styleFrom(foregroundColor: Colors.white),
-                ),
-              ],
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      // Gallery / Fallback Button
+                      OutlinedButton.icon(
+                        onPressed: _isTakingPicture ? null : _chooseFromGallery,
+                        icon: const Icon(Icons.photo_library_outlined, size: 18),
+                        label: const Text('Gallery'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Colors.white38),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                      ),
+                      // Shutter Capture Button
+                      GestureDetector(
+                        onTap: _isTakingPicture ? null : _takePicture,
+                        child: Container(
+                          width: 78,
+                          height: 78,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.white,
+                            border: Border.all(color: _kEmerald, width: 4),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.4),
+                                blurRadius: 10,
+                              ),
+                            ],
+                          ),
+                          child: _isTakingPicture
+                              ? const Padding(
+                                  padding: EdgeInsets.all(20),
+                                  child: CircularProgressIndicator(
+                                    color: _kNavy,
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.camera_alt_rounded,
+                                  color: _kNavyDark,
+                                  size: 32,
+                                ),
+                        ),
+                      ),
+                      const SizedBox(width: 96),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
       ],
     );
   }
-
-  // ============================================================
-  // CAMERA ERROR
-  // ============================================================
 
   Widget _buildCameraError() {
     return Center(
@@ -761,36 +431,56 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
             const Icon(
               Icons.no_photography_outlined,
               color: Colors.white,
-              size: 70,
+              size: 64,
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             const Text(
               'Camera unavailable',
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 20,
-                fontWeight: FontWeight.bold,
+                fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Text(
-              _errorMessage ?? 'Unable to access the camera.',
+              _errorMessage ??
+                  'Unable to access the camera. You can still pick a photo from your device gallery.',
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white70),
             ),
             const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () {
-                setState(() {
-                  _isInitializing = true;
-                  _hasError = false;
-                  _errorMessage = null;
-                });
-
-                _initializeCamera();
-              },
-              icon: const Icon(Icons.refresh),
-              label: const Text('Try Again'),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              alignment: WrapAlignment.center,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _isInitializing = true;
+                      _hasError = false;
+                      _errorMessage = null;
+                    });
+                    _initializeCamera();
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.white54),
+                  ),
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Try Camera Again'),
+                ),
+                FilledButton.icon(
+                  onPressed: _chooseFromGallery,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _kNavy,
+                    foregroundColor: Colors.white,
+                  ),
+                  icon: const Icon(Icons.photo_library_outlined),
+                  label: const Text('Pick from Gallery'),
+                ),
+              ],
             ),
           ],
         ),
@@ -798,301 +488,104 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
     );
   }
 
-  // ============================================================
-  // IMAGE PREVIEW / CORRECTED IMAGE
-  // ============================================================
-
-  Widget _buildPreviewScreen() {
-    final bool hasCorrectedImage =
-        _correctedImageBytes != null || _smartAlignedImageBytes != null;
-
+  Widget _buildReviewScreen() {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: const Color(0xFF0F172A),
       appBar: AppBar(
-        backgroundColor: Colors.black,
+        backgroundColor: _kNavyDark,
         foregroundColor: Colors.white,
-        title: Text(
-          hasCorrectedImage ? 'Processed Answer Sheet' : 'Review Answer Sheet',
+        title: const Text(
+          'Review Captured Sheet',
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17),
         ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: ActionChip(
+              avatar: Icon(
+                _zoomScale > 1.0 ? Icons.zoom_out : Icons.zoom_in,
+                size: 18,
+                color: Colors.white,
+              ),
+              label: Text(
+                _zoomScale > 1.0 ? '2x Zoom' : '1x / 2x',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12.5,
+                ),
+              ),
+              backgroundColor: _kNavy,
+              side: const BorderSide(color: Colors.white24),
+              onPressed: _toggleInspectZoom,
+            ),
+          ),
+        ],
       ),
       body: Column(
         children: [
           Expanded(
-            child: Center(
-              child: _capturedImageBytes != null
-                  ? GestureDetector(
-                      onTap: _openFullscreenPreview,
-                      child: Stack(
-                        alignment: Alignment.bottomCenter,
+            child: Stack(
+              alignment: Alignment.bottomCenter,
+              children: [
+                InteractiveViewer(
+                  transformationController: _zoomController,
+                  minScale: 1.0,
+                  maxScale: 4.0,
+                  child: Center(
+                    child: Image.memory(
+                      _capturedImageBytes!,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+                Positioned(
+                  bottom: 16,
+                  child: GestureDetector(
+                    onTap: _toggleInspectZoom,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _kNavyDark.withValues(alpha: 0.85),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Image.memory(
-                            _currentPreviewBytes()!,
-                            fit: BoxFit.contain,
+                          Icon(
+                            _zoomScale > 1.0 ? Icons.zoom_out : Icons.zoom_in,
+                            color: Colors.white,
+                            size: 18,
                           ),
-                          Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.70),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.zoom_in,
-                                  color: Colors.white,
-                                  size: 18,
-                                ),
-                                SizedBox(width: 6),
-                                Text(
-                                  'Tap to zoom',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
+                          const SizedBox(width: 6),
+                          Text(
+                            _zoomScale > 1.0
+                                ? 'Inspecting at 2x • Tap for 1x'
+                                : 'Tap to toggle 1x / 2x zoom',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ],
                       ),
-                    )
-                  : const SizedBox(),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-
-          if (_isProcessing)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      color: Colors.white,
-                      strokeWidth: 2,
-                    ),
-                  ),
-                  SizedBox(width: 10),
-                  Text(
-                    'Aligning sheet, detecting markers, and reading OMR...',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                ],
-              ),
-            ),
-
-          if (hasCorrectedImage)
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white24),
-              ),
-              child: Column(
-                children: [
-                  const Icon(
-                    Icons.check_circle_outline,
-                    color: Colors.white,
-                    size: 28,
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Perspective correction complete',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Detected ${_detectedMarkers.length} registration markers.',
-                    style: const TextStyle(color: Colors.white70),
-                  ),
-                  if (_openCVThresholdImageBytes != null ||
-                      _openCVOmrResult?.debugImageBytes != null) ...[
-                    const SizedBox(height: 10),
-                    Text(
-                      _showOmrDebugPreview
-                          ? 'Showing OMR debug overlay'
-                          : _showThresholdPreview
-                          ? 'Showing OpenCV threshold preview'
-                          : 'Showing corrected answer sheet',
-                      style: const TextStyle(color: Colors.white70),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      alignment: WrapAlignment.center,
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        if (_openCVThresholdImageBytes != null)
-                          OutlinedButton.icon(
-                            onPressed: () {
-                              setState(() {
-                                if (_showThresholdPreview ||
-                                    _showOmrDebugPreview) {
-                                  _showThresholdPreview = false;
-                                  _showOmrDebugPreview = false;
-                                } else {
-                                  _showThresholdPreview = true;
-                                  _showOmrDebugPreview = false;
-                                }
-                              });
-                            },
-                            icon: Icon(
-                              _showThresholdPreview && !_showOmrDebugPreview
-                                  ? Icons.image_outlined
-                                  : Icons.contrast,
-                            ),
-                            label: Text(
-                              _showThresholdPreview && !_showOmrDebugPreview
-                                  ? 'View Corrected Image'
-                                  : 'View OpenCV Threshold',
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.white,
-                              side: const BorderSide(color: Colors.white54),
-                            ),
-                          ),
-                        if (_openCVOmrResult?.debugImageBytes != null)
-                          OutlinedButton.icon(
-                            onPressed: () {
-                              setState(() {
-                                _showOmrDebugPreview = true;
-                                _showThresholdPreview = false;
-                              });
-                            },
-                            icon: const Icon(Icons.center_focus_strong),
-                            label: const Text('View OMR Debug Overlay'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.white,
-                              side: const BorderSide(color: Colors.white54),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ],
-                ],
-              ),
-            ),
-
-          if (hasCorrectedImage && _openCVOmrResult != null)
-            Container(
-              constraints: const BoxConstraints(maxHeight: 220),
-              margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white24),
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'OMR Answer Detection',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    ..._openCVOmrResult!.sections.map((section) {
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              section.sectionName,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            if (section.sectionType == 'identification')
-                              const Text(
-                                'Identification: OCR pending',
-                                style: TextStyle(color: Colors.white70),
-                              )
-                            else
-                              ...section.questions.map((question) {
-                                final values = question.bubbles
-                                    .map(
-                                      (bubble) =>
-                                          '${bubble.label}:${bubble.fillRatio.toStringAsFixed(3)}',
-                                    )
-                                    .join('  ');
-                                final classification = _classifyQuestion(
-                                  question,
-                                );
-
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 8),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          SizedBox(
-                                            width: 38,
-                                            child: Text(
-                                              'Q${question.questionNumber}',
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.w600,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          ),
-                                          Expanded(
-                                            child: _buildClassificationBadge(
-                                              classification,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        values,
-                                        style: const TextStyle(
-                                          color: Colors.white54,
-                                          fontFamily: 'monospace',
-                                          fontSize: 11,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              }),
-                          ],
-                        ),
-                      );
-                    }),
-                  ],
-                ),
-              ),
-            ),
-
+          // Sticky Thumb-Reachable Actions
           Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.black,
-              border: Border(
-                top: BorderSide(color: Colors.white.withValues(alpha: 0.15)),
-              ),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
             ),
             child: SafeArea(
               top: false,
@@ -1102,36 +595,37 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
                     child: OutlinedButton.icon(
                       onPressed: _isProcessing ? null : _retakePicture,
                       icon: const Icon(Icons.refresh),
-                      label: Text(hasCorrectedImage ? 'Retake' : 'Retake'),
+                      label: const Text(
+                        'Retake',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: const BorderSide(color: Colors.white),
+                        foregroundColor: _kNavy,
+                        side: const BorderSide(color: _kSlate),
                         padding: const EdgeInsets.symmetric(vertical: 15),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                       ),
                     ),
                   ),
-
                   const SizedBox(width: 12),
-
                   Expanded(
-                    child: ElevatedButton.icon(
+                    flex: 2,
+                    child: FilledButton.icon(
                       onPressed: _isProcessing ? null : _openUploadVerification,
-                      icon: _isProcessing
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Icon(
-                              Icons.arrow_forward,
-                            ),
-                      label: Text(
-                        _isProcessing
-                            ? 'Processing...'
-                            : 'Review & Process',
+                      icon: const Icon(Icons.arrow_forward),
+                      label: const Text(
+                        'Review & Process',
+                        style: TextStyle(fontWeight: FontWeight.w700),
                       ),
-                      style: ElevatedButton.styleFrom(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _kNavyDark,
+                        foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 15),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                       ),
                     ),
                   ),
@@ -1145,82 +639,24 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
   }
 }
 
-enum _OMRAnswerStatus { answered, blank, multiple, ambiguous }
-
-class _OMRAnswerClassification {
-  final _OMRAnswerStatus status;
-  final List<String> labels;
-  final double strongest;
-  final double secondStrongest;
-
-  const _OMRAnswerClassification({
-    required this.status,
-    required this.labels,
-    required this.strongest,
-    required this.secondStrongest,
-  });
-}
-
-class _FullscreenImagePreview extends StatelessWidget {
-  final Uint8List imageBytes;
-  final String title;
-
-  const _FullscreenImagePreview({
-    required this.imageBytes,
-    required this.title,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: Text(title),
-      ),
-      body: SafeArea(
-        child: InteractiveViewer(
-          minScale: 0.5,
-          maxScale: 8.0,
-          boundaryMargin: const EdgeInsets.all(120),
-          child: Center(child: Image.memory(imageBytes, fit: BoxFit.contain)),
-        ),
-      ),
-    );
-  }
-}
-
-// ============================================================
-// SCANNER OVERLAY PAINTER
-// ============================================================
-
 class ScannerOverlayPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     const double answerSheetRatio = 0.705;
-
     final double frameWidth = size.width * 0.82;
-
     final double frameHeight = frameWidth / answerSheetRatio;
-
     final double left = (size.width - frameWidth) / 2;
-
     final double top = (size.height - frameHeight) / 2;
 
     final Rect frame = Rect.fromLTWH(left, top, frameWidth, frameHeight);
-
-    // ----------------------------------------------------------
-    // DARK OVERLAY
-    // ----------------------------------------------------------
 
     final Paint overlayPaint = Paint()
       ..color = Colors.black.withValues(alpha: 0.55);
 
     final Path outsidePath = Path()
       ..addRect(Rect.fromLTWH(0, 0, size.width, size.height));
-
-    final Path framePath = Path()..addRect(frame);
+    final Path framePath = Path()
+      ..addRRect(RRect.fromRectAndRadius(frame, const Radius.circular(12)));
 
     final Path overlayPath = Path.combine(
       PathOperation.difference,
@@ -1230,23 +666,18 @@ class ScannerOverlayPainter extends CustomPainter {
 
     canvas.drawPath(overlayPath, overlayPaint);
 
-    // ----------------------------------------------------------
-    // FRAME
-    // ----------------------------------------------------------
-
     final Paint framePaint = Paint()
-      ..color = Colors.white
+      ..color = Colors.white.withValues(alpha: 0.8)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
+      ..strokeWidth = 2;
 
-    canvas.drawRect(frame, framePaint);
-
-    // ----------------------------------------------------------
-    // CORNER GUIDES
-    // ----------------------------------------------------------
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(frame, const Radius.circular(12)),
+      framePaint,
+    );
 
     final Paint cornerPaint = Paint()
-      ..color = Colors.white
+      ..color = _kEmerald
       ..style = PaintingStyle.stroke
       ..strokeWidth = 5
       ..strokeCap = StrokeCap.round;
@@ -1254,13 +685,11 @@ class ScannerOverlayPainter extends CustomPainter {
     const double cornerLength = 28;
 
     // TOP LEFT
-
     canvas.drawLine(
       Offset(frame.left, frame.top),
       Offset(frame.left + cornerLength, frame.top),
       cornerPaint,
     );
-
     canvas.drawLine(
       Offset(frame.left, frame.top),
       Offset(frame.left, frame.top + cornerLength),
@@ -1268,13 +697,11 @@ class ScannerOverlayPainter extends CustomPainter {
     );
 
     // TOP RIGHT
-
     canvas.drawLine(
       Offset(frame.right, frame.top),
       Offset(frame.right - cornerLength, frame.top),
       cornerPaint,
     );
-
     canvas.drawLine(
       Offset(frame.right, frame.top),
       Offset(frame.right, frame.top + cornerLength),
@@ -1282,13 +709,11 @@ class ScannerOverlayPainter extends CustomPainter {
     );
 
     // BOTTOM LEFT
-
     canvas.drawLine(
       Offset(frame.left, frame.bottom),
       Offset(frame.left + cornerLength, frame.bottom),
       cornerPaint,
     );
-
     canvas.drawLine(
       Offset(frame.left, frame.bottom),
       Offset(frame.left, frame.bottom - cornerLength),
@@ -1296,13 +721,11 @@ class ScannerOverlayPainter extends CustomPainter {
     );
 
     // BOTTOM RIGHT
-
     canvas.drawLine(
       Offset(frame.right, frame.bottom),
       Offset(frame.right - cornerLength, frame.bottom),
       cornerPaint,
     );
-
     canvas.drawLine(
       Offset(frame.right, frame.bottom),
       Offset(frame.right, frame.bottom - cornerLength),
@@ -1311,7 +734,5 @@ class ScannerOverlayPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) {
-    return false;
-  }
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

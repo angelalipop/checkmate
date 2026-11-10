@@ -155,3 +155,4 @@ student_service_diff.txt
 # Local backup files
 *.bak
 *.before-*
+lib/screens/checkmate_grading_scorebook_prototype.html

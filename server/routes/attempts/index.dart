@@ -9,7 +9,7 @@ Future<Response> onRequest(RequestContext context) async {
   }
 
   if (context.request.method == HttpMethod.post) {
-    return _createAttempt(context);
+    return _createOrRecordAttempt(context);
   }
 
   return Response.json(
@@ -61,7 +61,7 @@ Future<Response> _listAttempts(RequestContext context) async {
   }
 }
 
-Future<Response> _createAttempt(RequestContext context) async {
+Future<Response> _createOrRecordAttempt(RequestContext context) async {
   try {
     final body = await context.request.json();
 
@@ -83,7 +83,69 @@ Future<Response> _createAttempt(RequestContext context) async {
         ? body['student_id'] as int
         : int.tryParse(body['student_id']?.toString() ?? '');
 
-    if (examId == null || studentId == null) {
+    final classId = body['class_id'] is int
+        ? body['class_id'] as int
+        : int.tryParse(body['class_id']?.toString() ?? '');
+
+    final studentNumber = body['student_number']?.toString();
+    final sectionName = body['section']?.toString();
+
+    if (examId == null) {
+      return Response.json(
+        statusCode: 400,
+        body: {
+          'status': 'error',
+          'message': 'exam_id is required',
+        },
+      );
+    }
+
+    // A teacher can only record attempts on exams of their own classes.
+    final denied = await ExamAccess.guardExam(context, examId);
+    if (denied != null) return denied;
+
+    final actor = ExamActor.fromContext(context);
+
+    // Full scanner verification submission (includes verified answers list).
+    if (body['answers'] is List) {
+      if (studentId == null &&
+          (studentNumber == null || studentNumber.trim().isEmpty)) {
+        return Response.json(
+          statusCode: 400,
+          body: {
+            'status': 'error',
+            'message': 'student_id or student_number is required',
+          },
+        );
+      }
+
+      final rawAnswers = (body['answers'] as List)
+          .whereType<Map>()
+          .map(Map<String, dynamic>.from)
+          .toList();
+
+      final recorded = await AttemptService.recordVerifiedScan(
+        examId: examId,
+        studentId: studentId,
+        classId: classId,
+        studentNumber: studentNumber,
+        sectionName: sectionName,
+        answers: rawAnswers,
+        teacherId: actor?.id,
+      );
+
+      final updatedExisting = recorded['updated_existing'] == true;
+      return Response.json(
+        statusCode: updatedExisting ? 200 : 201,
+        body: {
+          'status': 'ok',
+          'updated_existing': updatedExisting,
+          'attempt': recorded,
+        },
+      );
+    }
+
+    if (studentId == null) {
       return Response.json(
         statusCode: 400,
         body: {
@@ -92,10 +154,6 @@ Future<Response> _createAttempt(RequestContext context) async {
         },
       );
     }
-
-    // A teacher can only start attempts on exams of their own classes.
-    final denied = await ExamAccess.guardExam(context, examId);
-    if (denied != null) return denied;
 
     final attempt = await AttemptService.create(
       examId: examId,
@@ -110,11 +168,12 @@ Future<Response> _createAttempt(RequestContext context) async {
       },
     );
   } catch (e) {
+    final msg = e.toString().replaceFirst('Exception: ', '');
     return Response.json(
-      statusCode: 500,
+      statusCode: 400,
       body: {
         'status': 'error',
-        'message': e.toString(),
+        'message': msg,
       },
     );
   }

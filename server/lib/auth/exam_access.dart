@@ -33,8 +33,9 @@ class ExamActor {
 /// Ownership checks for exam data.
 ///
 /// Admins may access everything. A teacher may only touch data that belongs
-/// to a class where classes.teacher_id is that teacher. Each guard returns
-/// null when access is allowed, otherwise the error Response to return.
+/// to a class where classes.teacher_id is that teacher (either directly via
+/// exams.class_id or via exam_class_assignments). Each guard returns null
+/// when access is allowed, otherwise the error Response to return.
 class ExamAccess {
   ExamAccess._();
 
@@ -58,8 +59,18 @@ class ExamAccess {
         '''
         SELECT 1
         FROM exams e
-        JOIN classes c ON c.id = e.class_id
-        WHERE e.id = @id AND c.teacher_id = @user_id
+        LEFT JOIN classes c ON c.id = e.class_id
+        WHERE e.id = @id
+          AND (
+            c.teacher_id = @user_id
+            OR EXISTS (
+              SELECT 1
+              FROM exam_class_assignments x
+              JOIN classes c2 ON c2.id = x.class_id
+              WHERE x.exam_id = e.id
+                AND c2.teacher_id = @user_id
+            )
+          )
         ''',
         examId,
         a.id,
@@ -79,8 +90,18 @@ class ExamAccess {
         SELECT 1
         FROM exam_sections s
         JOIN exams e ON e.id = s.exam_id
-        JOIN classes c ON c.id = e.class_id
-        WHERE s.id = @id AND c.teacher_id = @user_id
+        LEFT JOIN classes c ON c.id = e.class_id
+        WHERE s.id = @id
+          AND (
+            c.teacher_id = @user_id
+            OR EXISTS (
+              SELECT 1
+              FROM exam_class_assignments x
+              JOIN classes c2 ON c2.id = x.class_id
+              WHERE x.exam_id = e.id
+                AND c2.teacher_id = @user_id
+            )
+          )
         ''',
         sectionId,
         a.id,
@@ -100,8 +121,21 @@ class ExamAccess {
         SELECT 1
         FROM exam_attempts t
         JOIN exams e ON e.id = t.exam_id
-        JOIN classes c ON c.id = e.class_id
-        WHERE t.id = @id AND c.teacher_id = @user_id
+        LEFT JOIN classes c ON c.id = e.class_id
+        LEFT JOIN students st ON st.id = t.student_id
+        LEFT JOIN classes sc ON sc.id = st.class_id
+        WHERE t.id = @id
+          AND (
+            c.teacher_id = @user_id
+            OR sc.teacher_id = @user_id
+            OR EXISTS (
+              SELECT 1
+              FROM exam_class_assignments x
+              JOIN classes c2 ON c2.id = x.class_id
+              WHERE x.exam_id = e.id
+                AND c2.teacher_id = @user_id
+            )
+          )
         ''',
         attemptId,
         a.id,
@@ -122,8 +156,18 @@ class ExamAccess {
         FROM questions q
         JOIN exam_sections s ON s.id = q.section_id
         JOIN exams e ON e.id = s.exam_id
-        JOIN classes c ON c.id = e.class_id
-        WHERE q.id = @id AND c.teacher_id = @user_id
+        LEFT JOIN classes c ON c.id = e.class_id
+        WHERE q.id = @id
+          AND (
+            c.teacher_id = @user_id
+            OR EXISTS (
+              SELECT 1
+              FROM exam_class_assignments x
+              JOIN classes c2 ON c2.id = x.class_id
+              WHERE x.exam_id = e.id
+                AND c2.teacher_id = @user_id
+            )
+          )
         ''',
         questionId,
         a.id,

@@ -166,6 +166,27 @@ class ServerOpenCVOMRProcessor {
             'Section';
 
         if (type == 'identification') {
+          final idGridTop =
+              currentY + _sectionTitleHeight + AnswerSheetLayout.sectionTitleGap;
+          final idGridBottom = idGridTop +
+              questions.length *
+                  (_identificationBoxHeight + _identificationRowSpacing);
+          var bubblesInIdBand = 0;
+          for (final cand in bubbleCandidates) {
+            final logicalY = cand.centerY / scaleY;
+            if (logicalY >= idGridTop + 2.0 &&
+                logicalY <= idGridBottom - 2.0) {
+              bubblesInIdBand++;
+            }
+          }
+          if (bubblesInIdBand >= 8) {
+            throw Exception(
+              'Invalid Answer Sheet: "$sectionName" expects Identification answer boxes, '
+              'but OMR bubbles were detected on this sheet. Only the 1-to-1 answer sheet '
+              'for this specific assessment is accepted.',
+            );
+          }
+
           results.add(
             OpenCVSectionMeasurement(
               sectionName: sectionName,
@@ -225,6 +246,8 @@ class ServerOpenCVOMRProcessor {
         );
 
         final measuredQuestions = <OpenCVQuestionMeasurement>[];
+        var expectedSectionBubbles = 0;
+        var matchedSectionBubbles = 0;
 
         for (var i = 0; i < questions.length; i++) {
           final columnIndex = i ~/ questionsPerColumn;
@@ -263,6 +286,10 @@ class ServerOpenCVOMRProcessor {
               scaleX: scaleX,
               scaleY: scaleY,
             );
+            expectedSectionBubbles++;
+            if (detected != null) {
+              matchedSectionBubbles++;
+            }
 
             // Use the nearby printed contour only as a small positional
             // correction. Mark strength itself is measured from grayscale,
@@ -323,6 +350,64 @@ class ServerOpenCVOMRProcessor {
           );
         }
 
+        if (expectedSectionBubbles >= 4 &&
+            (matchedSectionBubbles / expectedSectionBubbles) < 0.55) {
+          throw Exception(
+            'Invalid Answer Sheet: The bubble grid for "$sectionName" '
+            '(${questions.length} items) does not match this answer sheet. '
+            'Only the 1-to-1 answer sheet for this specific assessment is accepted.',
+          );
+        }
+
+        // Check for an extra physical bubble row immediately below the last
+        // expected question of each column (rejects sheets from assessments
+        // with more questions in this section).
+        for (var colIdx = 0; colIdx < actualColumns; colIdx++) {
+          final colRows = (colIdx < actualColumns - 1)
+              ? questionsPerColumn
+              : (questions.length - colIdx * questionsPerColumn);
+          if (colRows <= 0) continue;
+          final colLeft = blockLeft + colIdx * columnWidth;
+          final extraLogicalY =
+              measurementGridTop +
+              colRows * _omrRowHeight +
+              (_bubbleSize / 2.0) +
+              sectionTranslation.dyLogical;
+          if (extraLogicalY >= _sheetHeight - _sheetPadding - 6.0) continue;
+
+          var extraRowHits = 0;
+          for (var optIdx = 0; optIdx < labels.length; optIdx++) {
+            final extraLogicalX =
+                colLeft +
+                _questionNumberWidth +
+                optIdx * _answerOptionWidth +
+                (_answerOptionWidth / 2.0) +
+                sectionTranslation.dxLogical;
+            final extraCand = _nearestBubbleCandidate(
+              bubbleCandidates,
+              expectedX: (extraLogicalX * scaleX).round(),
+              expectedY: (extraLogicalY * scaleY).round(),
+              scaleX: scaleX,
+              scaleY: scaleY,
+            );
+            if (extraCand != null) {
+              final dxL = ((extraCand.centerX / scaleX) - extraLogicalX).abs();
+              final dyL = ((extraCand.centerY / scaleY) - extraLogicalY).abs();
+              if (dxL <= 2.6 && dyL <= 2.6) {
+                extraRowHits++;
+              }
+            }
+          }
+          final minHitsToReject = labels.length <= 2 ? 2 : 3;
+          if (extraRowHits >= minHitsToReject) {
+            throw Exception(
+              'Invalid Answer Sheet: Extra question bubbles were detected in '
+              '"$sectionName" beyond the expected ${questions.length} items. '
+              'Only the 1-to-1 answer sheet for this specific assessment is accepted.',
+            );
+          }
+        }
+
         results.add(
           OpenCVSectionMeasurement(
             sectionName: sectionName,
@@ -338,6 +423,26 @@ class ServerOpenCVOMRProcessor {
             AnswerSheetLayout.sectionTitleGap +
             rows * _omrRowHeight +
             _sectionSpacing;
+      }
+
+      // Reject answer sheets that contain additional OMR bubble sections below
+      // the last expected section of this assessment.
+      if (currentY < _sheetHeight - 55.0) {
+        var extraBottomBubbles = 0;
+        for (final cand in bubbleCandidates) {
+          final logicalY = cand.centerY / scaleY;
+          if (logicalY >= currentY + 14.0 &&
+              logicalY <= _sheetHeight - 16.0) {
+            extraBottomBubbles++;
+          }
+        }
+        if (extraBottomBubbles >= 8) {
+          throw Exception(
+            'Invalid Answer Sheet: Additional question sections were detected on '
+            'this sheet that do not belong to this assessment. Only the 1-to-1 '
+            'answer sheet for this specific assessment is accepted.',
+          );
+        }
       }
 
       final (bool success, Uint8List encoded) = cv.imencode('.png', debug);

@@ -1,12 +1,41 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'api_service.dart';
 
-/// Client for the /my-subjects endpoints. Every call hits the Dart Frog
-/// server and PostgreSQL; nothing is cached, mocked or hard-coded here.
-/// The server decides what the teacher may see from the login token.
+/// Deep-link target used when routing from the Scanner's Post-Scoring Dialog
+/// ("View in My Subjects") into `MySubjectsScreen`.
+class MySubjectsScorebookTarget {
+  const MySubjectsScorebookTarget({
+    required this.classId,
+    required this.examId,
+    required this.studentId,
+    this.studentNumber,
+    this.studentName,
+    this.sectionName,
+    this.subjectId,
+    this.attemptId,
+  });
+
+  final int classId;
+  final int examId;
+  final int studentId;
+  final String? studentNumber;
+  final String? studentName;
+  final String? sectionName;
+  final int? subjectId;
+  final int? attemptId;
+}
+
+/// Global notifier observed by `MySubjectsScreen` to open a specific section's
+/// scorebook and highlight/pulse the newly recorded student row.
+final ValueNotifier<MySubjectsScorebookTarget?> mySubjectsScorebookTarget =
+    ValueNotifier<MySubjectsScorebookTarget?>(null);
+
+/// Client for the /my-subjects and scanner-to-scorebook endpoints. Every call
+/// hits the Dart Frog server and PostgreSQL; nothing is mocked or hard-coded.
 class MySubjectsApi {
   static Map<String, String> _headers(String token) => {
         'Content-Type': 'application/json',
@@ -91,6 +120,78 @@ class MySubjectsApi {
       headers: _headers(token),
     );
     return _decode(r);
+  }
+
+  /// Records (or updates/upserts) a verified answer sheet scan into PostgreSQL
+  /// (`exam_attempts` + `student_answers`) and clears any absence mark for that
+  /// student on that exam.
+  static Future<Map<String, dynamic>> recordScannedAttempt(
+    String token, {
+    required int examId,
+    int? studentId,
+    int? classId,
+    String? studentNumber,
+    String? sectionName,
+    required List<Map<String, dynamic>> answers,
+  }) async {
+    final r = await http.post(
+      Uri.parse('${ApiService.baseUrl}/attempts'),
+      headers: _headers(token),
+      body: jsonEncode({
+        'exam_id': examId,
+        'student_id': studentId,
+        'class_id': classId,
+        'student_number': studentNumber,
+        'section': sectionName,
+        'answers': answers,
+      }),
+    );
+    return _decode(r);
+  }
+
+  /// Fetches full attempt details (including per-question verified answers)
+  /// for a completed scorebook cell.
+  static Future<Map<String, dynamic>> getAttemptDetail(
+    String token,
+    int attemptId,
+  ) async {
+    final r = await http.get(
+      Uri.parse('${ApiService.baseUrl}/attempts/$attemptId'),
+      headers: _headers(token),
+    );
+    final decoded = _decode(r);
+    final attempt = decoded['attempt'];
+    return attempt is Map<String, dynamic>
+        ? attempt
+        : (attempt is Map ? Map<String, dynamic>.from(attempt) : decoded);
+  }
+
+  /// Deletes a recorded student score for an exam in a section so the cell
+  /// returns to `Pending`.
+  static Future<void> deleteScore(
+    String token, {
+    required int classId,
+    required int examId,
+    required int studentId,
+    int? attemptId,
+  }) async {
+    final r = await http.delete(
+      Uri.parse('${ApiService.baseUrl}/my-subjects/classes/$classId/scorebook')
+          .replace(
+        queryParameters: {
+          'exam_id': '$examId',
+          'student_id': '$studentId',
+          if (attemptId != null) 'attempt_id': '$attemptId',
+        },
+      ),
+      headers: _headers(token),
+      body: jsonEncode({
+        'exam_id': examId,
+        'student_id': studentId,
+        'attempt_id': ?attemptId,
+      }),
+    );
+    _decode(r);
   }
 
   /// Records (or removes) the teacher's confirmation that a student was

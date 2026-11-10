@@ -356,9 +356,9 @@ class AnswerSheetPdfService {
 
     return _ExtractedStudent(
       studentId: studentId,
-      studentNumber: studentNumber,
-      fullName: fullName,
-      section: section,
+      studentNumber: studentNumber.toUpperCase(),
+      fullName: fullName.toUpperCase(),
+      section: section.toUpperCase(),
     );
   }
 
@@ -515,7 +515,7 @@ class AnswerSheetPdfService {
           sheetNumber: item.sheetNumber,
         ),
 
-        pw.SizedBox(height: 6),
+        pw.SizedBox(height: 3),
 
         _buildStudentInformation(
           studentName: item.studentName,
@@ -523,7 +523,7 @@ class AnswerSheetPdfService {
           sectionName: item.sectionName,
         ),
 
-        pw.SizedBox(height: 7),
+        pw.SizedBox(height: 4),
 
         /*
           Render only the sections assigned
@@ -692,43 +692,46 @@ class AnswerSheetPdfService {
   }) {
     return pw.Column(
       children: [
+        // Row 1: Full-width Student Name (accommodates long names)
+        _buildLineField('STUDENT NAME', value: studentName),
+
+        pw.SizedBox(height: 3),
+
+        // Row 2: Student Number beside Section
         pw.Row(
           children: [
             pw.Expanded(
-              child: _buildLineField('Student Name', value: studentName),
+              child: _buildLineField('STUDENT NUMBER', value: studentNumber),
             ),
 
             pw.SizedBox(width: 6),
 
             pw.Expanded(
-              child: _buildLineField('Student Number', value: studentNumber),
+              child: _buildLineField('SECTION', value: sectionName),
             ),
           ],
         ),
-
-        pw.SizedBox(height: 5),
-
-        _buildLineField('Section', value: sectionName),
       ],
     );
   }
 
   static pw.Widget _buildLineField(String label, {String value = ''}) {
-    final cleanValue = value.trim();
+    final cleanValue = value.trim().toUpperCase();
     return pw.Container(
-      height: 16,
+      height: 20,
       padding: const pw.EdgeInsets.symmetric(horizontal: 4),
       decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.8)),
       child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.center,
         children: [
           pw.Text(
             '$label: ',
-            style: pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold),
+            style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold),
           ),
 
           pw.Expanded(
             child: pw.Container(
-              height: 11,
+              height: 15,
               alignment: pw.Alignment.bottomLeft,
               padding: const pw.EdgeInsets.only(bottom: 1),
               decoration: const pw.BoxDecoration(
@@ -738,7 +741,10 @@ class AnswerSheetPdfService {
                   ? null
                   : pw.Text(
                       cleanValue,
-                      style: const pw.TextStyle(fontSize: 6),
+                      style: pw.TextStyle(
+                        fontSize: 10,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
                       maxLines: 1,
                       overflow: pw.TextOverflow.clip,
                     ),

@@ -242,6 +242,20 @@ Route<void> _shellRoute(TeacherPage page, Widget screen) {
   );
 }
 
+/// Switches to the Scans tab inside the teacher shell with [examId] pre-loaded
+/// (Subject, Section, and Assessment automatically selected).
+void openTeacherScansForExam(BuildContext context, int examId) {
+  Navigator.of(context).pushReplacement(
+    _shellRoute(
+      TeacherPage.scans,
+      AnswerSheetInputScreen(
+        key: ValueKey('scan-exam-$examId'),
+        initialExamId: examId,
+      ),
+    ),
+  );
+}
+
 Future<void> _performLogout(BuildContext context) async {
   await AuthStorage.deleteToken();
   _TeacherIdentity.reset();

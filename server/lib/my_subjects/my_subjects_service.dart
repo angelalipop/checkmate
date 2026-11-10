@@ -338,12 +338,6 @@ class MySubjectsService {
   // POST /my-subjects/assessments/[id]/assign
   // ----------------------------------------------------------
 
-  /// Publishes [examId] and assigns it to [classIds] (new or existing).
-  ///
-  /// If the assessment is already published and has student attempts, its
-  /// version is bumped (`version + 1`) and the selected classes receive that
-  /// new version; existing attempts stay attached to the version they were
-  /// graded against.
   static Future<Map<String, dynamic>> assignAndPublish({
     required int teacherId,
     required int examId,
@@ -394,7 +388,6 @@ class MySubjectsService {
         );
       }
 
-      // Enforce minimum question validation before publishing/assigning.
       final sectionRows = await tx.execute(
         Sql.named('''
           SELECT
@@ -439,7 +432,6 @@ class MySubjectsService {
       final currentVersion = (r[2] as int?) ?? 1;
       final attemptCount = (r[5] as int?) ?? 0;
 
-      // Only bump the version when re-assigning an already-used assessment.
       final nextVersion = (wasPublished && attemptCount > 0)
           ? currentVersion + 1
           : currentVersion;
@@ -486,7 +478,7 @@ class MySubjectsService {
   }
 
   // ----------------------------------------------------------
-  // GET /my-subjects/sections/[classId]/scorebook
+  // GET /my-subjects/classes/[classId]/scorebook
   // ----------------------------------------------------------
 
   static Future<Map<String, dynamic>> scorebook(
@@ -497,18 +489,22 @@ class MySubjectsService {
 
     final studentRows = await Database.pool.execute(
       Sql.named('''
-        SELECT id, student_number, first_name, last_name
-        FROM students
-        WHERE class_id = @class_id
-        ORDER BY LOWER(last_name), LOWER(first_name), id
+        SELECT st.id, st.student_number, st.first_name, st.last_name, c.section
+        FROM students st
+        JOIN classes c ON c.id = st.class_id
+        WHERE st.class_id = @class_id
+        ORDER BY LOWER(st.last_name), LOWER(st.first_name), st.id
       '''),
       parameters: {'class_id': classId},
     );
 
+    // Include assessments assigned to this class that are published OR already
+    // have recorded exam_attempts (so scanning an exam immediately displays
+    // its scorebook column even if the exam was still in draft status).
     final assessmentRows = await Database.pool.execute(
       Sql.named('''
         $_assignedCte
-        SELECT e.id, e.title, e.assessment_type, ea.exam_version,
+        SELECT e.id, e.title, e.assessment_type, MAX(ea.exam_version) AS exam_version,
                (SELECT COALESCE(SUM(q.points), 0)
                   FROM questions q
                   JOIN exam_sections es ON es.id = q.section_id
@@ -516,7 +512,14 @@ class MySubjectsService {
         FROM ea
         JOIN exams e ON e.id = ea.exam_id
         WHERE ea.class_id = @class_id
-          AND e.status = 'published'
+          AND (
+            e.status = 'published'
+            OR EXISTS (
+              SELECT 1 FROM exam_attempts att
+              WHERE att.exam_id = e.id
+            )
+          )
+        GROUP BY e.id, e.title, e.assessment_type, e.created_at
         ORDER BY e.created_at, e.id
       '''),
       parameters: {'class_id': classId},
@@ -534,9 +537,11 @@ class MySubjectsService {
 
     final examIds = assessments.map((a) => a['id']! as int).toList();
 
-    // Latest attempt per (student_number, exam_id) for this class.
-    // Joining on LOWER(BTRIM(student_number)) matches how the scanner records
-    // attempts in exam_attempts.student_id.
+    // Latest attempt per (student, exam_id) for this class using the actual
+    // PostgreSQL schema columns in 001_initial_schema.sql:
+    //   exam_attempts: id, exam_id, student_id, score, max_score, status,
+    //                  completed_at, created_at
+    //   student_answers: verification_status ('automatic' | 'needs_review' | 'verified')
     final attempts = <String, Map<String, dynamic>>{};
     final absences = <String>{};
 
@@ -546,19 +551,30 @@ class MySubjectsService {
           SELECT DISTINCT ON (st.id, a.exam_id)
                  st.id AS student_id,
                  a.exam_id,
-                 a.total_score,
+                 a.id AS attempt_id,
+                 a.score,
                  a.max_score,
-                 a.grading_status,
+                 a.status,
                  (SELECT COUNT(*)
                     FROM student_answers sa
                    WHERE sa.attempt_id = a.id
-                     AND sa.needs_review = TRUE) AS review_count
+                     AND sa.verification_status = 'needs_review') AS review_count,
+                 a.completed_at,
+                 a.created_at
           FROM students st
+          JOIN students st_match
+            ON (
+              st_match.id = st.id
+              OR LOWER(BTRIM(st_match.student_number)) = LOWER(BTRIM(st.student_number))
+            )
           JOIN exam_attempts a
-            ON LOWER(BTRIM(a.student_id)) = LOWER(BTRIM(st.student_number))
+            ON a.student_id = st_match.id
           WHERE st.class_id = @class_id
             AND a.exam_id = ANY(@exam_ids)
-          ORDER BY st.id, a.exam_id, a.scanned_at DESC, a.id DESC
+          ORDER BY st.id, a.exam_id,
+                   (st_match.id = st.id) DESC,
+                   COALESCE(a.completed_at, a.created_at) DESC,
+                   a.id DESC
         '''),
         parameters: {
           'class_id': classId,
@@ -569,10 +585,12 @@ class MySubjectsService {
       for (final r in attemptRows) {
         final key = '${r[0]}|${r[1]}';
         attempts[key] = {
-          'score': _num(r[2]),
-          'max_score': _num(r[3]),
-          'grading_status': r[4]?.toString(),
-          'review_count': (r[5] as int?) ?? 0,
+          'attempt_id': r[2] as int?,
+          'score': _num(r[3]),
+          'max_score': _num(r[4]),
+          'status': r[5]?.toString(),
+          'review_count': (r[6] as num?)?.toInt() ?? 0,
+          'completed_at': (r[7] ?? r[8])?.toString(),
         };
       }
 
@@ -598,6 +616,11 @@ class MySubjectsService {
 
     final students = studentRows.map((s) {
       final sid = s[0]! as int;
+      final sectionName = s[4]?.toString() ?? '';
+      double earnedSum = 0;
+      double maxSum = 0;
+      var completedCount = 0;
+
       final cells = assessments.map((a) {
         final eid = a['id']! as int;
         final key = '$sid|$eid';
@@ -606,17 +629,29 @@ class MySubjectsService {
         String status;
         num? score;
         var maxScore = a['total_points'] as num?;
+        int? attemptId;
 
         if (attempt != null) {
-          final gs = attempt['grading_status'];
+          attemptId = attempt['attempt_id'] as int?;
+          final attStatus = attempt['status'];
           final rev = attempt['review_count'] as int;
           score = attempt['score'] as num?;
-          maxScore = (attempt['max_score'] as num?) ?? maxScore;
+          final storedMax = attempt['max_score'] as num?;
+          if (storedMax != null && storedMax > 0) {
+            maxScore = storedMax;
+          }
 
-          if (rev > 0 || gs == 'needs_review' || gs == 'pending_ident') {
+          if (rev > 0 ||
+              attStatus == 'pending_verification' ||
+              attStatus == 'needs_review') {
             status = 'needs_review';
           } else {
             status = 'completed';
+            if (score != null && maxScore != null && maxScore > 0) {
+              earnedSum += score.toDouble();
+              maxSum += maxScore.toDouble();
+              completedCount++;
+            }
           }
         } else if (absences.contains(key)) {
           status = 'absent';
@@ -627,17 +662,23 @@ class MySubjectsService {
 
         return {
           'exam_id': eid,
+          'attempt_id': attemptId,
           'status': status,
           'score': score,
           'max_score': maxScore,
         };
       }).toList();
 
+      final averagePercentage =
+          (completedCount > 0 && maxSum > 0) ? (earnedSum / maxSum) * 100.0 : null;
+
       return {
         'id': sid,
         'student_number': s[1],
         'first_name': s[2],
         'last_name': s[3],
+        'section': sectionName,
+        'average_percentage': averagePercentage,
         'cells': cells,
       };
     }).toList();
@@ -649,7 +690,56 @@ class MySubjectsService {
   }
 
   // ----------------------------------------------------------
-  // POST /my-subjects/sections/[classId]/absence
+  // DELETE /my-subjects/classes/[classId]/scorebook
+  // ----------------------------------------------------------
+
+  static Future<void> deleteScore({
+    required int teacherId,
+    required int classId,
+    required int examId,
+    required int studentId,
+    int? attemptId,
+  }) async {
+    await _ownedClassSubjects(teacherId, [classId]);
+
+    await Database.pool.runTx((tx) async {
+      if (attemptId != null && attemptId > 0) {
+        await tx.execute(
+          Sql.named('''
+            DELETE FROM exam_attempts
+            WHERE id = @attempt_id AND exam_id = @exam_id
+          '''),
+          parameters: {
+            'attempt_id': attemptId,
+            'exam_id': examId,
+          },
+        );
+      }
+
+      await tx.execute(
+        Sql.named('''
+          DELETE FROM exam_attempts a
+          USING students st, students st_match
+          WHERE st.id = @student_id
+            AND st.class_id = @class_id
+            AND a.exam_id = @exam_id
+            AND a.student_id = st_match.id
+            AND (
+              st_match.id = st.id
+              OR LOWER(BTRIM(st_match.student_number)) = LOWER(BTRIM(st.student_number))
+            )
+        '''),
+        parameters: {
+          'student_id': studentId,
+          'class_id': classId,
+          'exam_id': examId,
+        },
+      );
+    });
+  }
+
+  // ----------------------------------------------------------
+  // PUT /my-subjects/classes/[classId]/absences
   // ----------------------------------------------------------
 
   static Future<void> setAbsence({
@@ -661,8 +751,6 @@ class MySubjectsService {
   }) async {
     await _ownedClassSubjects(teacherId, [classId]);
 
-    // Verify that the student is in this section and the exam is assigned to
-    // it before writing anything.
     final check = await Database.pool.execute(
       Sql.named('''
         $_assignedCte

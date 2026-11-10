@@ -229,13 +229,13 @@ class OMRProcessor {
    */
   static const double headerHeight = 45.0;
 
-  static const double headerBottomSpacing = 6.0;
+  static const double headerBottomSpacing = 3.0;
 
-  static const double studentRowHeight = 16.0;
+  static const double studentRowHeight = 20.0;
 
-  static const double studentRowSpacing = 5.0;
+  static const double studentRowSpacing = 3.0;
 
-  static const double studentInfoBottomSpacing = 7.0;
+  static const double studentInfoBottomSpacing = 4.0;
 
   // ==========================================================================
   // OMR READING SETTINGS

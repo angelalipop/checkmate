@@ -12,6 +12,7 @@ import 'exam_preview_screen.dart';
 import 'exams_tab.dart'
     show importParsedSectionsIntoExam, pickAndParseQuestionPaper;
 import 'questions_screen.dart';
+import 'teacher_dashboard.dart' show openTeacherScansForExam;
 
 class ExamBuilderScreen extends StatefulWidget {
   final int examId;
@@ -126,7 +127,12 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
     );
   }
 
+  bool get _isPublished =>
+      (_exam?['status']?.toString() ?? 'draft').trim().toLowerCase() ==
+      'published';
+
   Future<void> _updateAssessmentStatus(String targetStatus) async {
+    if (_isPublished) return;
     final exam = _exam;
     if (exam == null || _isUpdatingStatus) return;
 
@@ -721,30 +727,33 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                 ),
             ],
             const SizedBox(height: 12),
-            Wrap(
-              spacing: 10,
-              runSpacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _isUpdatingStatus
-                      ? null
-                      : () => _updateAssessmentStatus('draft'),
-                  icon: const Icon(Icons.save_outlined, size: 18),
-                  label: Text(
-                    status == 'draft' ? 'Save Draft' : 'Revert to Draft',
+            if (status == 'published')
+              FilledButton.icon(
+                onPressed: () => openTeacherScansForExam(context, widget.examId),
+                icon: const Icon(Icons.document_scanner_outlined, size: 18),
+                label: const Text('Scan Now'),
+              )
+            else
+              Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _isUpdatingStatus
+                        ? null
+                        : () => _updateAssessmentStatus('draft'),
+                    icon: const Icon(Icons.save_outlined, size: 18),
+                    label: const Text('Save Draft'),
                   ),
-                ),
-                FilledButton.icon(
-                  onPressed: (_isUpdatingStatus || !isValid)
-                      ? null
-                      : () => _updateAssessmentStatus('published'),
-                  icon: const Icon(Icons.publish_outlined, size: 18),
-                  label: Text(
-                    status == 'published' ? 'Published' : 'Publish Assessment',
+                  FilledButton.icon(
+                    onPressed: (_isUpdatingStatus || !isValid)
+                        ? null
+                        : () => _updateAssessmentStatus('published'),
+                    icon: const Icon(Icons.publish_outlined, size: 18),
+                    label: const Text('Publish Assessment'),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
           ],
         ),
       ),
@@ -909,22 +918,23 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                 'Exam Sections',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _importPdfIntoCurrentExam,
-                    icon: const Icon(Icons.upload_file_outlined),
-                    label: const Text('Upload PDF'),
-                  ),
-                  FilledButton.icon(
-                    onPressed: () => _showSectionDialog(),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add Section'),
-                  ),
-                ],
-              ),
+              if (!_isPublished)
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _importPdfIntoCurrentExam,
+                      icon: const Icon(Icons.upload_file_outlined),
+                      label: const Text('Upload PDF'),
+                    ),
+                    FilledButton.icon(
+                      onPressed: () => _showSectionDialog(),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add Section'),
+                    ),
+                  ],
+                ),
             ],
           ),
 
@@ -982,29 +992,31 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                       '${section['default_points'] ?? '1'} pts/item • '
                       '$qCount/5 min questions',
                     ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          tooltip: 'Edit section',
-                          icon: const Icon(Icons.edit_outlined),
-                          onPressed: () => _showSectionDialog(
-                            section: section,
-                            sectionIndex: idx,
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Delete section',
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: sectionId == null
-                              ? null
-                              : () => _deleteSection(
-                                  sectionId,
-                                  section['name']?.toString() ?? 'Section',
+                    trailing: _isPublished
+                        ? null
+                        : Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: 'Edit section',
+                                icon: const Icon(Icons.edit_outlined),
+                                onPressed: () => _showSectionDialog(
+                                  section: section,
+                                  sectionIndex: idx,
                                 ),
-                        ),
-                      ],
-                    ),
+                              ),
+                              IconButton(
+                                tooltip: 'Delete section',
+                                icon: const Icon(Icons.delete_outline),
+                                onPressed: sectionId == null
+                                    ? null
+                                    : () => _deleteSection(
+                                        sectionId,
+                                        section['name']?.toString() ?? 'Section',
+                                      ),
+                              ),
+                            ],
+                          ),
                   ),
                 );
               },

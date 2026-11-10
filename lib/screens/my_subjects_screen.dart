@@ -6,7 +6,7 @@ import 'exams_tab.dart';
 import 'teacher_dashboard.dart' show TeacherPage, TeacherShell;
 
 // =============================================================
-// CheckMate — My Subjects (Teacher Portal)
+// CheckMate — My Subjects & Centralized Scorebook (Teacher Portal)
 //
 //   My Subjects (list)  ->  Subject page  ->  Section scorebook
 //                                          ->  Assessment Builder
@@ -27,14 +27,15 @@ final ValueNotifier<String> mySubjectsSearch = ValueNotifier<String>('');
 const double _kDesktop = 900;
 const double _kTablet = 600;
 
+// Brand Palette & Visual Tokens
 const Color _navy = Color(0xFF162137);
-const Color _amber = Color(0xFFF7A224);
 const Color _ink = Color(0xFF1E293B);
 const Color _slate = Color(0xFF64748B);
 const Color _bg = Color(0xFFF8FAFC);
 const Color _line = Color(0xFFE2E8F0);
 const Color _green = Color(0xFF10B981);
 const Color _greenDark = Color(0xFF047857);
+const Color _amber = Color(0xFFF59E0B);
 const Color _amberDark = Color(0xFF92400E);
 const Color _red = Color(0xFFB91C1C);
 
@@ -72,7 +73,9 @@ const _typeLabels = <String, String>{
   'prelim': 'Prelim',
   'midterm': 'Midterm',
   'prefinal': 'Prefinals',
+  'pre_finals': 'Prefinals',
   'final': 'Finals',
+  'finals': 'Finals',
   'other': 'Other',
 };
 
@@ -208,12 +211,21 @@ class _Subject {
 enum _Kind { list, subject, section, builder }
 
 class _View {
-  const _View(this.kind, {this.subject, this.section, this.examId});
+  const _View(
+    this.kind, {
+    this.subject,
+    this.section,
+    this.examId,
+    this.highlightStudentId,
+    this.highlightExamId,
+  });
 
   final _Kind kind;
   final _Subject? subject;
   final _Section? section;
   final int? examId;
+  final int? highlightStudentId;
+  final int? highlightExamId;
 }
 
 // =============================================================
@@ -250,12 +262,14 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
     mySubjectsSearch.value = '';
     _searchC = TextEditingController();
     mySubjectsSearch.addListener(_onSearch);
+    mySubjectsScorebookTarget.addListener(_onScorebookTargetChanged);
     _load();
   }
 
   @override
   void dispose() {
     mySubjectsSearch.removeListener(_onSearch);
+    mySubjectsScorebookTarget.removeListener(_onScorebookTargetChanged);
     _searchC.dispose();
     super.dispose();
   }
@@ -266,6 +280,65 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
       _searchC.text = mySubjectsSearch.value;
     }
     setState(() {});
+  }
+
+  void _onScorebookTargetChanged() {
+    if (!mounted) return;
+    final target = mySubjectsScorebookTarget.value;
+    if (target == null) return;
+    if (_subjects.isNotEmpty) {
+      _applyScorebookTarget(target);
+    }
+  }
+
+  void _applyScorebookTarget(MySubjectsScorebookTarget target) {
+    _Subject? matchedSubject;
+    _Section? matchedSection;
+
+    for (final subj in _subjects) {
+      for (final sec in subj.sections) {
+        if (sec.classId == target.classId) {
+          matchedSubject = subj;
+          matchedSection = sec;
+          break;
+        }
+      }
+      if (matchedSubject != null) break;
+    }
+
+    if (matchedSubject == null &&
+        target.sectionName != null &&
+        target.sectionName!.trim().isNotEmpty) {
+      final cleanSec = target.sectionName!.trim().toLowerCase();
+      for (final subj in _subjects) {
+        for (final sec in subj.sections) {
+          if (sec.name.trim().toLowerCase() == cleanSec) {
+            matchedSubject = subj;
+            matchedSection = sec;
+            break;
+          }
+        }
+        if (matchedSubject != null) break;
+      }
+    }
+
+    if (matchedSubject != null && matchedSection != null) {
+      mySubjectsScorebookTarget.value = null;
+      setState(() {
+        _stack
+          ..removeRange(1, _stack.length)
+          ..add(_View(_Kind.subject, subject: matchedSubject))
+          ..add(
+            _View(
+              _Kind.section,
+              subject: matchedSubject,
+              section: matchedSection,
+              highlightStudentId: target.studentId,
+              highlightExamId: target.examId,
+            ),
+          );
+      });
+    }
   }
 
   Future<void> _load() async {
@@ -297,6 +370,11 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
           _schoolYear = years.isEmpty ? 'all' : years.last;
         }
       });
+
+      final pendingTarget = mySubjectsScorebookTarget.value;
+      if (pendingTarget != null) {
+        _applyScorebookTarget(pendingTarget);
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -320,6 +398,20 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
     setState(() {
       while (_stack.length > 1 && _stack.last.kind != _Kind.subject) {
         _stack.removeLast();
+      }
+    });
+  }
+
+  void _switchSectionInScorebook(_Subject subject, _Section newSection) {
+    setState(() {
+      if (_stack.isNotEmpty && _stack.last.kind == _Kind.section) {
+        _stack[_stack.length - 1] = _View(
+          _Kind.section,
+          subject: subject,
+          section: newSection,
+        );
+      } else {
+        _stack.add(_View(_Kind.section, subject: subject, section: newSection));
       }
     });
   }
@@ -390,8 +482,6 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
   Widget build(BuildContext context) {
     final top = _stack.last;
 
-    // The embedded Assessment Builder handles its own back press; every
-    // other view steps back through this screen's stack.
     return PopScope(
       canPop: _stack.length == 1 || top.kind == _Kind.builder,
       onPopInvokedWithResult: (didPop, result) {
@@ -424,11 +514,16 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
         final subject = v.subject!;
         final section = v.section!;
         return _SectionPage(
-          key: ValueKey('section-${section.classId}'),
+          key: ValueKey(
+            'section-${section.classId}-${v.highlightStudentId ?? 0}-${v.highlightExamId ?? 0}',
+          ),
           subject: subject,
           section: section,
+          highlightStudentId: v.highlightStudentId,
+          highlightExamId: v.highlightExamId,
           onGoList: _goList,
           onGoSubject: _goSubject,
+          onSwitchSection: (sec) => _switchSectionInScorebook(subject, sec),
         );
 
       case _Kind.builder:
@@ -453,13 +548,13 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
             'My Subjects',
             style: TextStyle(
               fontSize: 26,
-              fontWeight: FontWeight.w500,
+              fontWeight: FontWeight.w700,
               color: _ink,
             ),
           ),
           const SizedBox(height: 4),
           const Text(
-            'Your assigned subjects across College and Senior High School.',
+            'Your assigned subjects and section scorebooks across College and Senior High School.',
             style: TextStyle(fontSize: 14, color: _slate),
           ),
           const SizedBox(height: 16),
@@ -471,7 +566,7 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
             const SizedBox(height: 12),
           ],
           if (_loading)
-            const _Centered(child: CircularProgressIndicator())
+            const _Centered(child: CircularProgressIndicator(color: _navy))
           else if (_error != null)
             _ErrorBox(message: _error!, onRetry: _load)
           else if (_subjects.isEmpty)
@@ -561,7 +656,6 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
 
     return LayoutBuilder(
       builder: (context, box) {
-        // Phones: two per row. Wider: as many as fit, up to five.
         final perRow = box.maxWidth < _kTablet
             ? 2
             : (box.maxWidth ~/ 190).clamp(2, 5);
@@ -579,19 +673,25 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
 
   List<Widget> _buildGroups(List<_Subject> filtered) {
     final groups = <(String, List<_Subject>)>[
-      ('College Department',
-          filtered.where((s) => s.department == 'college').toList()),
-      ('Senior High School',
-          filtered.where((s) => s.department == 'shs').toList()),
-      ('Other',
-          filtered
-              .where((s) => s.department != 'college' && s.department != 'shs')
-              .toList()),
+      (
+        'College Department',
+        filtered.where((s) => s.department == 'college').toList()
+      ),
+      (
+        'Senior High School',
+        filtered.where((s) => s.department == 'shs').toList()
+      ),
+      (
+        'Other',
+        filtered
+            .where((s) => s.department != 'college' && s.department != 'shs')
+            .toList()
+      ),
     ];
 
     final out = <Widget>[];
     for (final (title, items) in groups) {
-      if (items.isEmpty) continue; // never show an empty group
+      if (items.isEmpty) continue;
 
       final distinct = items.map((s) => s.subjectId ?? s.key).toSet().length;
 
@@ -606,7 +706,7 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
                     title,
                     style: const TextStyle(
                       fontSize: 18,
-                      fontWeight: FontWeight.w500,
+                      fontWeight: FontWeight.w600,
                       color: _ink,
                     ),
                   ),
@@ -664,7 +764,7 @@ class _PageScroll extends StatelessWidget {
     final refresh = onRefresh;
     return refresh == null
         ? scroll
-        : RefreshIndicator(onRefresh: refresh, child: scroll);
+        : RefreshIndicator(color: _navy, onRefresh: refresh, child: scroll);
   }
 }
 
@@ -700,7 +800,10 @@ class _ErrorBox extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           OutlinedButton(
-            style: OutlinedButton.styleFrom(minimumSize: const Size(88, 44)),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _navy,
+              minimumSize: const Size(88, 44),
+            ),
             onPressed: onRetry,
             child: const Text('Retry'),
           ),
@@ -721,8 +824,6 @@ class _EmptyBox extends StatelessWidget {
   final IconData icon;
   final String title;
   final String? message;
-
-  /// Optional button shown under the message.
   final Widget? action;
 
   @override
@@ -732,7 +833,7 @@ class _EmptyBox extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 36),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: _line),
       ),
       child: Column(
@@ -744,7 +845,7 @@ class _EmptyBox extends StatelessWidget {
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontSize: 16,
-              fontWeight: FontWeight.w500,
+              fontWeight: FontWeight.w600,
               color: _ink,
             ),
           ),
@@ -766,8 +867,6 @@ class _EmptyBox extends StatelessWidget {
   }
 }
 
-/// Dark pill button (same look as the Students tab) that switches the
-/// Teacher Portal to its Students tab.
 class _AddStudentsButton extends StatelessWidget {
   const _AddStudentsButton();
 
@@ -775,8 +874,6 @@ class _AddStudentsButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return FilledButton.icon(
       onPressed: () {
-        // Uses the portal shell's own navigation, so the sidebar and
-        // bottom bar behave exactly as if Students had been tapped.
         context
             .findAncestorWidgetOfExactType<TeacherShell>()
             ?.onSelect(TeacherPage.students);
@@ -791,7 +888,7 @@ class _AddStudentsButton extends StatelessWidget {
       icon: const Icon(Icons.person_add_alt_1_outlined, size: 20),
       label: const Text(
         'Add Students',
-        style: TextStyle(fontWeight: FontWeight.w500),
+        style: TextStyle(fontWeight: FontWeight.w600),
       ),
     );
   }
@@ -811,7 +908,7 @@ class _Pill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: background,
         borderRadius: BorderRadius.circular(999),
@@ -820,7 +917,7 @@ class _Pill extends StatelessWidget {
         text,
         style: TextStyle(
           fontSize: 12,
-          fontWeight: FontWeight.w500,
+          fontWeight: FontWeight.w600,
           color: color,
         ),
       ),
@@ -829,10 +926,15 @@ class _Pill extends StatelessWidget {
 }
 
 class _SearchField extends StatelessWidget {
-  const _SearchField({required this.controller, required this.onChanged});
+  const _SearchField({
+    required this.controller,
+    required this.onChanged,
+    this.hintText = 'Search subjects by name or code',
+  });
 
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
+  final String hintText;
 
   @override
   Widget build(BuildContext context) {
@@ -841,22 +943,22 @@ class _SearchField extends StatelessWidget {
       onChanged: onChanged,
       style: const TextStyle(color: _ink),
       decoration: InputDecoration(
-        hintText: 'Search subjects by name or code',
+        hintText: hintText,
         hintStyle: const TextStyle(color: _slate, fontSize: 14),
         prefixIcon: const Icon(Icons.search, color: _slate),
         filled: true,
         fillColor: Colors.white,
         contentPadding: const EdgeInsets.symmetric(vertical: 14),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: _line),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: _line),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: _navy, width: 1.5),
         ),
       ),
@@ -887,11 +989,11 @@ class _FilterField extends StatelessWidget {
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: _line),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: _line),
         ),
       ),
@@ -920,7 +1022,7 @@ class _FilterField extends StatelessWidget {
   }
 }
 
-/// 3 columns on desktop, 2 on tablet, 1 on phone.
+/// 2 columns on desktop/tablet, 1 on phone.
 class _ResponsiveGrid extends StatelessWidget {
   const _ResponsiveGrid({required this.children});
 
@@ -929,7 +1031,7 @@ class _ResponsiveGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final screenW = MediaQuery.sizeOf(context).width;
-    final cols = screenW >= _kDesktop ? 3 : (screenW >= _kTablet ? 2 : 1);
+    final cols = screenW >= _kDesktop ? 2 : (screenW >= _kTablet ? 2 : 1);
     const gap = 16.0;
 
     return LayoutBuilder(
@@ -947,7 +1049,6 @@ class _ResponsiveGrid extends StatelessWidget {
   }
 }
 
-/// White card, thin border, 8px corners, soft shadow on hover.
 class _HoverCard extends StatefulWidget {
   const _HoverCard({
     required this.onTap,
@@ -980,27 +1081,33 @@ class _HoverCardState extends State<_HoverCard> {
           duration: const Duration(milliseconds: 160),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: _line),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _hover ? _navy.withValues(alpha: 0.35) : _line),
             boxShadow: _hover
                 ? [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.08),
+                      color: _navy.withValues(alpha: 0.08),
                       blurRadius: 16,
                       offset: const Offset(0, 6),
                     ),
                   ]
-                : const [],
+                : [
+                    BoxShadow(
+                      color: _navy.withValues(alpha: 0.03),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
           ),
           child: Material(
             color: Colors.transparent,
             child: InkWell(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(16),
               onTap: widget.onTap,
               child: ConstrainedBox(
                 constraints: const BoxConstraints(minHeight: 44),
                 child: Padding(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(18),
                   child: widget.builder(_hover),
                 ),
               ),
@@ -1032,22 +1139,25 @@ class _SubjectCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 36,
-                height: 36,
+                width: 38,
+                height: 38,
                 decoration: BoxDecoration(
                   color: _navy.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.menu_book_outlined,
-                    size: 20, color: _navy),
+                child: const Icon(
+                  Icons.menu_book_outlined,
+                  size: 20,
+                  color: _navy,
+                ),
               ),
               const SizedBox(width: 10),
               if (s.code.isNotEmpty)
                 Flexible(
                   child: _Pill(
                     text: s.code,
-                    background: _amber.withValues(alpha: 0.18),
-                    color: _amberDark,
+                    background: _navy.withValues(alpha: 0.08),
+                    color: _navy,
                   ),
                 ),
             ],
@@ -1059,7 +1169,7 @@ class _SubjectCard extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               fontSize: 16,
-              fontWeight: FontWeight.w500,
+              fontWeight: FontWeight.w700,
               color: _ink,
             ),
           ),
@@ -1075,7 +1185,11 @@ class _SubjectCard extends StatelessWidget {
             sectionNames,
             maxLines: 3,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 13, color: _slate),
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: _slate,
+            ),
           ),
           const SizedBox(height: 12),
           const Divider(height: 1, color: _line),
@@ -1086,8 +1200,8 @@ class _SubjectCard extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  '${s.totalStudents} '
-                  '${s.totalStudents == 1 ? 'student' : 'students'}',
+                  '${s.sections.length} ${s.sections.length == 1 ? 'section' : 'sections'} • '
+                  '${s.totalStudents} ${s.totalStudents == 1 ? 'student' : 'students'}',
                   style: const TextStyle(fontSize: 13, color: _slate),
                 ),
               ),
@@ -1132,7 +1246,7 @@ class _Breadcrumb extends StatelessWidget {
               items[i].label,
               style: const TextStyle(
                 fontSize: 14,
-                fontWeight: FontWeight.w500,
+                fontWeight: FontWeight.w600,
                 color: _ink,
               ),
             )
@@ -1220,7 +1334,6 @@ class _SubjectPageState extends State<_SubjectPage> {
   }
 
   Future<void> _newAssessment() async {
-    // Uses the exact same Create Exam / Edit Exam Details modal format as ExamsTab.
     final s = widget.subject;
     final subjectClasses = <Map<String, dynamic>>[
       for (final sec in s.sections)
@@ -1257,13 +1370,14 @@ class _SubjectPageState extends State<_SubjectPage> {
     final s = widget.subject;
     final narrow = MediaQuery.sizeOf(context).width < _kTablet;
 
+    // Deep Navy Primary CTA Button (never amber/orange).
     final newButton = narrow
         ? IconButton.filled(
             tooltip: 'New assessment',
             onPressed: _newAssessment,
             style: IconButton.styleFrom(
-              backgroundColor: _amber,
-              foregroundColor: _navy,
+              backgroundColor: _navy,
+              foregroundColor: Colors.white,
               minimumSize: const Size(44, 44),
             ),
             icon: const Icon(Icons.add),
@@ -1271,18 +1385,18 @@ class _SubjectPageState extends State<_SubjectPage> {
         : FilledButton.icon(
             onPressed: _newAssessment,
             style: FilledButton.styleFrom(
-              backgroundColor: _amber,
-              foregroundColor: _navy,
+              backgroundColor: _navy,
+              foregroundColor: Colors.white,
               minimumSize: const Size(0, 44),
               padding: const EdgeInsets.symmetric(horizontal: 18),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(12),
               ),
             ),
             icon: const Icon(Icons.add),
             label: const Text(
               'New assessment',
-              style: TextStyle(fontWeight: FontWeight.w500),
+              style: TextStyle(fontWeight: FontWeight.w600),
             ),
           );
 
@@ -1306,7 +1420,7 @@ class _SubjectPageState extends State<_SubjectPage> {
                   s.name,
                   style: const TextStyle(
                     fontSize: 26,
-                    fontWeight: FontWeight.w500,
+                    fontWeight: FontWeight.w700,
                     color: _ink,
                   ),
                 ),
@@ -1323,13 +1437,25 @@ class _SubjectPageState extends State<_SubjectPage> {
             ),
           ],
           const SizedBox(height: 28),
-          const Text(
-            'Assigned Sections',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w500,
-              color: _ink,
-            ),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Assigned Sections & Scorebooks',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: _ink,
+                  ),
+                ),
+              ),
+              _Pill(
+                text:
+                    '${_assessments.length} ${_assessments.length == 1 ? 'exam' : 'exams'} • ${s.totalStudents} students',
+                background: _line,
+                color: _ink,
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           _ResponsiveGrid(
@@ -1338,6 +1464,7 @@ class _SubjectPageState extends State<_SubjectPage> {
                 _SectionCard(
                   subject: s,
                   section: sec,
+                  examCount: _assessments.length,
                   onTap: () => widget.onOpenSection(sec),
                 ),
             ],
@@ -1347,13 +1474,13 @@ class _SubjectPageState extends State<_SubjectPage> {
             'Assessment Library',
             style: TextStyle(
               fontSize: 18,
-              fontWeight: FontWeight.w500,
+              fontWeight: FontWeight.w600,
               color: _ink,
             ),
           ),
           const SizedBox(height: 12),
           if (_loading)
-            const _Centered(child: CircularProgressIndicator())
+            const _Centered(child: CircularProgressIndicator(color: _navy))
           else if (_error != null)
             _ErrorBox(message: _error!, onRetry: _load)
           else if (_assessments.isEmpty)
@@ -1387,11 +1514,13 @@ class _SectionCard extends StatelessWidget {
   const _SectionCard({
     required this.subject,
     required this.section,
+    required this.examCount,
     required this.onTap,
   });
 
   final _Subject subject;
   final _Section section;
+  final int examCount;
   final VoidCallback onTap;
 
   @override
@@ -1402,13 +1531,25 @@ class _SectionCard extends StatelessWidget {
       builder: (hovered) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            section.name,
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-              color: _ink,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  section.name,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: _ink,
+                  ),
+                ),
+              ),
+              if (subject.code.isNotEmpty)
+                _Pill(
+                  text: subject.code,
+                  background: _navy.withValues(alpha: 0.08),
+                  color: _navy,
+                ),
+            ],
           ),
           if (subject.contextLine.isNotEmpty) ...[
             const SizedBox(height: 4),
@@ -1417,20 +1558,20 @@ class _SectionCard extends StatelessWidget {
               style: const TextStyle(fontSize: 13, color: _slate),
             ),
           ],
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
-            '${section.students} '
-            '${section.students == 1 ? 'student' : 'students'}',
+            '${section.students} ${section.students == 1 ? 'student' : 'students'} • '
+            '$examCount ${examCount == 1 ? 'assessment' : 'assessments'}',
             style: const TextStyle(fontSize: 13, color: _slate),
           ),
           const SizedBox(height: 12),
           Row(
             children: [
               const Text(
-                'Open section',
+                'Open section scorebook',
                 style: TextStyle(
                   fontSize: 14,
-                  fontWeight: FontWeight.w500,
+                  fontWeight: FontWeight.w600,
                   color: _navy,
                 ),
               ),
@@ -1485,7 +1626,7 @@ class _AssessmentRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 15,
-                    fontWeight: FontWeight.w500,
+                    fontWeight: FontWeight.w600,
                     color: _ink,
                   ),
                 ),
@@ -1521,7 +1662,7 @@ class _AssessmentRow extends StatelessWidget {
 }
 
 // =============================================================
-// SECTION SCOREBOOK
+// SECTION SCOREBOOK (MOBILE CARDS + DESKTOP TABULAR GRADEBOOK)
 // =============================================================
 
 List<Map<String, dynamic>> _maps(Object? raw) => raw is List
@@ -1535,20 +1676,28 @@ class _SectionPage extends StatefulWidget {
     required this.section,
     required this.onGoList,
     required this.onGoSubject,
+    required this.onSwitchSection,
+    this.highlightStudentId,
+    this.highlightExamId,
   });
 
   final _Subject subject;
   final _Section section;
   final VoidCallback onGoList;
   final VoidCallback onGoSubject;
+  final ValueChanged<_Section> onSwitchSection;
+  final int? highlightStudentId;
+  final int? highlightExamId;
 
   @override
   State<_SectionPage> createState() => _SectionPageState();
 }
 
 class _SectionPageState extends State<_SectionPage> {
-  static const double _colW = 132;
-  static const double _rowH = 56;
+  static const double _colW = 136;
+  static const double _avgColW = 116;
+  static const double _secColW = 104;
+  static const double _rowH = 60;
   static const double _headH = 76;
 
   List<Map<String, dynamic>> _assessments = const [];
@@ -1556,18 +1705,27 @@ class _SectionPageState extends State<_SectionPage> {
   bool _loading = true;
   String? _error;
   String _filter = 'all';
+  String _studentQuery = '';
+
+  int? _activeHighlightStudentId;
+  int? _activeHighlightExamId;
 
   final ScrollController _hScroll = ScrollController();
+  final TextEditingController _studentSearchC = TextEditingController();
+  final Map<int, GlobalKey> _studentRowKeys = <int, GlobalKey>{};
 
   @override
   void initState() {
     super.initState();
+    _activeHighlightStudentId = widget.highlightStudentId;
+    _activeHighlightExamId = widget.highlightExamId;
     _load();
   }
 
   @override
   void dispose() {
     _hScroll.dispose();
+    _studentSearchC.dispose();
     super.dispose();
   }
 
@@ -1583,7 +1741,7 @@ class _SectionPageState extends State<_SectionPage> {
 
       final students = _maps(data['students']);
       for (final s in students) {
-        s['cells'] = _maps(s['cells']); // mutable copies
+        s['cells'] = _maps(s['cells']);
       }
 
       if (!mounted) return;
@@ -1592,6 +1750,12 @@ class _SectionPageState extends State<_SectionPage> {
         _students = students;
         _loading = false;
       });
+
+      if (_activeHighlightStudentId != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _scrollToHighlightedRecord();
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -1601,6 +1765,47 @@ class _SectionPageState extends State<_SectionPage> {
     }
   }
 
+  void _scrollToHighlightedRecord() {
+    if (!mounted) return;
+    final sid = _activeHighlightStudentId;
+    if (sid != null) {
+      final key = _studentRowKeys[sid];
+      final ctx = key?.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 450),
+          curve: Curves.easeOutCubic,
+          alignment: 0.3,
+        );
+      }
+    }
+
+    final eid = _activeHighlightExamId;
+    if (eid != null && _hScroll.hasClients) {
+      final idx = _assessments.indexWhere((a) => _int(a['id']) == eid);
+      if (idx > 0) {
+        final targetOffset = (idx * _colW).clamp(
+          0.0,
+          _hScroll.position.maxScrollExtent,
+        );
+        _hScroll.animateTo(
+          targetOffset,
+          duration: const Duration(milliseconds: 450),
+          curve: Curves.easeOutCubic,
+        );
+      }
+    }
+
+    Future<void>.delayed(const Duration(seconds: 4), () {
+      if (!mounted) return;
+      setState(() {
+        _activeHighlightStudentId = null;
+        _activeHighlightExamId = null;
+      });
+    });
+  }
+
   List<Map<String, dynamic>> _cells(Map<String, dynamic> s) =>
       (s['cells'] as List).cast<Map<String, dynamic>>();
 
@@ -1608,21 +1813,67 @@ class _SectionPageState extends State<_SectionPage> {
       ? _students.length
       : _students.where((s) => _cells(s).any((c) => c['status'] == f)).length;
 
-  List<Map<String, dynamic>> get _visible => _filter == 'all'
-      ? _students
-      : _students
-          .where((s) => _cells(s).any((c) => c['status'] == _filter))
-          .toList();
+  String _studentName(Map<String, dynamic> s) {
+    final last = (s['last_name']?.toString() ?? '').trim().toUpperCase();
+    final first = (s['first_name']?.toString() ?? '').trim().toUpperCase();
+    if (last.isNotEmpty && first.isNotEmpty) return '$last, $first';
+    return '$last $first'.trim();
+  }
 
-  String _studentName(Map<String, dynamic> s) =>
-      '${s['last_name'] ?? ''}, ${s['first_name'] ?? ''}'.trim();
+  double? _studentAveragePercent(Map<String, dynamic> s) {
+    final fromServer = s['average_percentage'];
+    if (fromServer is num) return fromServer.toDouble();
 
-  Future<void> _toggleAbsent(
+    double earned = 0;
+    double max = 0;
+    int count = 0;
+    for (final c in _cells(s)) {
+      if (c['status'] == 'completed') {
+        final sc = c['score'] is num ? (c['score'] as num).toDouble() : null;
+        final mx =
+            c['max_score'] is num ? (c['max_score'] as num).toDouble() : null;
+        if (sc != null && mx != null && mx > 0) {
+          earned += sc;
+          max += mx;
+          count++;
+        }
+      }
+    }
+    if (count == 0 || max <= 0) return null;
+    return (earned / max) * 100.0;
+  }
+
+  List<Map<String, dynamic>> get _visible {
+    final q = _studentQuery.trim().toLowerCase();
+    return _students.where((s) {
+      if (_filter != 'all' &&
+          !_cells(s).any((c) => c['status'] == _filter)) {
+        return false;
+      }
+      if (q.isNotEmpty) {
+        final name = _studentName(s).toLowerCase();
+        final snum = (s['student_number']?.toString() ?? '').toLowerCase();
+        if (!name.contains(q) && !snum.contains(q)) {
+          return false;
+        }
+      }
+      return true;
+    }).toList();
+  }
+
+  Future<void> _onCellTapped(
     Map<String, dynamic> student,
     Map<String, dynamic> cell,
-    String examTitle,
+    Map<String, dynamic> assessment,
   ) async {
-    final status = cell['status'];
+    final status = cell['status']?.toString() ?? 'pending';
+    final examTitle = assessment['title']?.toString() ?? 'Assessment';
+
+    if (status == 'completed' || status == 'needs_review') {
+      await _showManageScoreModal(student, cell, assessment);
+      return;
+    }
+
     if (status != 'pending' && status != 'absent') return;
 
     final marking = status == 'pending';
@@ -1632,9 +1883,10 @@ class _SectionPageState extends State<_SectionPage> {
       context: context,
       builder: (c) => AlertDialog(
         backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: Text(
           marking ? 'Mark as absent?' : 'Remove absent mark?',
-          style: const TextStyle(fontWeight: FontWeight.w500, color: _ink),
+          style: const TextStyle(fontWeight: FontWeight.w700, color: _ink),
         ),
         content: Text(
           marking
@@ -1644,15 +1896,21 @@ class _SectionPageState extends State<_SectionPage> {
         ),
         actions: [
           TextButton(
-            style: TextButton.styleFrom(minimumSize: const Size(88, 44)),
+            style: TextButton.styleFrom(
+              foregroundColor: _slate,
+              minimumSize: const Size(88, 44),
+            ),
             onPressed: () => Navigator.pop(c, false),
             child: const Text('Cancel'),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-              backgroundColor: _amber,
-              foregroundColor: _navy,
+              backgroundColor: _navy,
+              foregroundColor: Colors.white,
               minimumSize: const Size(88, 44),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
             onPressed: () => Navigator.pop(c, true),
             child: Text(marking ? 'Mark absent' : 'Remove'),
@@ -1681,6 +1939,239 @@ class _SectionPageState extends State<_SectionPage> {
     }
   }
 
+  Future<void> _showManageScoreModal(
+    Map<String, dynamic> student,
+    Map<String, dynamic> cell,
+    Map<String, dynamic> assessment,
+  ) async {
+    final name = _studentName(student);
+    final snum = student['student_number']?.toString() ?? '';
+    final examTitle = assessment['title']?.toString() ?? 'Assessment';
+    final examId = _int(cell['exam_id']) ?? _int(assessment['id']) ?? 0;
+    final studentId = _int(student['id']) ?? 0;
+    final attemptId = _int(cell['attempt_id']);
+    final score = cell['score'] is num ? cell['score'] as num : null;
+    final maxScore = cell['max_score'] is num ? cell['max_score'] as num : null;
+    final pct = (score != null && maxScore != null && maxScore > 0)
+        ? ((score.toDouble() / maxScore.toDouble()) * 100.0).round()
+        : null;
+
+    final deleteRequested = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: _green.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.fact_check_outlined,
+                        color: _greenDark,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            examTitle,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: _ink,
+                            ),
+                          ),
+                          Text(
+                            '${widget.subject.code} • ${widget.section.name}',
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              color: _slate,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(dialogContext, false),
+                      icon: const Icon(Icons.close, color: _slate),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: _bg,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: _line),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w700,
+                          color: _ink,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Student No: $snum • Section: ${widget.section.name}',
+                        style: const TextStyle(fontSize: 12.5, color: _slate),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Text(
+                            maxScore != null
+                                ? '${_formatScore(score)} / ${_formatScore(maxScore)}'
+                                : _formatScore(score),
+                            style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w800,
+                              color: _ink,
+                            ),
+                          ),
+                          if (pct != null) ...[
+                            const SizedBox(width: 10),
+                            _Pill(
+                              text: '$pct%',
+                              background: _green.withValues(alpha: 0.15),
+                              color: _greenDark,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () => Navigator.pop(dialogContext, true),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _red,
+                        side: BorderSide(color: _red.withValues(alpha: 0.4)),
+                        minimumSize: const Size(0, 44),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      icon: const Icon(Icons.delete_outline, size: 18),
+                      label: const Text(
+                        'Delete Score',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(dialogContext, false),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _navy,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(88, 44),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text('Done'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (deleteRequested != true || !mounted) return;
+
+    final confirmDelete = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Text(
+          'Delete recorded score?',
+          style: TextStyle(fontWeight: FontWeight.w700, color: _ink),
+        ),
+        content: Text(
+          'Delete $name\'s recorded score for "$examTitle"? Their status will return to Pending.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: _red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Delete Score'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmDelete != true || !mounted) return;
+
+    try {
+      final token = await _token();
+      await MySubjectsApi.deleteScore(
+        token,
+        classId: widget.section.classId,
+        examId: examId,
+        studentId: studentId,
+        attemptId: attemptId,
+      );
+      if (!mounted) return;
+      setState(() {
+        cell['status'] = 'pending';
+        cell['score'] = null;
+        cell['attempt_id'] = null;
+        student['average_percentage'] = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: _navy,
+          content: Text('Deleted recorded score for $name on "$examTitle".'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(backgroundColor: _red, content: Text(_err(e))),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = widget.subject;
@@ -1699,24 +2190,57 @@ class _SectionPageState extends State<_SectionPage> {
             ],
           ),
           const SizedBox(height: 8),
-          Text(
-            '${s.name} – ${sec.name}',
-            style: const TextStyle(
-              fontSize: 26,
-              fontWeight: FontWeight.w500,
-              color: _ink,
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${s.name} – ${sec.name}',
+                      style: const TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w700,
+                        color: _ink,
+                      ),
+                    ),
+                    if (s.fullContextLine.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        s.fullContextLine,
+                        style: const TextStyle(fontSize: 14, color: _slate),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (s.sections.length > 1)
+                SizedBox(
+                  width: 170,
+                  child: _FilterField(
+                    label: 'Section',
+                    value: '${sec.classId}',
+                    options: [
+                      for (final item in s.sections)
+                        MapEntry('${item.classId}', item.name),
+                    ],
+                    onChanged: (val) {
+                      final targetId = int.tryParse(val);
+                      if (targetId == null || targetId == sec.classId) return;
+                      final found = s.sections.firstWhere(
+                        (e) => e.classId == targetId,
+                        orElse: () => sec,
+                      );
+                      widget.onSwitchSection(found);
+                    },
+                  ),
+                ),
+            ],
           ),
-          if (s.fullContextLine.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(
-              s.fullContextLine,
-              style: const TextStyle(fontSize: 14, color: _slate),
-            ),
-          ],
           const SizedBox(height: 20),
           if (_loading)
-            const _Centered(child: CircularProgressIndicator())
+            const _Centered(child: CircularProgressIndicator(color: _navy))
           else if (_error != null)
             _ErrorBox(message: _error!, onRetry: _load)
           else
@@ -1747,60 +2271,233 @@ class _SectionPageState extends State<_SectionPage> {
     }
 
     final rows = _visible;
+    final bool isMobileView = MediaQuery.sizeOf(context).width < _kTablet;
 
     return [
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (final f in const [
-            ('all', 'All'),
-            ('completed', 'Completed'),
-            ('pending', 'Pending'),
-            ('needs_review', 'Needs Review'),
-          ])
-            ChoiceChip(
-              materialTapTargetSize: MaterialTapTargetSize.padded,
-              label: Text('${f.$2} (${_countFor(f.$1)})'),
-              selected: _filter == f.$1,
-              selectedColor: _navy,
-              backgroundColor: Colors.white,
-              side: const BorderSide(color: _line),
-              labelStyle: TextStyle(
-                fontSize: 13,
-                color: _filter == f.$1 ? Colors.white : _ink,
-              ),
-              checkmarkColor: Colors.white,
-              onSelected: (_) => setState(() => _filter = f.$1),
-            ),
-        ],
+      // Search & Filter Bar
+      LayoutBuilder(
+        builder: (context, box) {
+          final searchWidget = _SearchField(
+            controller: _studentSearchC,
+            hintText: 'Search student by name or student number...',
+            onChanged: (v) => setState(() => _studentQuery = v),
+          );
+
+          final filterChips = Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final f in const [
+                ('all', 'All'),
+                ('completed', 'Completed'),
+                ('pending', 'Pending'),
+                ('needs_review', 'Needs Review'),
+              ])
+                ChoiceChip(
+                  materialTapTargetSize: MaterialTapTargetSize.padded,
+                  label: Text('${f.$2} (${_countFor(f.$1)})'),
+                  selected: _filter == f.$1,
+                  selectedColor: _navy,
+                  backgroundColor: Colors.white,
+                  side: const BorderSide(color: _line),
+                  labelStyle: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: _filter == f.$1 ? Colors.white : _ink,
+                  ),
+                  checkmarkColor: Colors.white,
+                  onSelected: (_) => setState(() => _filter = f.$1),
+                ),
+            ],
+          );
+
+          if (box.maxWidth >= 760) {
+            return Row(
+              children: [
+                Expanded(flex: 5, child: searchWidget),
+                const SizedBox(width: 16),
+                Expanded(
+                  flex: 6,
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: filterChips,
+                  ),
+                ),
+              ],
+            );
+          }
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              searchWidget,
+              const SizedBox(height: 12),
+              filterChips,
+            ],
+          );
+        },
       ),
       const SizedBox(height: 16),
       if (rows.isEmpty)
         const _EmptyBox(
           icon: Icons.filter_alt_off_outlined,
-          title: 'No students match this filter.',
+          title: 'No students match this filter or search.',
         )
+      else if (isMobileView)
+        _mobileCards(rows)
       else
         _table(rows),
       const SizedBox(height: 12),
       const Text(
         'Students without a finalized scan stay Pending. Tap a Pending cell '
-        'only to confirm that the student was absent.',
+        'to mark absent, or tap a Completed score to inspect or delete it.',
         style: TextStyle(fontSize: 12, color: _slate),
       ),
     ];
   }
 
-  Widget _table(List<Map<String, dynamic>> rows) {
-    final narrow = MediaQuery.sizeOf(context).width < _kTablet;
-    final leftW = narrow ? 128.0 : 200.0;
+  // ------------------------------------------------------------
+  // MOBILE VIEW: HIGH-CONTRAST STUDENT SCORE CARDS (< 600px)
+  // ------------------------------------------------------------
 
-    Widget head(Widget child, double w) => Container(
+  Widget _mobileCards(List<Map<String, dynamic>> rows) {
+    return Column(
+      children: [
+        for (final s in rows)
+          Builder(
+            builder: (context) {
+              final sid = _int(s['id']) ?? 0;
+              final isHighlighted = _activeHighlightStudentId == sid;
+              final avg = _studentAveragePercent(s);
+              final cells = _cells(s);
+              final rowKey =
+                  _studentRowKeys.putIfAbsent(sid, () => GlobalKey());
+
+              return AnimatedContainer(
+                key: rowKey,
+                duration: const Duration(milliseconds: 350),
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: isHighlighted
+                      ? _green.withValues(alpha: 0.10)
+                      : Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isHighlighted ? _green : _line,
+                    width: isHighlighted ? 2 : 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: _navy.withValues(alpha: 0.03),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _studentName(s),
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: _ink,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${s['student_number'] ?? ''} • ${widget.section.name}',
+                                style: const TextStyle(
+                                  fontSize: 12.5,
+                                  color: _slate,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: avg != null
+                                ? _green.withValues(alpha: 0.14)
+                                : _bg,
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: avg != null
+                                  ? _green.withValues(alpha: 0.4)
+                                  : _line,
+                            ),
+                          ),
+                          child: Text(
+                            avg != null
+                                ? 'Avg: ${avg.toStringAsFixed(1)}%'
+                                : 'Avg: —',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: avg != null ? _greenDark : _slate,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 10),
+                      child: Divider(height: 1, color: _line),
+                    ),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (var i = 0; i < _assessments.length; i++)
+                          _MobileScoreChip(
+                            title: _assessments[i]['title']?.toString() ?? '',
+                            cell: cells[i],
+                            highlighted: isHighlighted &&
+                                (_activeHighlightExamId == null ||
+                                    _activeHighlightExamId ==
+                                        _int(_assessments[i]['id'])),
+                            onTap: () => _onCellTapped(
+                              s,
+                              cells[i],
+                              _assessments[i],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------
+  // DESKTOP VIEW: COMPREHENSIVE TABULAR GRADEBOOK (>= 600px)
+  // ------------------------------------------------------------
+
+  Widget _table(List<Map<String, dynamic>> rows) {
+    const double leftW = 240.0;
+
+    Widget head(Widget child, double w, {Alignment align = Alignment.centerLeft}) =>
+        Container(
           width: w,
           height: _headH,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          alignment: Alignment.centerLeft,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          alignment: align,
           decoration: const BoxDecoration(
             color: _bg,
             border: Border(bottom: BorderSide(color: _line)),
@@ -1812,13 +2509,20 @@ class _SectionPageState extends State<_SectionPage> {
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: _line),
+        boxShadow: [
+          BoxShadow(
+            color: _navy.withValues(alpha: 0.03),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Fixed student column.
+          // Fixed Student Name & Student Number Column
           Container(
             width: leftW,
             decoration: const BoxDecoration(
@@ -1828,50 +2532,86 @@ class _SectionPageState extends State<_SectionPage> {
               children: [
                 head(
                   const Text(
-                    'Student',
+                    'Student Name & Number',
                     style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
                       color: _ink,
                     ),
                   ),
                   leftW - 1,
                 ),
                 for (final s in rows)
-                  Container(
-                    height: _rowH,
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    alignment: Alignment.centerLeft,
-                    decoration: const BoxDecoration(
-                      border: Border(bottom: BorderSide(color: _line)),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _studentName(s),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: _ink,
+                  Builder(
+                    builder: (context) {
+                      final sid = _int(s['id']) ?? 0;
+                      final isHighlighted = _activeHighlightStudentId == sid;
+                      final rowKey =
+                          _studentRowKeys.putIfAbsent(sid, () => GlobalKey());
+
+                      return AnimatedContainer(
+                        key: rowKey,
+                        duration: const Duration(milliseconds: 350),
+                        height: _rowH,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        alignment: Alignment.centerLeft,
+                        decoration: BoxDecoration(
+                          color: isHighlighted
+                              ? _green.withValues(alpha: 0.14)
+                              : Colors.white,
+                          border: const Border(
+                            bottom: BorderSide(color: _line),
                           ),
                         ),
-                        Text(
-                          s['student_number']?.toString() ?? '',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 11, color: _slate),
+                        child: Row(
+                          children: [
+                            if (isHighlighted)
+                              Container(
+                                width: 4,
+                                height: 34,
+                                margin: const EdgeInsets.only(right: 8),
+                                decoration: BoxDecoration(
+                                  color: _green,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                              ),
+                            Expanded(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _studentName(s),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: _ink,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    s['student_number']?.toString() ?? '',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 11.5,
+                                      color: _slate,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
               ],
             ),
           ),
-          // Assessment columns scroll sideways inside the table only.
+          // Horizontally Scrollable Columns: Section, Assessments, Overall Average
           Expanded(
             child: Scrollbar(
               controller: _hScroll,
@@ -1882,6 +2622,18 @@ class _SectionPageState extends State<_SectionPage> {
                   children: [
                     Row(
                       children: [
+                        head(
+                          const Text(
+                            'Section',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: _ink,
+                            ),
+                          ),
+                          _secColW,
+                          align: Alignment.center,
+                        ),
                         for (final a in _assessments)
                           head(
                             Column(
@@ -1894,7 +2646,7 @@ class _SectionPageState extends State<_SectionPage> {
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontSize: 12,
-                                    fontWeight: FontWeight.w500,
+                                    fontWeight: FontWeight.w700,
                                     color: _ink,
                                   ),
                                 ),
@@ -1911,25 +2663,97 @@ class _SectionPageState extends State<_SectionPage> {
                             ),
                             _colW,
                           ),
+                        head(
+                          const Text(
+                            'Overall Avg',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: _ink,
+                            ),
+                          ),
+                          _avgColW,
+                          align: Alignment.center,
+                        ),
                       ],
                     ),
                     for (final s in rows)
-                      Row(
-                        children: [
-                          for (var i = 0; i < _assessments.length; i++)
-                            _ScoreCell(
-                              width: _colW,
-                              height: _rowH,
-                              cell: _cells(s)[i],
-                              dimmed: _filter != 'all' &&
-                                  _cells(s)[i]['status'] != _filter,
-                              onTap: () => _toggleAbsent(
-                                s,
-                                _cells(s)[i],
-                                _assessments[i]['title']?.toString() ?? '',
+                      Builder(
+                        builder: (context) {
+                          final sid = _int(s['id']) ?? 0;
+                          final isRowHighlighted =
+                              _activeHighlightStudentId == sid;
+                          final avg = _studentAveragePercent(s);
+
+                          return Row(
+                            children: [
+                              // Section Column
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 350),
+                                width: _secColW,
+                                height: _rowH,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: isRowHighlighted
+                                      ? _green.withValues(alpha: 0.10)
+                                      : Colors.white,
+                                  border: const Border(
+                                    bottom: BorderSide(color: _line),
+                                  ),
+                                ),
+                                child: _Pill(
+                                  text: widget.section.name,
+                                  background: _bg,
+                                  color: _slate,
+                                ),
                               ),
-                            ),
-                        ],
+                              // Dynamic Exam Score Columns
+                              for (var i = 0; i < _assessments.length; i++)
+                                _ScoreCell(
+                                  width: _colW,
+                                  height: _rowH,
+                                  cell: _cells(s)[i],
+                                  highlighted: isRowHighlighted &&
+                                      (_activeHighlightExamId == null ||
+                                          _activeHighlightExamId ==
+                                              _int(_assessments[i]['id'])),
+                                  dimmed: _filter != 'all' &&
+                                      _cells(s)[i]['status'] != _filter,
+                                  onTap: () => _onCellTapped(
+                                    s,
+                                    _cells(s)[i],
+                                    _assessments[i],
+                                  ),
+                                ),
+                              // Overall Average Column
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 350),
+                                width: _avgColW,
+                                height: _rowH,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: isRowHighlighted
+                                      ? _green.withValues(alpha: 0.10)
+                                      : Colors.white,
+                                  border: const Border(
+                                    bottom: BorderSide(color: _line),
+                                    left: BorderSide(color: _line),
+                                  ),
+                                ),
+                                child: Text(
+                                  avg != null
+                                      ? '${avg.toStringAsFixed(1)}%'
+                                      : '—',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: avg != null ? _ink : _slate,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
                       ),
                   ],
                 ),
@@ -1942,11 +2766,96 @@ class _SectionPageState extends State<_SectionPage> {
   }
 }
 
+class _MobileScoreChip extends StatelessWidget {
+  const _MobileScoreChip({
+    required this.title,
+    required this.cell,
+    required this.highlighted,
+    required this.onTap,
+  });
+
+  final String title;
+  final Map<String, dynamic> cell;
+  final bool highlighted;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = cell['status']?.toString() ?? 'pending';
+    final score = cell['score'] is num ? cell['score'] as num : null;
+    final max = cell['max_score'] is num ? cell['max_score'] as num : null;
+
+    Color bg;
+    Color fg;
+    String valueText;
+
+    switch (status) {
+      case 'completed':
+        valueText = max == null
+            ? _formatScore(score)
+            : '${_formatScore(score)}/${_formatScore(max)}';
+        bg = _green.withValues(alpha: 0.15);
+        fg = _greenDark;
+      case 'needs_review':
+        valueText = 'Needs Review';
+        bg = _amber.withValues(alpha: 0.20);
+        fg = _amberDark;
+      case 'absent':
+        valueText = 'Absent';
+        bg = _red.withValues(alpha: 0.10);
+        fg = _red;
+      default:
+        valueText = 'Pending';
+        bg = _line;
+        fg = _slate;
+    }
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(10),
+          border: highlighted ? Border.all(color: _green, width: 1.5) : null,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: _ink,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              valueText,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: fg,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ScoreCell extends StatelessWidget {
   const _ScoreCell({
     required this.width,
     required this.height,
     required this.cell,
+    required this.highlighted,
     required this.dimmed,
     required this.onTap,
   });
@@ -1954,6 +2863,7 @@ class _ScoreCell extends StatelessWidget {
   final double width;
   final double height;
   final Map<String, dynamic> cell;
+  final bool highlighted;
   final bool dimmed;
   final VoidCallback onTap;
 
@@ -1988,30 +2898,35 @@ class _ScoreCell extends StatelessWidget {
         fg = _slate;
     }
 
-    final tappable = status == 'pending' || status == 'absent';
-
     return Opacity(
       opacity: dimmed ? 0.4 : 1,
       child: InkWell(
-        onTap: tappable ? onTap : null,
-        child: Container(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 350),
           width: width,
           height: height,
           alignment: Alignment.center,
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: _line)),
+          decoration: BoxDecoration(
+            color: highlighted
+                ? _green.withValues(alpha: 0.18)
+                : Colors.transparent,
+            border: const Border(bottom: BorderSide(color: _line)),
           ),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(
               color: bg,
               borderRadius: BorderRadius.circular(999),
+              border: highlighted
+                  ? Border.all(color: _greenDark, width: 1.5)
+                  : null,
             ),
             child: Text(
               text,
               style: TextStyle(
                 fontSize: 12,
-                fontWeight: FontWeight.w500,
+                fontWeight: FontWeight.w700,
                 color: fg,
               ),
             ),

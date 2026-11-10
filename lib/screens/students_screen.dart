@@ -45,17 +45,17 @@ class _StudentsScreenState extends State<StudentsScreen> {
   List<Map<String, dynamic>> _programs = [];
   List<Map<String, dynamic>> _sections = [];
 
-  /// Every section assigned to the logged-in teacher (built from the classes
-  /// the server returns for them), whether or not it has students yet.
+  /// Every Section + Subject combination assigned to the logged-in teacher
+  /// (built from the classes the server returns for them), whether or not it
+  /// has students yet. Each combination keeps its own, independent roster.
   List<_AssignedSection> _assigned = [];
   final Map<int, String> _classToSection = {};
   final Map<String, _AssignedSection> _sectionByKey = {};
   bool _isTeacher = false;
 
-  String? _department;
-  int? _programId;
-  int? _yearLevel;
-  String? _sectionKey;
+  /// Card (section + subject) that was opened from the Classes screen; it is
+  /// listed first so the teacher lands right on it.
+  String? _priorityKey;
   bool _initialSelectionApplied = false;
 
   final _searchController = TextEditingController();
@@ -114,8 +114,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
       final results = await Future.wait<Object?>([
         ApiService.getStudents(token),
         ApiService.getClasses(token),
-        // Programs only add department names to the filters; the list itself
-        // must still load if they are unavailable.
+        // Programs only add the program code to the card subtitle; the list
+        // itself must still load if they are unavailable.
         _tolerant(AcademicApi.programs(token)),
         SectionApi.getSections(token),
         _roleIsTeacher(token),
@@ -130,7 +130,6 @@ class _StudentsScreenState extends State<StudentsScreen> {
         _sections = results[3]! as List<Map<String, dynamic>>;
         _isTeacher = widget.isTeacher || results[4] == true;
         _rebuildAssigned();
-        _validateFilters();
         if (!_initialSelectionApplied) {
           _initialSelectionApplied = true;
           _applyInitialClass();
@@ -1182,7 +1181,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
       final populatedSections = _assigned
           .where((s) => _actualStudentCount(s) > 0)
           .map((s) => s.name)
-          .where((name) => name.isNotEmpty)
+          // This subject's roster is empty, so its own section stays
+          // importable even if the section has students in another subject.
+          .where((name) => name.isNotEmpty && name != section.name)
           .toSet()
           .toList();
 
@@ -1396,13 +1397,6 @@ class _StudentsScreenState extends State<StudentsScreen> {
   static String _sectionName(Object? value) =>
       _text(value).toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
 
-  String _departmentOf(Map<String, dynamic> program) =>
-      program['level'] == 'shs'
-      ? 'Senior High School'
-      : (_text(program['department']).isEmpty
-            ? 'College'
-            : _text(program['department']));
-
   /// "1st Semester" -> 1, "2nd Semester" -> 2, "Summer" -> null.
   static int? _semesterNumber(Object? value) {
     final text = _text(value);
@@ -1487,8 +1481,26 @@ class _StudentsScreenState extends State<StudentsScreen> {
         : year;
   }
 
-  /// Builds the teacher's assigned sections from their classes. A section
-  /// that has several subject classes is still one section.
+  ({String key, String name, String code}) _subjectInfo(
+    Map<String, dynamic> item,
+  ) {
+    final raw = item['subject'];
+    final subject = raw is Map ? raw : const {};
+    final name = _text(subject['name'] ?? item['subject_name']);
+    final code = _text(subject['code'] ?? item['subject_code']);
+    final id = _text(subject['id'] ?? item['subject_id']);
+    final key = id.isNotEmpty
+        ? 'id:$id'
+        : code.isNotEmpty
+        ? 'code:${code.toLowerCase()}'
+        : name.isNotEmpty
+        ? 'name:${name.toLowerCase()}'
+        : 'none';
+    return (key: key, name: name, code: code);
+  }
+
+  /// Builds the teacher's assigned cards from their classes: one entry per
+  /// Section + Subject combination.
   void _rebuildAssigned() {
     final byKey = <String, _AssignedSection>{};
     _classToSection.clear();
@@ -1500,10 +1512,15 @@ class _StudentsScreenState extends State<StudentsScreen> {
       if (classId == null || rawName.isEmpty) continue;
 
       final catalog = _catalogFor(item);
-      final key = catalog != null
+      final sectionKey = catalog != null
           ? 'section:${_id(catalog['id'])}'
           : 'class:${_sectionName(rawName)}|${_text(item['school_year'])}|'
                 '${_semesterNumber(item['semester'])}';
+
+      // One card per Section + Subject: the same section taught under two
+      // subjects (e.g. for irregular students) is never merged.
+      final subject = _subjectInfo(item);
+      final key = '$sectionKey|subject:${subject.key}';
 
       final existing = byKey[key];
       if (existing != null) {
@@ -1523,6 +1540,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
           semester: catalog != null
               ? _semesterNumber(catalog['semester'])
               : _semesterNumber(item['semester']),
+          subjectKey: subject.key,
+          subjectName: subject.name,
+          subjectCode: subject.code,
           classes: [item],
         );
       }
@@ -1555,91 +1575,6 @@ class _StudentsScreenState extends State<StudentsScreen> {
     return key == null ? null : _sectionByKey[key];
   }
 
-  // ----- filter choices: only from the teacher's assigned sections -----
-
-  List<String> get _departments =>
-      {
-        for (final s in _assigned)
-          if (s.program != null) _departmentOf(s.program!),
-      }.toList()..sort((a, b) {
-        if (a == b) return 0;
-        if (a == 'Senior High School') return -1;
-        if (b == 'Senior High School') return 1;
-        return a.compareTo(b);
-      });
-
-  List<Map<String, dynamic>> get _departmentPrograms {
-    final byId = <int, Map<String, dynamic>>{};
-    for (final s in _assigned) {
-      final program = s.program;
-      final id = s.programId;
-      if (program == null || id == null) continue;
-      if (_departmentOf(program) == _department) byId[id] = program;
-    }
-    return byId.values.toList()
-      ..sort((a, b) => _text(a['code']).compareTo(_text(b['code'])));
-  }
-
-  Map<String, dynamic>? get _program {
-    for (final program in _departmentPrograms) {
-      if (_id(program['id']) == _programId) return program;
-    }
-    return null;
-  }
-
-  String _yearLabel(int year) {
-    if (_program?['level'] == 'shs') return 'Grade ${year + 10}';
-    const labels = ['1st Year', '2nd Year', '3rd Year', '4th Year'];
-    return year >= 1 && year <= labels.length ? labels[year - 1] : 'Year $year';
-  }
-
-  List<int> get _years => _programId == null
-      ? <int>[]
-      : (_assigned
-            .where((s) => s.programId == _programId)
-            .map((s) => s.year)
-            .whereType<int>()
-            .toSet()
-            .toList()
-          ..sort());
-
-  /// Sections for the Section dropdown. Year Level narrows them but is never
-  /// required.
-  List<_AssignedSection> get _availableSections => _programId == null
-      ? <_AssignedSection>[]
-      : (_assigned
-            .where(
-              (s) =>
-                  s.programId == _programId &&
-                  (_yearLevel == null || s.year == _yearLevel),
-            )
-            .toList()
-          ..sort((a, b) => a.name.compareTo(b.name)));
-
-  String _sectionOption(_AssignedSection section) {
-    final duplicates = _availableSections
-        .where((s) => _sectionName(s.name) == _sectionName(section.name))
-        .length;
-    if (duplicates < 2) return section.name;
-    return [
-      section.name,
-      section.schoolYear,
-      if (section.semester != null) 'Semester ${section.semester}',
-    ].where((part) => part.isNotEmpty).join(' · ');
-  }
-
-  /// Assigned sections that pass the (optional) filters.
-  List<_AssignedSection> get _filteredSections => _assigned.where((s) {
-    if (_department != null &&
-        (s.program == null || _departmentOf(s.program!) != _department)) {
-      return false;
-    }
-    if (_programId != null && s.programId != _programId) return false;
-    if (_yearLevel != null && s.year != _yearLevel) return false;
-    if (_sectionKey != null && s.key != _sectionKey) return false;
-    return true;
-  }).toList();
-
   Map<String, dynamic>? _classFor(Map<String, dynamic> student) {
     final classId = _studentClassId(student);
     for (final item in _classes) {
@@ -1649,96 +1584,131 @@ class _StudentsScreenState extends State<StudentsScreen> {
     return embedded is Map ? Map<String, dynamic>.from(embedded) : null;
   }
 
-  /// Reset dependent filters whenever a parent choice is no longer valid.
-  void _validateFilters() {
-    if (!_departments.contains(_department)) _department = null;
-    if (!_departmentPrograms.any((p) => _id(p['id']) == _programId)) {
-      _programId = null;
-    }
-    if (!_years.contains(_yearLevel)) _yearLevel = null;
-    if (!_availableSections.any((s) => s.key == _sectionKey)) {
-      _sectionKey = null;
-    }
-  }
-
   void _applyInitialClass() {
     final classId = widget.initialClassId;
     if (classId == null) return;
     final key = _classToSection[classId];
-    final section = key == null ? null : _sectionByKey[key];
-    if (section == null) return;
-    final program = section.program;
-    if (program != null) {
-      _department = _departmentOf(program);
-      _programId = section.programId;
-      _yearLevel = section.year;
-    }
-    _sectionKey = section.key;
+    if (key != null && _sectionByKey.containsKey(key)) _priorityKey = key;
   }
 
-  /// One entry per assigned section (header + its students, or an empty
-  /// state), with one student identity per section even when the same
-  /// student appears in several subject classes.
-  List<Object> _buildEntries() {
-    final visible = _filteredSections;
-    final visibleKeys = {for (final s in visible) s.key};
-    final groups = <String, Map<String, Map<String, dynamic>>>{};
+  String _termSubtitle(_AssignedSection section) {
+    final year = section.year;
+    final shs = section.program?['level'] == 'shs';
+    return [
+      _text(section.program?['code']),
+      if (year != null)
+        (shs
+            ? 'Grade ${year + 10}'
+            : const [
+                    '1st Year',
+                    '2nd Year',
+                    '3rd Year',
+                    '4th Year',
+                  ].elementAtOrNull(year - 1) ??
+                  'Year $year'),
+      section.schoolYear,
+      if (section.semester != null) 'Semester ${section.semester}',
+    ].where((part) => part.isNotEmpty).join(' · ');
+  }
 
-    for (final student in _students) {
+  /// True when the search query matches the card itself (section, subject,
+  /// program, term), not just one of its students.
+  bool _cardMatches(_AssignedSection section) {
+    if (_query.isEmpty) return true;
+    final haystack = [
+      section.name,
+      section.subjectName,
+      section.subjectCode,
+      '${section.subjectCode} ${section.subjectName}',
+      _termSubtitle(section),
+    ].join(' ').toLowerCase();
+    return haystack.contains(_query);
+  }
+
+  /// Cards grouped under their subject. Each card (Section + Subject) holds
+  /// only the students enrolled in that subject's class for that section.
+  List<_SubjectGroup> _buildSubjectGroups() {
+    final rosters = <String, Map<String, Map<String, dynamic>>>{};
+    for (var i = 0; i < _students.length; i++) {
+      final student = _students[i];
       final classId = _studentClassId(student);
       final key = classId == null ? null : _classToSection[classId];
-      if (key == null || !visibleKeys.contains(key) || !_matches(student)) {
-        continue;
-      }
+      if (key == null) continue;
       final number = _text(student['student_number']);
       final identity = number.isNotEmpty
           ? 'number:$number'
-          : 'id:${student['id'] ?? _students.indexOf(student)}';
-      groups.putIfAbsent(key, () => {}).putIfAbsent(identity, () => student);
+          : 'id:${student['id'] ?? i}';
+      rosters.putIfAbsent(key, () => {}).putIfAbsent(identity, () => student);
     }
 
-    final entries = <Object>[];
-    for (final section in visible) {
-      final students = groups[section.key]?.values.toList() ?? [];
-      // While searching, only sections with a match are worth showing.
-      if (students.isEmpty && _query.isNotEmpty) continue;
+    // Sections per subject as assigned to the teacher, independent of search.
+    final assignedCounts = <String, int>{};
+    for (final section in _assigned) {
+      assignedCounts.update(
+        section.subjectKey,
+        (count) => count + 1,
+        ifAbsent: () => 1,
+      );
+    }
+
+    final groups = <String, _SubjectGroup>{};
+    for (final section in _assigned) {
+      final all = rosters[section.key]?.values.toList() ?? [];
+      final cardMatch = _cardMatches(section);
+      // A matching section/subject shows its whole roster; otherwise only the
+      // matching students are listed, and cards without a match are hidden.
+      final students = cardMatch ? all : all.where(_matches).toList();
+      if (!cardMatch && students.isEmpty) continue;
       students.sort((a, b) {
         final last = _text(a['last_name'])
             .toLowerCase()
             .compareTo(_text(b['last_name']).toLowerCase());
         return last != 0 ? last : _fullName(a).compareTo(_fullName(b));
       });
-      final year = section.year;
-      final shs = section.program?['level'] == 'shs';
-      entries.add(
-        _GroupHeader(
-          assignedSection: section,
-          section: section.name,
-          subject: [
-            _text(section.program?['code']),
-            if (year != null)
-              (shs
-                  ? 'Grade ${year + 10}'
-                  : const [
-                          '1st Year',
-                          '2nd Year',
-                          '3rd Year',
-                          '4th Year',
-                        ].elementAtOrNull(year - 1) ??
-                        'Year $year'),
-            section.schoolYear,
-            if (section.semester != null) 'Semester ${section.semester}',
-          ].where((part) => part.isNotEmpty).join(' · '),
-          count: _actualStudentCount(section),
+
+      final group = groups.putIfAbsent(
+        section.subjectKey,
+        () => _SubjectGroup(
+          name: section.subjectName.isNotEmpty
+              ? section.subjectName
+              : (section.subjectCode.isNotEmpty
+                    ? section.subjectCode
+                    : 'No subject'),
+          code: section.subjectCode,
+          assignedCount: assignedCounts[section.subjectKey] ?? 1,
         ),
       );
-      if (students.isEmpty) {
-        entries.add(_EmptySection(section));
-      } else {
-        entries.addAll(students);
-      }
+      group.entries.add(
+        _SectionEntry(
+          header: _GroupHeader(
+            assignedSection: section,
+            section: section.name,
+            subject: _termSubtitle(section),
+            count: _actualStudentCount(section),
+          ),
+          students: students,
+          section: section,
+        ),
+      );
     }
-    return entries;
+
+    final result = groups.values.toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    final priority = _priorityKey;
+    if (priority != null) {
+      for (final group in result) {
+        group.entries.sort(
+          (a, b) => (b.section.key == priority ? 1 : 0).compareTo(
+            a.section.key == priority ? 1 : 0,
+          ),
+        );
+      }
+      result.sort(
+        (a, b) => (b.entries.any((e) => e.section.key == priority) ? 1 : 0)
+            .compareTo(a.entries.any((e) => e.section.key == priority) ? 1 : 0),
+      );
+    }
+    return result;
   }
 
   Future<void> _showStudentEmailsDialog(_AssignedSection section) async {
@@ -2526,187 +2496,119 @@ class _StudentsScreenState extends State<StudentsScreen> {
   // BUILD
   // =========================
 
-  Widget _filter<T>({
-    required String label,
-    required T? value,
-    required String hint,
-    required List<DropdownMenuItem<T>> items,
-    required ValueChanged<T?> onChanged,
-    required String identity,
-  }) => _labeled(
-    label,
-    DropdownButtonFormField<T>(
-      key: ValueKey('$identity:$value'),
-      initialValue: value,
-      isExpanded: true,
-      dropdownColor: Colors.white,
-      style: const TextStyle(color: CmColors.navy, fontSize: 14),
-      decoration: _fieldDecoration(),
-      hint: Text(hint, overflow: TextOverflow.ellipsis),
-      items: items,
-      onChanged: _loading || _error != null ? null : onChanged,
+  Widget _searchBar() => Padding(
+    padding: const EdgeInsets.only(bottom: 20),
+    child: TextField(
+      controller: _searchController,
+      onChanged: (value) => setState(() => _query = value.trim().toLowerCase()),
+      decoration: _fieldDecoration().copyWith(
+        hintText: 'Search students...',
+        prefixIcon: const Icon(Icons.search, color: CmColors.slate),
+        suffixIcon: _query.isEmpty
+            ? null
+            : IconButton(
+                tooltip: 'Clear search',
+                icon: const Icon(Icons.close),
+                onPressed: () => setState(() {
+                  _searchController.clear();
+                  _query = '';
+                }),
+              ),
+      ),
     ),
   );
 
-  Widget _filters() => LayoutBuilder(
-    builder: (context, constraints) {
-      final columns = constraints.maxWidth >= 1050
-          ? 4
-          : constraints.maxWidth >= 600
-          ? 2
-          : 1;
-      final width = (constraints.maxWidth - 16 * (columns - 1)) / columns;
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _subjectHeading(_SubjectGroup group) {
+    final count = group.assignedCount;
+    final subtitle = [
+      if (group.code.isNotEmpty) group.code,
+      '$count section${count == 1 ? '' : 's'}',
+    ].join(' · ');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
           children: [
-            TextField(
-              controller: _searchController,
-              onChanged: (value) =>
-                  setState(() => _query = value.trim().toLowerCase()),
-              decoration: _fieldDecoration().copyWith(
-                hintText: 'Search students...',
-                prefixIcon: const Icon(Icons.search, color: CmColors.slate),
-                suffixIcon: _query.isEmpty
-                    ? null
-                    : IconButton(
-                        tooltip: 'Clear search',
-                        icon: const Icon(Icons.close),
-                        onPressed: () => setState(() {
-                          _searchController.clear();
-                          _query = '';
-                        }),
-                      ),
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: CmColors.line),
+              ),
+              child: const Icon(
+                Icons.menu_book_outlined,
+                size: 22,
+                color: CmColors.navy,
               ),
             ),
-            const SizedBox(height: 20),
-            Wrap(
-              spacing: 16,
-              runSpacing: 16,
-              children: [
-                SizedBox(
-                  width: width,
-                  child: _filter<String>(
-                    label: 'Department',
-                    value: _department,
-                    hint: 'All departments',
-                    identity: 'department',
-                    items: [
-                      const DropdownMenuItem<String>(
-                        value: null,
-                        child: Text('All departments'),
-                      ),
-                      for (final d in _departments)
-                        DropdownMenuItem(
-                          value: d,
-                          child: Text(d, overflow: TextOverflow.ellipsis),
-                        ),
-                    ],
-                    onChanged: (value) => setState(() {
-                      _department = value;
-                      _programId = null;
-                      _yearLevel = null;
-                      _sectionKey = null;
-                    }),
-                  ),
-                ),
-                if (_department != null)
-                  SizedBox(
-                    width: width,
-                    child: _filter<int>(
-                      label: 'Program / Strand',
-                      value: _programId,
-                      hint: 'All programs / strands',
-                      identity: 'program:$_department',
-                      items: [
-                        const DropdownMenuItem<int>(
-                          value: null,
-                          child: Text('All programs / strands'),
-                        ),
-                        for (final p in _departmentPrograms)
-                          DropdownMenuItem(
-                            value: _id(p['id']),
-                            child: Text(
-                              _text(p['code']),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                      onChanged: (value) => setState(() {
-                        _programId = value;
-                        _yearLevel = null;
-                        _sectionKey = null;
-                      }),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    group.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: CmColors.navy,
                     ),
                   ),
-                if (_programId != null) ...[
-                  SizedBox(
-                    width: width,
-                    child: _filter<int>(
-                      label: 'Year Level',
-                      value: _yearLevel,
-                      hint: 'All year levels',
-                      identity: 'year:$_programId',
-                      items: [
-                        const DropdownMenuItem<int>(
-                          value: null,
-                          child: Text('All year levels'),
-                        ),
-                        for (final y in _years)
-                          DropdownMenuItem(
-                            value: y,
-                            child: Text(_yearLabel(y)),
-                          ),
-                      ],
-                      onChanged: (value) => setState(() {
-                        _yearLevel = value;
-                        _sectionKey = null;
-                      }),
-                    ),
-                  ),
-                  SizedBox(
-                    width: width,
-                    child: _filter<String>(
-                      label: 'Section',
-                      value: _sectionKey,
-                      hint: 'All sections',
-                      identity: 'section:$_programId:$_yearLevel',
-                      items: [
-                        const DropdownMenuItem<String>(
-                          value: null,
-                          child: Text('All sections'),
-                        ),
-                        for (final section in _availableSections)
-                          DropdownMenuItem(
-                            value: section.key,
-                            child: Text(
-                              _sectionOption(section),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                      onChanged: (value) => setState(() {
-                        _sectionKey = value;
-                      }),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      color: CmColors.slate,
                     ),
                   ),
                 ],
-              ],
-            ),
-            if (_assigned.any((s) => s.program == null)) ...[
-              const SizedBox(height: 12),
-              Text(
-                'Not in the Sections catalog (cannot be filtered by department): '
-                '${_assigned.where((s) => s.program == null).map((s) => s.name).join(', ')}',
-                style: const TextStyle(color: CmColors.amber, fontSize: 12),
               ),
-            ],
+            ),
           ],
         ),
-      );
-    },
-  );
+        const SizedBox(height: 12),
+        const Divider(height: 1, thickness: 1, color: CmColors.line),
+      ],
+    );
+  }
+
+  Widget _subjectGroup(_SubjectGroup group, int columns) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _subjectHeading(group),
+        const SizedBox(height: 16),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            const gap = 16.0;
+            final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
+            return Wrap(
+              spacing: gap,
+              runSpacing: 24,
+              children: [
+                for (final entry in group.entries)
+                  SizedBox(
+                    key: ValueKey(entry.section.key),
+                    width: width,
+                    child: _sectionCard(
+                      entry.header,
+                      entry.students,
+                      entry.section,
+                      entry.section.key,
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
 
   Widget _emptyMessage(IconData icon, String message) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 64),
@@ -2819,9 +2721,24 @@ class _StudentsScreenState extends State<StudentsScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
-                '${header.count} student${header.count == 1 ? '' : 's'}',
-                style: const TextStyle(fontSize: 12, color: CmColors.slate),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: CmColors.line),
+                ),
+                child: Text(
+                  '${header.count} student${header.count == 1 ? '' : 's'}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: CmColors.slate,
+                  ),
+                ),
               ),
             ],
           ),
@@ -2916,8 +2833,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                 height:
                                     _maxVisibleStudents * _studentRowExtent -
                                     _studentTileSpacing,
-                                child: Scrollbar(
-                                  thumbVisibility: true,
+                                child: ScrollConfiguration(
+                                  behavior: ScrollConfiguration.of(context).copyWith(scrollbars: true),
                                   child: ListView.builder(
                                     primary: false,
                                     padding: EdgeInsets.zero,
@@ -3021,28 +2938,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
   }
 
   Widget _buildBody() {
-    final entries = _loading || _error != null ? <Object>[] : _buildEntries();
-    final groups = <Widget>[];
-    for (var i = 0; i < entries.length; i++) {
-      final entry = entries[i];
-      if (entry is! _GroupHeader) continue;
-      final students = <Map<String, dynamic>>[];
-      var section = entry.assignedSection;
-      for (
-        var j = i + 1;
-        j < entries.length && entries[j] is! _GroupHeader;
-        j++
-      ) {
-        final item = entries[j];
-        if (item is _EmptySection) {
-          section ??= item.section;
-        } else if (item is Map<String, dynamic>) {
-          students.add(item);
-        }
-      }
-      final key = section?.key ?? 'display:${entry.section}:$i';
-      groups.add(_sectionCard(entry, students, section, key));
-    }
+    final groups = _loading || _error != null
+        ? <_SubjectGroup>[]
+        : _buildSubjectGroups();
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = constraints.maxWidth >= 900 ? 2 : 1;
@@ -3050,7 +2948,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
           children: [
-            _filters(),
+            _searchBar(),
             if (_loading)
               const Padding(
                 padding: EdgeInsets.all(64),
@@ -3066,26 +2964,13 @@ class _StudentsScreenState extends State<StudentsScreen> {
                     ? (_isTeacher
                           ? 'No sections are assigned to you yet. Ask an administrator to assign your subjects and sections.'
                           : 'No sections found.')
-                    : _query.isNotEmpty
-                    ? 'No matching students.'
-                    : 'No sections match these filters.',
+                    : 'No matching students, sections, or subjects.',
               )
             else
-              LayoutBuilder(
-                builder: (context, gridConstraints) {
-                  const gap = 16.0;
-                  final width =
-                      (gridConstraints.maxWidth - gap * (columns - 1)) /
-                      columns;
-                  return Wrap(
-                    spacing: gap,
-                    runSpacing: 24,
-                    children: groups
-                        .map((card) => SizedBox(width: width, child: card))
-                        .toList(),
-                  );
-                },
-              ),
+              for (var i = 0; i < groups.length; i++) ...[
+                if (i > 0) const SizedBox(height: 32),
+                _subjectGroup(groups[i], columns),
+              ],
           ],
         );
       },
@@ -3106,14 +2991,37 @@ class _GroupHeader {
   final _AssignedSection? assignedSection;
 }
 
-/// An empty section's placeholder row (empty-state message + add button).
-class _EmptySection {
-  const _EmptySection(this.section);
+/// One section card (a Section + Subject combination) and its roster.
+class _SectionEntry {
+  const _SectionEntry({
+    required this.header,
+    required this.students,
+    required this.section,
+  });
+  final _GroupHeader header;
+  final List<Map<String, dynamic>> students;
   final _AssignedSection section;
 }
 
-/// A section assigned to the logged-in teacher. It can hold several subject
-/// classes; students belong to those classes.
+/// A subject heading and the section cards assigned under it.
+class _SubjectGroup {
+  _SubjectGroup({
+    required this.name,
+    required this.code,
+    required this.assignedCount,
+  });
+  final String name;
+  final String code;
+
+  /// Number of sections the teacher handles for this subject (not affected
+  /// by the search query).
+  final int assignedCount;
+  final List<_SectionEntry> entries = [];
+}
+
+/// A Section + Subject combination assigned to the logged-in teacher. It can
+/// hold several classes (records) of that same subject; students belong to
+/// those classes only.
 class _AssignedSection {
   _AssignedSection({
     required this.key,
@@ -3122,6 +3030,9 @@ class _AssignedSection {
     required this.year,
     required this.schoolYear,
     required this.semester,
+    required this.subjectKey,
+    required this.subjectName,
+    required this.subjectCode,
     required this.classes,
   });
 
@@ -3131,6 +3042,9 @@ class _AssignedSection {
   final int? year;
   final String schoolYear;
   final int? semester;
+  final String subjectKey;
+  final String subjectName;
+  final String subjectCode;
   final List<Map<String, dynamic>> classes;
 
   int? get programId => int.tryParse(program?['id']?.toString() ?? '');

@@ -1,24 +1,29 @@
 import '../services/omr_processor.dart';
 
 class ScoredAnswer {
+  final int? questionId;
   final int questionNumber;
   final String studentAnswer;
   final String correctAnswer;
   final double points;
   final double earnedPoints;
   final bool isCorrect;
+  final double confidence;
 
   const ScoredAnswer({
+    this.questionId,
     required this.questionNumber,
     required this.studentAnswer,
     required this.correctAnswer,
     required this.points,
     required this.earnedPoints,
     required this.isCorrect,
+    this.confidence = 1.0,
   });
 }
 
 class ScoredSection {
+  final int? sectionId;
   final String sectionName;
   final String sectionType;
   final int questionCount;
@@ -27,6 +32,7 @@ class ScoredSection {
   final List<ScoredAnswer> answers;
 
   const ScoredSection({
+    this.sectionId,
     required this.sectionName,
     required this.sectionType,
     required this.questionCount,
@@ -34,6 +40,8 @@ class ScoredSection {
     required this.earnedPoints,
     required this.answers,
   });
+
+  int get correctCount => answers.where((a) => a.isCorrect).length;
 }
 
 class ScoringResult {
@@ -73,37 +81,32 @@ class ScoringService {
     for (int sectionIndex = 0;
         sectionIndex < omrResult.sections.length;
         sectionIndex++) {
-      final OMRSectionResult omrSection =
-          omrResult.sections[sectionIndex];
+      final OMRSectionResult omrSection = omrResult.sections[sectionIndex];
 
-      final Map<String, dynamic> sectionData =
-          sectionIndex < sections.length
-              ? sections[sectionIndex]
-              : <String, dynamic>{};
+      final Map<String, dynamic> sectionData = sectionIndex < sections.length
+          ? sections[sectionIndex]
+          : <String, dynamic>{};
 
-      final dynamic rawQuestions =
-          sectionData['questions'];
+      final int? sectionId = int.tryParse(
+        sectionData['id']?.toString() ?? '',
+      );
 
-      final List<Map<String, dynamic>> questions =
-          rawQuestions is List
-              ? rawQuestions
-                  .whereType<Map>()
-                  .map(
-                    (question) =>
-                        Map<String, dynamic>.from(question),
-                  )
-                  .toList()
-              : <Map<String, dynamic>>[];
+      final dynamic rawQuestions = sectionData['questions'];
+
+      final List<Map<String, dynamic>> questions = rawQuestions is List
+          ? rawQuestions
+              .whereType<Map>()
+              .map((question) => Map<String, dynamic>.from(question))
+              .toList()
+          : <Map<String, dynamic>>[];
 
       final List<ScoredAnswer> scoredAnswers = [];
 
       double sectionTotalPoints = 0;
       double sectionEarnedPoints = 0;
 
-      for (final OMRAnswer studentAnswer
-          in omrSection.answers) {
-        final Map<String, dynamic>? question =
-            _findQuestion(
+      for (final OMRAnswer studentAnswer in omrSection.answers) {
+        final Map<String, dynamic>? question = _findQuestion(
           questions,
           studentAnswer.questionNumber,
         );
@@ -112,29 +115,49 @@ class ScoringService {
           continue;
         }
 
-        final String studentValue =
-            _normalizeAnswer(studentAnswer.answer);
-
-        final String correctValue =
-            _normalizeAnswer(
-          question['correct_answer']?.toString() ?? '',
+        final int? questionId = int.tryParse(
+          question['id']?.toString() ?? '',
         );
 
-        final double points =
-            _parsePoints(question['points']);
+        final String studentValue = _normalizeAnswer(
+          studentAnswer.answer,
+          omrSection.sectionType,
+        );
 
-        final bool answered =
-            studentValue.isNotEmpty &&
+        final String correctValue = _normalizeAnswer(
+          question['correct_answer']?.toString() ?? '',
+          omrSection.sectionType,
+        );
+
+        final Set<String> acceptableValues = <String>{
+          if (correctValue.isNotEmpty) correctValue,
+        };
+        final dynamic rawAcceptable = question['acceptable_answers'];
+        if (rawAcceptable is List) {
+          for (final item in rawAcceptable) {
+            final text = item is Map
+                ? (item['answer']?.toString() ?? '')
+                : item.toString();
+            final norm = _normalizeAnswer(text, omrSection.sectionType);
+            if (norm.isNotEmpty) acceptableValues.add(norm);
+          }
+        }
+
+        final double points = _parsePoints(
+          question['points'] ?? sectionData['default_points'],
+        );
+
+        final bool answered = studentValue.isNotEmpty &&
             studentValue != 'UNANSWERED' &&
+            studentValue != 'AMBIGUOUS' &&
+            studentValue != 'MULTIPLE' &&
             studentValue != 'OCR PENDING';
 
-        final bool isCorrect =
-            answered &&
-            correctValue.isNotEmpty &&
-            studentValue == correctValue;
+        final bool isCorrect = answered &&
+            acceptableValues.isNotEmpty &&
+            acceptableValues.contains(studentValue);
 
-        final double earned =
-            isCorrect ? points : 0;
+        final double earned = isCorrect ? points : 0;
 
         if (answered) {
           answeredQuestions++;
@@ -153,22 +176,21 @@ class ScoringService {
 
         scoredAnswers.add(
           ScoredAnswer(
-            questionNumber:
-                studentAnswer.questionNumber,
-            studentAnswer:
-                studentAnswer.answer,
-            correctAnswer:
-                question['correct_answer']?.toString() ??
-                    '',
+            questionId: questionId,
+            questionNumber: studentAnswer.questionNumber,
+            studentAnswer: studentAnswer.answer,
+            correctAnswer: question['correct_answer']?.toString() ?? '',
             points: points,
             earnedPoints: earned,
             isCorrect: isCorrect,
+            confidence: studentAnswer.confidence,
           ),
         );
       }
 
       scoredSections.add(
         ScoredSection(
+          sectionId: sectionId,
           sectionName: omrSection.sectionName,
           sectionType: omrSection.sectionType,
           questionCount: omrSection.questionCount,
@@ -180,9 +202,7 @@ class ScoringService {
     }
 
     final double percentage =
-        totalPoints > 0
-            ? (earnedPoints / totalPoints) * 100
-            : 0;
+        totalPoints > 0 ? (earnedPoints / totalPoints) * 100 : 0;
 
     return ScoringResult(
       totalQuestions: totalQuestions,
@@ -217,17 +237,17 @@ class ScoringService {
       return 1;
     }
 
-    return double.tryParse(
-          value.toString(),
-        ) ??
-        1;
+    return double.tryParse(value.toString()) ?? 1;
   }
 
-  static String _normalizeAnswer(String value) {
-    return value
-        .trim()
-        .toUpperCase()
-        .replaceAll('TRUE', 'T')
-        .replaceAll('FALSE', 'F');
+  static String _normalizeAnswer(String value, [String sectionType = '']) {
+    final trimmed = value.trim().toUpperCase();
+    if (trimmed.isEmpty) return '';
+    final type = sectionType.trim().toLowerCase();
+    if (type == 'true_false' || type == 'true or false' || type == 'tf') {
+      if (trimmed == 'TRUE' || trimmed == 'T') return 'T';
+      if (trimmed == 'FALSE' || trimmed == 'F') return 'F';
+    }
+    return trimmed.replaceAll(RegExp(r'\s+'), ' ');
   }
 }
