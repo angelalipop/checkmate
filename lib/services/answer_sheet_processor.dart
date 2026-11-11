@@ -1,7 +1,11 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import 'package:image/image.dart' as img;
+
+import 'answer_sheet_layout.dart';
 
 class RegistrationPoint {
   final double x;
@@ -27,23 +31,25 @@ class AnswerSheetProcessor {
   // GENERATED SHEET GEOMETRY
   // ---------------------------------------------------------------------------
 
-  static const double _pageWidth = 397.0;
-  static const double _pageHeight = 559.0;
+  static const double _pageWidth = AnswerSheetLayout.sheetWidth;
+  static const double _pageHeight = AnswerSheetLayout.sheetHeight;
 
   /*
-   * PDF registration markers:
+   * PDF registration markers (synced directly with AnswerSheetLayout):
    *
-   * marker inset = 2
-   * marker size  = 10
+   * marker inset = AnswerSheetLayout.registrationMarkerInset (3.0)
+   * marker size  = AnswerSheetLayout.registrationMarkerSize  (16.0)
    *
-   * marker center = 2 + 5 = 7
+   * marker center = 3.0 + (16.0 / 2.0) = 11.0
    *
-   * TL = (7, 7)
-   * TR = (390, 7)
-   * BR = (390, 552)
-   * BL = (7, 552)
+   * TL = (11, 11)
+   * TR = (386, 11)
+   * BR = (386, 548)
+   * BL = (11, 548)
    */
-  static const double _markerCenterInset = 7.0;
+  static const double _markerCenterInset =
+      AnswerSheetLayout.registrationMarkerInset +
+      (AnswerSheetLayout.registrationMarkerSize / 2.0);
 
   // Normalized image size used by the OMR processor.
   static const int _correctedWidth = 1500;
@@ -70,9 +76,24 @@ class AnswerSheetProcessor {
 
     // Respect EXIF / phone orientation.
     final img.Image image = img.bakeOrientation(decoded);
+    debugPrint(
+      '[CheckMate] Original image: ${decoded.width}x${decoded.height}',
+    );
 
+    debugPrint(
+      '[CheckMate] Orientation-corrected image: '
+      '${image.width}x${image.height}',
+    );
     final List<RegistrationPoint> markers = _detectRegistrationMarkers(image);
+    debugPrint('[CheckMate] Detected markers: ${markers.length}');
 
+    for (int i = 0; i < markers.length; i++) {
+      debugPrint(
+        '[CheckMate] Marker $i: '
+        'x=${markers[i].x.toStringAsFixed(2)}, '
+        'y=${markers[i].y.toStringAsFixed(2)}',
+      );
+    }
     if (markers.length != 4) {
       throw Exception(
         'Four registration markers could not be detected. '
@@ -310,7 +331,30 @@ class AnswerSheetProcessor {
     candidates.sort((_MarkerCandidate a, _MarkerCandidate b) {
       return a.individualScore.compareTo(b.individualScore);
     });
+    debugPrint('\n========== MARKER CANDIDATES ==========');
+    debugPrint(
+      'Corner region: '
+      '(${region.cornerX.toStringAsFixed(1)}, '
+      '${region.cornerY.toStringAsFixed(1)})',
+    );
 
+    for (int i = 0; i < math.min(candidates.length, 12); i++) {
+      final candidate = candidates[i];
+
+      debugPrint(
+        'Candidate ${i + 1}: '
+        'center=(${candidate.centerX.toStringAsFixed(1)}, '
+        '${candidate.centerY.toStringAsFixed(1)}), '
+        'size=${candidate.width.toStringAsFixed(1)}'
+        'x${candidate.height.toStringAsFixed(1)}, '
+        'area=${candidate.area}, '
+        'fill=${candidate.fillRatio.toStringAsFixed(2)}, '
+        'distance=${candidate.distanceToCorner.toStringAsFixed(1)}, '
+        'score=${candidate.individualScore.toStringAsFixed(1)}',
+      );
+    }
+
+    debugPrint('=======================================\n');
     const int maxCandidates = 12;
 
     if (candidates.length > maxCandidates) {
@@ -356,7 +400,19 @@ class AnswerSheetProcessor {
         }
       }
     }
+    if (best != null) {
+      debugPrint('\n========== SELECTED MARKERS ==========');
+      debugPrint('Score: ${best.score}');
 
+      debugPrint('TL: (${best.topLeft.centerX}, ${best.topLeft.centerY})');
+      debugPrint('TR: (${best.topRight.centerX}, ${best.topRight.centerY})');
+      debugPrint('BR: (${best.bottomRight.centerX}, ${best.bottomRight.centerY})');
+      debugPrint('BL: (${best.bottomLeft.centerX}, ${best.bottomLeft.centerY})');
+
+      debugPrint('======================================\n');
+    } else {
+      debugPrint('ERROR: No plausible four-marker combination found.');
+    }
     return best;
   }
 
@@ -647,10 +703,10 @@ class AnswerSheetProcessor {
     /*
      * The marker centers are known points in the generated 397 x 559 page:
      *
-     * TL = (7, 7)
-     * TR = (390, 7)
-     * BR = (390, 552)
-     * BL = (7, 552)
+     * TL = (11, 11)
+     * TR = (386, 11)
+     * BR = (386, 548)
+     * BL = (11, 548)
      *
      * Solve the projective transform from LOGICAL PAGE coordinates to the
      * photographed marker coordinates. Then use the inverse mapping for every
@@ -884,41 +940,6 @@ class AnswerSheetProcessor {
       matrix[6][8],
       matrix[7][8],
       1.0,
-    ];
-  }
-
-  static List<double> _invertHomography(List<double> h) {
-    final double a = h[0];
-    final double b = h[1];
-    final double c = h[2];
-
-    final double d = h[3];
-    final double e = h[4];
-    final double f = h[5];
-
-    final double g = h[6];
-    final double k = h[7];
-    final double l = h[8];
-
-    final double determinant =
-        a * (e * l - f * k) - b * (d * l - f * g) + c * (d * k - e * g);
-
-    if (determinant.abs() < 1e-12) {
-      throw Exception('Perspective transform cannot be inverted.');
-    }
-
-    return <double>[
-      (e * l - f * k) / determinant,
-      (c * k - b * l) / determinant,
-      (b * f - c * e) / determinant,
-
-      (f * g - d * l) / determinant,
-      (a * l - c * g) / determinant,
-      (c * d - a * f) / determinant,
-
-      (d * k - e * g) / determinant,
-      (b * g - a * k) / determinant,
-      (a * e - b * d) / determinant,
     ];
   }
 

@@ -10,14 +10,6 @@ import '../services/curriculum_file_parser.dart';
 import '../services/curriculum_template.dart';
 import 'login_screen.dart' show CmColors;
 
-// =============================================================
-// Academic Management — Curricula and Subjects.
-// Built on the same patterns as the Teachers screen (navy/slate palette,
-// rounded fields, dialogs, empty states). Every action calls the Dart Frog
-// server, which reads and writes PostgreSQL. Nothing is mocked or stored
-// in the browser. Teacher assignment and student import are not here.
-// =============================================================
-
 const Color _activeGreen = Color(0xFF2F8F72);
 const Color _dangerRed = Color(0xFFDC2626);
 const Color _draftBlue = Color(0xFF2F63B8);

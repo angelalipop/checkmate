@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:qr/qr.dart';
@@ -7,31 +9,7 @@ import 'package:qr/qr.dart';
 import 'answer_sheet_layout.dart';
 
 class AnswerSheetPdfService {
-  /*
-    --------------------------------------------------------------------------
-    CHECKMATE DYNAMIC ANSWER SHEET (TWO A5 SHEETS PER A4 LANDSCAPE PAGE)
-    --------------------------------------------------------------------------
-
-    Main goals:
-
-    1. Use as little paper as reasonably possible.
-    2. Keep OMR bubbles at a fixed physical size.
-    3. Allow MC and True/False to use multiple columns.
-    4. Keep Identification as wider OCR writing boxes.
-    5. Dynamically create additional A5 sheets only when necessary.
-    6. Put two independent A5 portrait sheets side by side on one A4 landscape
-       page for printing, with a subtle vertical center cutting guide so the
-       printed A4 page can be cut vertically into two separate A5 sheets.
-    7. Automatically populate Student Name, Student Number, and Section for all
-       assigned students of the assessment (across single or multiple sections).
-    8. Give every student sheet a unique QR/sheet identifier.
-    9. Preserve the exact 397 x 559 logical A5 coordinate system and four fixed
-       corner registration markers so separated A5 sheets work seamlessly with
-       the existing OMR and Azure OCR pipelines.
-
-    --------------------------------------------------------------------------
-  */
-
+  
   // --------------------------------------------------------------------------
   // A5-STYLE SHEET DIMENSIONS
   // --------------------------------------------------------------------------
@@ -55,6 +33,7 @@ class AnswerSheetPdfService {
   // OMR SETTINGS
   // --------------------------------------------------------------------------
 
+  static const double _omrHeaderHeight = AnswerSheetLayout.omrHeaderHeight;
   static const double _bubbleSize = AnswerSheetLayout.bubbleSize;
 
   static const double _answerOptionWidth = AnswerSheetLayout.answerOptionWidth;
@@ -147,12 +126,14 @@ class AnswerSheetPdfService {
       - Page 2: Student 3 on the left, Student 4 on the right.
       - Odd final student: positioned on the left, right side left blank.
     */
-    final individualSheets = <_StudentSheetItem>[];
+    final pages = <List<_StudentSheetItem?>>[];
     var nextSheetNumber = 1;
 
     if (resolvedStudents.isEmpty) {
+      final templates = <_StudentSheetItem>[];
+
       for (final layout in sheetLayouts) {
-        individualSheets.add(
+        templates.add(
           _StudentSheetItem(
             layout: layout,
             sheetNumber: nextSheetNumber++,
@@ -162,24 +143,67 @@ class AnswerSheetPdfService {
           ),
         );
       }
-    } else {
+
+      for (int i = 0; i < templates.length; i += 2) {
+        pages.add([
+          templates[i],
+          i + 1 < templates.length ? templates[i + 1] : null,
+        ]);
+      }
+    } else if (sheetLayouts.length == 1) {
+      final studentsSheets = <_StudentSheetItem>[];
+
       for (final student in resolvedStudents) {
-        final studentInfo = _extractStudentFields(
+        final info = _extractStudentFields(
           student: student,
           fallbackSection: defaultSection,
         );
 
+        studentsSheets.add(
+          _StudentSheetItem(
+            layout: sheetLayouts.first,
+            sheetNumber: nextSheetNumber++,
+            studentName: info.fullName,
+            studentNumber: info.studentNumber,
+            sectionName: info.section,
+            studentId: info.studentId,
+          ),
+        );
+      }
+
+      for (int i = 0; i < studentsSheets.length; i += 2) {
+        pages.add([
+          studentsSheets[i],
+          i + 1 < studentsSheets.length ? studentsSheets[i + 1] : null,
+        ]);
+      }
+    } else {
+      for (final student in resolvedStudents) {
+        final info = _extractStudentFields(
+          student: student,
+          fallbackSection: defaultSection,
+        );
+
+        final studentSheets = <_StudentSheetItem>[];
+
         for (final layout in sheetLayouts) {
-          individualSheets.add(
+          studentSheets.add(
             _StudentSheetItem(
               layout: layout,
               sheetNumber: nextSheetNumber++,
-              studentName: studentInfo.fullName,
-              studentNumber: studentInfo.studentNumber,
-              sectionName: studentInfo.section,
-              studentId: studentInfo.studentId,
+              studentName: info.fullName,
+              studentNumber: info.studentNumber,
+              sectionName: info.section,
+              studentId: info.studentId,
             ),
           );
+        }
+
+        for (int i = 0; i < studentSheets.length; i += 2) {
+          pages.add([
+            studentSheets[i],
+            i + 1 < studentSheets.length ? studentSheets[i + 1] : null,
+          ]);
         }
       }
     }
@@ -194,11 +218,9 @@ class AnswerSheetPdfService {
       (420.945 pt x 595.28 pt), and centers the exact 397.0 x 559.0 pt
       answer sheet template without scaling.
     */
-    for (int index = 0; index < individualSheets.length; index += 2) {
-      final leftItem = individualSheets[index];
-      final rightItem = index + 1 < individualSheets.length
-          ? individualSheets[index + 1]
-          : null;
+    for (final pageItems in pages) {
+      final leftItem = pageItems[0];
+      final rightItem = pageItems[1];
 
       pdf.addPage(
         pw.Page(
@@ -218,7 +240,7 @@ class AnswerSheetPdfService {
                           exam: exam,
                           sections: activeSections,
                           questions: questions,
-                          item: leftItem,
+                          item: leftItem!,
                         ),
                       ),
                     ),
@@ -423,6 +445,19 @@ class AnswerSheetPdfService {
         questionCount: sectionQuestions.length,
       );
 
+      debugPrint('--- ANSWER SHEET PAGINATION DEBUG ---');
+      debugPrint('Section: ${section['name']}');
+      debugPrint('Type: $type');
+      debugPrint('Questions: ${sectionQuestions.length}');
+      debugPrint('Section height: $sectionHeight');
+      debugPrint('Used height before section: $usedHeight');
+      debugPrint('Available height: ${_usableSheetHeight()}');
+      debugPrint('Total if added: ${usedHeight + sectionHeight}');
+      debugPrint(
+        'Will move to next sheet: '
+        '${currentSheet.isNotEmpty && usedHeight + sectionHeight > _usableSheetHeight()}',
+      );
+
       if (currentSheet.isNotEmpty &&
           usedHeight + sectionHeight > _usableSheetHeight()) {
         layouts.add(currentSheet);
@@ -449,11 +484,11 @@ class AnswerSheetPdfService {
   // --------------------------------------------------------------------------
 
   static double _headerAndStudentInfoHeight() {
-    return 97;
+    return AnswerSheetLayout.firstSectionY;
   }
 
   static double _usableSheetHeight() {
-    return _sheetHeight - (_sheetPadding * 2) - 18;
+    return AnswerSheetLayout.sheetHeight - AnswerSheetLayout.sheetPadding - 18;
   }
 
   // --------------------------------------------------------------------------
@@ -853,12 +888,37 @@ class AnswerSheetPdfService {
               width: columnWidth,
               child: pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: columnQuestions
-                    .map(
-                      (question) =>
-                          _buildOmrRow(question: question, labels: labels),
-                    )
-                    .toList(),
+                children: [
+                  // One header row per OMR column.
+                  pw.SizedBox(
+                    height: _omrHeaderHeight,
+                    child: pw.Row(
+                      children: [
+                        pw.SizedBox(width: _questionNumberWidth),
+                        ...labels.map(
+                          (label) => pw.SizedBox(
+                            width: _answerOptionWidth,
+                            child: pw.Center(
+                              child: pw.Text(
+                                label,
+                                style: pw.TextStyle(
+                                  fontSize: 6,
+                                  fontWeight: pw.FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Actual question rows.
+                  ...columnQuestions.map(
+                    (question) =>
+                        _buildOmrRow(question: question, labels: labels),
+                  ),
+                ],
               ),
             );
           }).toList(),
@@ -917,23 +977,13 @@ class AnswerSheetPdfService {
       width: _answerOptionWidth,
       child: pw.Align(
         alignment: pw.Alignment.topCenter,
-        child: pw.Column(
-          mainAxisSize: pw.MainAxisSize.min,
-          crossAxisAlignment: pw.CrossAxisAlignment.center,
-          children: [
-            pw.Container(
-              width: _bubbleSize,
-              height: _bubbleSize,
-              decoration: pw.BoxDecoration(
-                shape: pw.BoxShape.circle,
-                border: pw.Border.all(width: 1),
-              ),
-            ),
-
-            pw.SizedBox(height: 0.5),
-
-            pw.Text(label, style: const pw.TextStyle(fontSize: 5)),
-          ],
+        child: pw.Container(
+          width: _bubbleSize,
+          height: _bubbleSize,
+          decoration: pw.BoxDecoration(
+            shape: pw.BoxShape.circle,
+            border: pw.Border.all(width: 1),
+          ),
         ),
       ),
     );
