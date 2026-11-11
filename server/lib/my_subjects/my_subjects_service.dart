@@ -1,6 +1,7 @@
 import 'package:postgres/postgres.dart';
 
 import 'package:server/database.dart';
+import 'package:server/my_subjects/grading_calculator.dart';
 import 'package:server/exams/exam_validator.dart';
 
 /// An error whose [message] is safe to show to the teacher.
@@ -22,6 +23,8 @@ class MySubjectsService {
     'quiz',
     'short_quiz',
     'long_quiz',
+    'performance_task',
+    'laboratory',
     'prelim',
     'midterm',
     'prefinal',
@@ -207,7 +210,7 @@ class MySubjectsService {
                   FROM ea ea2
                   JOIN classes c2 ON c2.id = ea2.class_id
                  WHERE ea2.exam_id = e.id
-                   AND c2.teacher_id = @teacher_id) AS sections
+                   AND c2.teacher_id = @teacher_id) AS sections, e.grading_period, e.creation_mode, e.manual_max_score
         FROM exams e
         JOIN ea ON ea.exam_id = e.id
         WHERE ea.class_id = ANY(@ids)
@@ -234,6 +237,9 @@ class MySubjectsService {
         'question_count': r[5],
         'version': r[6],
         'sections': sections,
+        'grading_period': r[8],
+        'creation_mode': r[9],
+        'manual_max_score': _num(r[10]),
       };
     }).toList();
   }
@@ -249,6 +255,9 @@ class MySubjectsService {
     required String assessmentType,
     String? description,
     String? instructions,
+    String? gradingPeriod,
+    String creationMode = 'builder',
+    num? maximumScore,
   }) async {
     final cleanTitle = title.trim();
     final rawType = assessmentType.trim().toLowerCase();
@@ -264,6 +273,14 @@ class MySubjectsService {
       throw MySubjectsException('Choose a valid assessment type.');
     }
     final type = ExamValidator.toDatabaseAssessmentType(rawType);
+    String? period;
+    try { period = GradingCalculator.validatePeriod(gradingPeriod, type); }
+    on ArgumentError catch(e) { throw MySubjectsException(e.message.toString()); }
+    if (!['builder','manual'].contains(creationMode)) throw MySubjectsException('Invalid creation mode.');
+    final manual = creationMode == 'manual';
+    if (manual && (!['performance_task','laboratory'].contains(type) || period == null || maximumScore == null || !maximumScore.isFinite || maximumScore <= 0 || maximumScore > 9999999999.99 || (maximumScore * 100 - (maximumScore * 100).round()).abs() > 0.000001)) {
+      throw MySubjectsException('Manual PT/LAB columns need a period and positive maximum score with at most two decimal places.');
+    }
     if (ids.isEmpty) {
       throw MySubjectsException('Choose at least one section.');
     }
@@ -286,11 +303,11 @@ class MySubjectsService {
         Sql.named('''
           INSERT INTO exams (
             class_id, title, description, instructions,
-            status, assessment_type, version
+            status, assessment_type, version, grading_period, creation_mode, manual_max_score
           )
           VALUES (
             @class_id, @title, @description, @instructions,
-            'draft', @type, 1
+            'draft', @type, 1, @period, @mode, @maximum
           )
           RETURNING id, class_id, title, status, assessment_type, version
         '''),
@@ -300,6 +317,9 @@ class MySubjectsService {
           'description': clean(description),
           'instructions': clean(instructions),
           'type': type,
+          'period': period,
+          'mode': creationMode,
+          'maximum': manual ? maximumScore : null,
         },
       );
 
@@ -330,6 +350,9 @@ class MySubjectsService {
         'assessment_type': row[4],
         'version': row[5],
         'class_ids': ids,
+        'grading_period': period,
+        'creation_mode': creationMode,
+        'manual_max_score': manual ? maximumScore : null,
       };
     });
   }
@@ -351,6 +374,8 @@ class MySubjectsService {
       throw MySubjectsException('Too many sections selected.');
     }
 
+    final modeCheck = await Database.pool.execute(Sql.named('SELECT creation_mode FROM exams WHERE id = @id'), parameters: {'id': examId});
+    if (modeCheck.isNotEmpty && modeCheck.first[0] == 'manual') throw MySubjectsException('Manual-only assessments do not use publishing.');
     final targetSubjects = await _ownedClassSubjects(teacherId, ids);
     if (targetSubjects.toSet().length != 1) {
       throw MySubjectsException(
@@ -505,20 +530,13 @@ class MySubjectsService {
       Sql.named('''
         $_assignedCte
         SELECT e.id, e.title, e.assessment_type, MAX(ea.exam_version) AS exam_version,
-               (SELECT COALESCE(SUM(q.points), 0)
+               COALESCE(e.manual_max_score, (SELECT COALESCE(SUM(q.points), 0)
                   FROM questions q
                   JOIN exam_sections es ON es.id = q.section_id
-                 WHERE es.exam_id = e.id) AS total_points
+                 WHERE es.exam_id = e.id)) AS total_points, e.grading_period, e.creation_mode, e.status
         FROM ea
         JOIN exams e ON e.id = ea.exam_id
         WHERE ea.class_id = @class_id
-          AND (
-            e.status = 'published'
-            OR EXISTS (
-              SELECT 1 FROM exam_attempts att
-              WHERE att.exam_id = e.id
-            )
-          )
         GROUP BY e.id, e.title, e.assessment_type, e.created_at
         ORDER BY e.created_at, e.id
       '''),
@@ -532,9 +550,32 @@ class MySubjectsService {
         'assessment_type': r[2],
         'version': r[3] ?? 1,
         'total_points': _num(r[4]) ?? 0,
+        'grading_period': r[5],
+        'creation_mode': r[6],
+        'status': r[7],
+        'grading_category': GradingCalculator.category(r[2]),
+        'grade_eligible': r[6] == 'manual' || r[7] == 'published',
       };
     }).toList();
 
+    final counters = <String,int>{};
+    for (final a in assessments) {
+      final prefix = switch(a['assessment_type']) {
+        'quiz' || 'short_quiz' || 'long_quiz' => 'Q',
+        'performance_task' => 'PT', 'laboratory' => 'LAB',
+        'prelim' || 'midterm' || 'prefinal' || 'pre_finals' || 'final' || 'finals' => 'EX', _ => 'U',
+      };
+      final key = '${a['grading_period']}|$prefix';
+      counters[key] = (counters[key] ?? 0) + 1;
+      a['column_label'] = '$prefix${counters[key]}';
+      a['requires_classification'] = a['grading_period'] == null || a['grading_category'] == null;
+    }
+    final preferences = await gradingPreferences(teacherId, classId);
+    final manualRows = await Database.pool.execute(Sql.named('''
+      SELECT m.exam_id, m.student_id, m.score FROM assessment_manual_scores m
+      JOIN students st ON st.id = m.student_id WHERE st.class_id = @class_id
+    '''), parameters: {'class_id':classId});
+    final manualScores = {for (final r in manualRows) '${r[1]}|${r[0]}': _num(r[2])};
     final examIds = assessments.map((a) => a['id']! as int).toList();
 
     // Latest attempt per (student, exam_id) for this class using the actual
@@ -631,7 +672,10 @@ class MySubjectsService {
         var maxScore = a['total_points'] as num?;
         int? attemptId;
 
-        if (attempt != null) {
+        if (a['creation_mode'] == 'manual') {
+          score = manualScores[key];
+          status = score == null ? 'pending' : 'completed';
+        } else if (attempt != null) {
           attemptId = attempt['attempt_id'] as int?;
           final attStatus = attempt['status'];
           final rev = attempt['review_count'] as int;
@@ -678,7 +722,8 @@ class MySubjectsService {
         'first_name': s[2],
         'last_name': s[3],
         'section': sectionName,
-        'average_percentage': averagePercentage,
+        'average_percentage': averagePercentage, // Retained for legacy clients only.
+        'grading': GradingCalculator.student(assessments, cells, preferences),
         'cells': cells,
       };
     }).toList();
@@ -686,6 +731,7 @@ class MySubjectsService {
     return {
       'assessments': assessments,
       'students': students,
+      'preferences': preferences,
     };
   }
 
@@ -702,6 +748,15 @@ class MySubjectsService {
   }) async {
     await _ownedClassSubjects(teacherId, [classId]);
 
+    final target = await _scoreTarget(teacherId, classId, examId, studentId);
+    if (target['creation_mode'] == 'manual') {
+      await saveManualScore(teacherId:teacherId, classId:classId, examId:examId, studentId:studentId, score:null);
+      return;
+    }
+    if (attemptId != null) {
+      final owned = await Database.pool.execute(Sql.named("SELECT a.id FROM exam_attempts a JOIN students st ON st.id=a.student_id JOIN students target ON target.id=@student_id WHERE a.id=@attempt_id AND a.exam_id=@exam_id AND LOWER(BTRIM(st.student_number))=LOWER(BTRIM(target.student_number))"), parameters:{'student_id':studentId,'attempt_id':attemptId,'exam_id':examId});
+      if (owned.isEmpty) throw MySubjectsException('Score not found.',statusCode:404);
+    }
     await Database.pool.runTx((tx) async {
       if (attemptId != null && attemptId > 0) {
         await tx.execute(
@@ -801,4 +856,125 @@ class MySubjectsService {
       );
     }
   }
+  static Future<Map<String, dynamic>> _scoreTarget(
+    int teacherId,
+    int classId,
+    int examId,
+    int studentId,
+  ) async {
+    await _ownedClassSubjects(teacherId, [classId]);
+    final rows = await Database.pool.execute(
+      Sql.named('''
+      SELECT e.creation_mode, e.manual_max_score
+      FROM exams e JOIN classes owner ON owner.id=e.class_id
+      WHERE e.id=@exam_id AND owner.teacher_id=@teacher_id
+       AND EXISTS (SELECT 1 FROM students WHERE id=@student_id AND class_id=@class_id)
+       AND (e.class_id=@class_id OR EXISTS (SELECT 1 FROM exam_class_assignments WHERE exam_id=e.id AND class_id=@class_id))
+    '''),
+      parameters: {
+        'exam_id': examId,
+        'student_id': studentId,
+        'class_id': classId,
+        'teacher_id': teacherId,
+      },
+    );
+    if (rows.isEmpty)
+      throw MySubjectsException('Record not found.', statusCode: 404);
+    return {'creation_mode': rows.first[0], 'maximum': _num(rows.first[1])};
+  }
+
+  static Future<void> saveManualScore({
+    required int teacherId,
+    required int classId,
+    required int examId,
+    required int studentId,
+    required num? score,
+  }) async {
+    final target = await _scoreTarget(teacherId, classId, examId, studentId);
+    if (target['creation_mode'] != 'manual')
+      throw MySubjectsException(
+        'Use the existing answer review workflow for scanned assessments.',
+      );
+    final max = target['maximum'] as num;
+    if (score != null &&
+        (!score.isFinite ||
+            score < 0 ||
+            score > max ||
+            (score * 100 - (score * 100).round()).abs() > 0.000001))
+      throw MySubjectsException(
+        'Score must be between 0 and $max with at most two decimal places.',
+      );
+    if (score == null) {
+      await Database.pool.execute(
+        Sql.named(
+          'DELETE FROM assessment_manual_scores WHERE exam_id=@exam_id AND student_id=@student_id',
+        ),
+        parameters: {'exam_id': examId, 'student_id': studentId},
+      );
+    } else {
+      await Database.pool.execute(
+        Sql.named('''
+        INSERT INTO assessment_manual_scores(exam_id,student_id,score,updated_by)
+        VALUES(@exam_id,@student_id,@score,@teacher_id)
+        ON CONFLICT(exam_id,student_id) DO UPDATE SET score=EXCLUDED.score,updated_by=EXCLUDED.updated_by,updated_at=NOW()
+      '''),
+        parameters: {
+          'exam_id': examId,
+          'student_id': studentId,
+          'score': score,
+          'teacher_id': teacherId,
+        },
+      );
+      await setAbsence(
+        teacherId: teacherId,
+        classId: classId,
+        examId: examId,
+        studentId: studentId,
+        absent: false,
+      );
+    }
+  }
+
+  static Future<Map<String, num>> gradingPreferences(
+    int teacherId,
+    int classId,
+  ) async {
+    await _ownedClassSubjects(teacherId, [classId]);
+    final rows = await Database.pool.execute(
+      Sql.named(
+        'SELECT pt,quiz,exam,prelims,midterm,pre_finals,finals FROM class_grading_preferences WHERE class_id=@id',
+      ),
+      parameters: {'id': classId},
+    );
+    if (rows.isEmpty) return Map<String, num>.of(GradingCalculator.defaults);
+    final keys = GradingCalculator.defaults.keys.toList();
+    return {
+      for (var i = 0; i < keys.length; i++) keys[i]: _num(rows.first[i])!,
+    };
+  }
+
+  static Future<Map<String, num>> saveGradingPreferences(
+    int teacherId,
+    int classId,
+    Map<String, dynamic> input,
+  ) async {
+    await _ownedClassSubjects(teacherId, [classId]);
+    final Map<String, num> weights;
+    try {
+      weights = GradingCalculator.validatePreferences(input);
+    } on ArgumentError catch (e) {
+      throw MySubjectsException(e.message.toString());
+    }
+    await Database.pool.execute(
+      Sql.named('''
+      INSERT INTO class_grading_preferences(class_id,pt,quiz,exam,prelims,midterm,pre_finals,finals,updated_by)
+      VALUES(@id,@pt,@quiz,@exam,@prelims,@midterm,@pre_finals,@finals,@teacher)
+      ON CONFLICT(class_id) DO UPDATE SET pt=EXCLUDED.pt,quiz=EXCLUDED.quiz,exam=EXCLUDED.exam,
+       prelims=EXCLUDED.prelims,midterm=EXCLUDED.midterm,pre_finals=EXCLUDED.pre_finals,finals=EXCLUDED.finals,updated_by=EXCLUDED.updated_by,updated_at=NOW()
+    '''),
+      parameters: {...weights, 'id': classId, 'teacher': teacherId},
+    );
+    return weights;
+  }
+
 }

@@ -135,6 +135,7 @@ Future<Response> _patch(RequestContext context, int examId) async {
       classIds: classIds,
       assessmentType: decoded['assessment_type']?.toString(),
       status: decoded['status']?.toString(),
+      gradingPeriod: decoded['grading_period']?.toString(),
     );
 
     if (exam == null) {

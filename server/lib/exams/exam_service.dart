@@ -1,6 +1,7 @@
 import 'package:postgres/postgres.dart';
 
 import 'package:server/database.dart';
+import 'package:server/my_subjects/grading_calculator.dart';
 import 'package:server/exams/exam_validator.dart';
 
 /// An error whose [message] and optional [validation] details are safe to show
@@ -29,6 +30,8 @@ class ExamService {
     'quiz',
     'short_quiz',
     'long_quiz',
+    'performance_task',
+    'laboratory',
     'prelim',
     'midterm',
     'prefinal',
@@ -53,6 +56,8 @@ class ExamService {
               'quiz',
               'short_quiz',
               'long_quiz',
+              'performance_task',
+              'laboratory',
               'prelim',
               'midterm',
               'prefinal',
@@ -178,7 +183,7 @@ class ExamService {
             ) q2
             JOIN classes c2 ON c2.id = q2.cid
           ) AS assigned_sections,
-          s.id AS subject_id
+          s.id AS subject_id, e.grading_period, e.creation_mode, e.manual_max_score
         FROM exams e
         JOIN classes c ON c.id = e.class_id
         JOIN subjects s ON s.id = c.subject_id
@@ -215,6 +220,9 @@ class ExamService {
         'created_at': row[6].toString(),
         'updated_at': row[7].toString(),
         'assessment_type': row[11],
+        'grading_period': row[21],
+        'creation_mode': row[22],
+        'manual_max_score': row[23] == null ? null : num.parse('${row[23]}'),
         'version': row[12],
         // Every section (class) this exam is given to.
         'class_ids': _parseIds(row[13]),
@@ -251,6 +259,7 @@ class ExamService {
     String? instructions,
     String? status,
     String? assessmentType,
+    String? gradingPeriod,
   }) async {
     await _ensureAssessmentTypeConstraint();
 
@@ -276,6 +285,10 @@ class ExamService {
       }
       cleanType = ExamValidator.toDatabaseAssessmentType(assessmentType);
     }
+
+    String? period;
+    try { period = GradingCalculator.validatePeriod(gradingPeriod, cleanType); }
+    on ArgumentError catch (e) { throw ExamValidationException(e.message.toString()); }
 
     if (normalizedStatus == 'published') {
       final validation = ExamValidator.validate(
@@ -306,7 +319,7 @@ class ExamService {
           description,
           instructions,
           status,
-          assessment_type
+          assessment_type, grading_period
         )
         VALUES (
           @class_id,
@@ -314,7 +327,7 @@ class ExamService {
           @description,
           @instructions,
           COALESCE(@status, 'draft'),
-          @assessment_type
+          @assessment_type, @grading_period
         )
         RETURNING
           id,
@@ -337,6 +350,7 @@ class ExamService {
             instructions?.trim().isEmpty ?? false ? null : instructions?.trim(),
         'status': normalizedStatus,
         'assessment_type': cleanType,
+        'grading_period': period,
       },
     );
 
@@ -374,6 +388,8 @@ class ExamService {
       'assessment_type': row[8],
       'version': row[9],
       'class_ids': targetClassIds,
+      'grading_period': period,
+      'creation_mode': 'builder',
     };
   }
 
@@ -394,6 +410,7 @@ class ExamService {
     List<int>? classIds,
     String? assessmentType,
     String? status,
+    String? gradingPeriod,
   }) async {
     await _ensureAssessmentTypeConstraint();
 
@@ -441,7 +458,7 @@ class ExamService {
                  EXISTS (
                    SELECT 1 FROM exam_attempts a WHERE a.exam_id = e.id
                  ),
-                 e.assessment_type
+                 e.assessment_type, e.grading_period, e.creation_mode
           FROM exams e
           JOIN classes c ON c.id = e.class_id
           WHERE e.id = @id
@@ -544,7 +561,11 @@ class ExamService {
         finalIds = requested;
       }
 
+      if (cur[7] == 'manual') throw ExamValidationException('Edit manual scores from the scorebook. Manual assessments cannot enter publishing.');
       final effectiveType = type ?? currentAssessmentType;
+      String? period;
+      try { period = GradingCalculator.validatePeriod(gradingPeriod ?? cur[6]?.toString(), effectiveType); }
+      on ArgumentError catch(e) { throw ExamValidationException(e.message.toString()); }
       final effectiveStatus = requestedStatus ?? currentStatus;
 
       final validation = await validateExamInDb(
@@ -575,6 +596,7 @@ class ExamService {
             class_id = @class_id,
             assessment_type = COALESCE(@type::text, assessment_type),
             status = COALESCE(@status::text, status),
+            grading_period = @grading_period,
             updated_at = NOW()
           WHERE id = @id
           RETURNING
@@ -597,6 +619,7 @@ class ExamService {
           'class_id': newPrimary,
           'type': type,
           'status': requestedStatus,
+          'grading_period': period,
         },
       );
 
@@ -615,6 +638,8 @@ class ExamService {
         'version': row[9],
         'class_ids': (finalIds.toList()..sort()),
         'validation': validation.toJson(),
+        'grading_period': period,
+        'creation_mode': 'builder',
       };
     });
   }

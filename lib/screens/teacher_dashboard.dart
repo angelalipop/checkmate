@@ -78,9 +78,7 @@ enum TeacherPage {
   subjects('My Subjects', Icons.menu_book_outlined),
   students('Students', Icons.school_outlined),
   exams('Exams', Icons.assignment_outlined),
-  scans('Scans', Icons.document_scanner_outlined),
-  analytics('Analytics', Icons.insights_outlined),
-  reports('Reports', Icons.summarize_outlined);
+  scans('Scans', Icons.document_scanner_outlined);
 
   const TeacherPage(this.label, this.icon);
   final String label;
@@ -127,6 +125,7 @@ String _classCode(Map<String, dynamic> c) {
 
 class _ExamInfo {
   const _ExamInfo({
+    this.id,
     required this.title,
     required this.code,
     required this.date,
@@ -134,6 +133,7 @@ class _ExamInfo {
     required this.status,
   });
 
+  final int? id;
   final String title, code, date, status;
   final int students;
 }
@@ -281,7 +281,7 @@ class _ModuleShell extends StatelessWidget {
   final Widget child;
 
   void _select(BuildContext context, TeacherPage target) {
-    if (target == page) return;
+    if (target == page && target != TeacherPage.exams) return;
 
     // Another module screen: swap it in, keeping the same shell.
     final screen = _moduleScreenFor(target);
@@ -1017,6 +1017,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
         final cd = e['class'];
         final classId = cd is Map ? cd['id']?.toString() : null;
         return _ExamInfo(
+          id: int.tryParse(e['id']?.toString() ?? ''),
           title: e['title']?.toString() ?? 'Untitled exam',
           code: codeForExam(e),
           date: (e['created_at']?.toString() ?? '').split('T').first,
@@ -1058,11 +1059,21 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     setState(() => _page = page);
   }
 
+  Future<void> _openExamBuilder(int? examId) async {
+    final screen = ExamsTab(
+      key: examId != null ? ValueKey('builder-$examId') : null,
+      initialExamId: examId,
+    );
+    await Navigator.push(context, _shellRoute(TeacherPage.exams, screen));
+    if (mounted) _loadData(silent: true);
+  }
+
   Widget _body() {
     if (_page == TeacherPage.dashboard) {
       return _DashboardContent(
         teacherName: widget.teacherName,
         onNavigate: _select,
+        onOpenExam: _openExamBuilder,
         loading: _loading,
         error: _error,
         onRetry: _loadData,
@@ -1244,6 +1255,7 @@ class _DashboardContent extends StatelessWidget {
   const _DashboardContent({
     required this.teacherName,
     required this.onNavigate,
+    required this.onOpenExam,
     required this.loading,
     required this.error,
     required this.onRetry,
@@ -1252,6 +1264,7 @@ class _DashboardContent extends StatelessWidget {
 
   final String teacherName;
   final ValueChanged<TeacherPage> onNavigate;
+  final ValueChanged<int?> onOpenExam;
   final bool loading;
   final String? error;
   final VoidCallback onRetry;
@@ -1316,13 +1329,9 @@ class _DashboardContent extends StatelessWidget {
                   if (exams.isEmpty)
                     const _EmptyPanel('No examinations yet.')
                   else if (w >= 720)
-                    _ExamTable(exams: exams)
+                    _ExamTable(exams: exams, onOpenExam: onOpenExam)
                   else
-                    _ExamCards(exams: exams),
-                  const SizedBox(height: 32),
-                  _sectionHeader('Reports', null, null),
-                  const SizedBox(height: 12),
-                  _reports(context),
+                    _ExamCards(exams: exams, onOpenExam: onOpenExam),
                   const SizedBox(height: 16),
                   ],
                 ],
@@ -1387,35 +1396,6 @@ class _DashboardContent extends StatelessWidget {
     );
   }
 
-  // ---------- Reports ----------
-
-  Widget _reports(BuildContext context) {
-    const items = [
-      (Icons.description_outlined, 'Examination reports'),
-      (Icons.person_outline, 'Student score reports'),
-      (Icons.groups_outlined, 'Class performance'),
-      (Icons.table_chart_outlined, 'Item analysis'),
-      (Icons.event_available_outlined, 'Attendance'),
-    ];
-    return Wrap(
-      spacing: 10,
-      runSpacing: 10,
-      children: [
-        for (final (icon, label) in items)
-          ActionChip(
-            avatar: Icon(icon, size: 18, color: CmColors.navy),
-            label: Text(label),
-            labelStyle: const TextStyle(
-                color: CmColors.navy, fontWeight: FontWeight.w600),
-            backgroundColor: Colors.white,
-            side: const BorderSide(color: CmColors.line),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-            onPressed: () => _soon(context, label),
-          ),
-      ],
-    );
-  }
 
   // ---------- Layout helpers ----------
 
@@ -1815,8 +1795,9 @@ class _StatusChip extends StatelessWidget {
 }
 
 class _ExamTable extends StatelessWidget {
-  const _ExamTable({required this.exams});
+  const _ExamTable({required this.exams, required this.onOpenExam});
   final List<_ExamInfo> exams;
+  final ValueChanged<int?> onOpenExam;
 
   static const _head = TextStyle(
       fontSize: 12, fontWeight: FontWeight.w700, color: CmColors.slate);
@@ -1867,7 +1848,7 @@ class _ExamTable extends StatelessWidget {
                   SizedBox(
                     width: 90,
                     child: TextButton(
-                      onPressed: () => _soon(context, 'Exam details'),
+                      onPressed: () => onOpenExam(e.id),
                       child: Text(
                         e.status == 'Needs Review' ? 'Review' : 'Open',
                         style: const TextStyle(
@@ -1887,8 +1868,9 @@ class _ExamTable extends StatelessWidget {
 }
 
 class _ExamCards extends StatelessWidget {
-  const _ExamCards({required this.exams});
+  const _ExamCards({required this.exams, required this.onOpenExam});
   final List<_ExamInfo> exams;
+  final ValueChanged<int?> onOpenExam;
 
   @override
   Widget build(BuildContext context) {
@@ -1924,7 +1906,7 @@ class _ExamCards extends StatelessWidget {
                     width: double.infinity,
                     height: 44,
                     child: OutlinedButton(
-                      onPressed: () => _soon(context, 'Exam details'),
+                      onPressed: () => onOpenExam(e.id),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: CmColors.navy,
                         side: const BorderSide(color: CmColors.line),

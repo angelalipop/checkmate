@@ -97,6 +97,9 @@ class MySubjectsApi {
     required List<int> classIds,
     required String title,
     required String assessmentType,
+    String? gradingPeriod,
+    String creationMode = 'builder',
+    num? maximumScore,
   }) async {
     final r = await http.post(
       Uri.parse('${ApiService.baseUrl}/my-subjects/assessments'),
@@ -105,6 +108,9 @@ class MySubjectsApi {
         'class_ids': classIds,
         'title': title,
         'assessment_type': assessmentType,
+        'grading_period': ?gradingPeriod,
+        'creation_mode': creationMode,
+        'maximum_score': ?maximumScore,
       }),
     );
     return Map<String, dynamic>.from(_decode(r)['assessment'] as Map);
@@ -214,4 +220,13 @@ class MySubjectsApi {
     );
     _decode(r);
   }
+  static Future<void> saveManualScore(String token,{required int classId,required int examId,required int studentId,required num? score}) async {
+    final r=await http.put(Uri.parse('${ApiService.baseUrl}/my-subjects/classes/$classId/scorebook'),headers:_headers(token),body:jsonEncode({'exam_id':examId,'student_id':studentId,'score':score}));
+    _decode(r);
+  }
+  static Future<void> saveGradingPreferences(String token,int classId,Map<String,num> preferences) async {
+    final r=await http.put(Uri.parse('${ApiService.baseUrl}/my-subjects/classes/$classId/grading-preferences'),headers:_headers(token),body:jsonEncode(preferences));
+    _decode(r);
+  }
+
 }

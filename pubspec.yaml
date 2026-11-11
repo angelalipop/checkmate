@@ -42,6 +42,8 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/fonts/CheckMateGrades-Regular.ttf
+    - assets/fonts/CheckMateGrades-Bold.ttf
     - assets/logo.png
     - assets/transparent_logo.png
     - assets/login_illustration.png

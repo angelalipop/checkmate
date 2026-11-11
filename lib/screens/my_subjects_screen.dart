@@ -1,6 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../services/auth_storage.dart';
+import '../services/api_service.dart';
+import '../services/grade_report_service.dart';
+import 'package:file_selector/file_selector.dart';
+import 'package:printing/printing.dart';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/foundation.dart';
+import 'package:share_plus/share_plus.dart';
 import '../services/my_subjects_api_service.dart';
 import 'exams_tab.dart';
 import 'teacher_dashboard.dart' show TeacherPage, TeacherShell;
@@ -23,6 +30,9 @@ import 'teacher_dashboard.dart' show TeacherPage, TeacherShell;
 /// it; this screen listens. (On phones/tablets the screen shows its own
 /// search field because those layouts have no search in the top bar.)
 final ValueNotifier<String> mySubjectsSearch = ValueNotifier<String>('');
+
+/// Controls shell chrome only while a section scorebook is visible.
+final ValueNotifier<bool> mySubjectsScorebookVisible = ValueNotifier<bool>(false);
 
 const double _kDesktop = 900;
 const double _kTablet = 600;
@@ -70,6 +80,8 @@ const _typeLabels = <String, String>{
   'quiz': 'Quiz',
   'short_quiz': 'Short Quiz',
   'long_quiz': 'Long Quiz',
+  'performance_task': 'Performance Task',
+  'laboratory': 'Laboratory',
   'prelim': 'Prelim',
   'midterm': 'Midterm',
   'prefinal': 'Prefinals',
@@ -271,6 +283,9 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
     mySubjectsSearch.removeListener(_onSearch);
     mySubjectsScorebookTarget.removeListener(_onScorebookTargetChanged);
     _searchC.dispose();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      mySubjectsScorebookVisible.value = false;
+    });
     super.dispose();
   }
 
@@ -481,6 +496,13 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
   @override
   Widget build(BuildContext context) {
     final top = _stack.last;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final sectionVisible = _stack.last.kind == _Kind.section;
+      if (mySubjectsScorebookVisible.value != sectionVisible) {
+        mySubjectsScorebookVisible.value = sectionVisible;
+      }
+    });
 
     return PopScope(
       canPop: _stack.length == 1 || top.kind == _Kind.builder,
@@ -524,6 +546,7 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
           onGoList: _goList,
           onGoSubject: _goSubject,
           onSwitchSection: (sec) => _switchSectionInScorebook(subject, sec),
+          onOpenBuilder: (examId) => _push(_View(_Kind.builder, subject: subject, examId: examId)),
         );
 
       case _Kind.builder:
@@ -1353,11 +1376,13 @@ class _SubjectPageState extends State<_SubjectPage> {
           },
         },
     ];
-    final examId = await showExamDetailsModal(
-      context,
-      classes: subjectClasses,
-      initialClassId: s.sections.isNotEmpty ? s.sections.first.classId : null,
-    );
+    final created = await showAssessmentCreation(context,classes:subjectClasses,initialClassId:s.sections.isNotEmpty?s.sections.first.classId:null);
+    if(created?.manual==true && mounted){
+      final section=s.sections.firstWhere((sec)=>sec.classId==created!.classId);
+      widget.onOpenSection(section);
+      return;
+    }
+    final examId=created?.examId;
     if (examId != null && examId > 0 && mounted) {
       widget.onOpenBuilder(examId);
     } else if (examId != null && mounted) {
@@ -1498,7 +1523,10 @@ class _SubjectPageState extends State<_SubjectPage> {
                       assessment: a,
                       onTap: () {
                         final id = _int(a['id']);
-                        if (id != null) widget.onOpenBuilder(id);
+                        if(a['creation_mode']=='manual'){
+                          final names=(a['sections'] as List?)??[];
+                          widget.onOpenSection(s.sections.firstWhere((sec)=>names.contains(sec.name),orElse:()=>s.sections.first));
+                        }else if (id != null) {widget.onOpenBuilder(id);}
                       },
                     ),
                   ),
@@ -1607,7 +1635,7 @@ class _AssessmentRow extends StatelessWidget {
         : <String>[];
 
     final published = status == 'published';
-    final statusText = published
+    final statusText = a['creation_mode']=='manual' ? 'Manual Score' : published
         ? 'Published'
         : (status == 'archived' ? 'Archived' : 'Draft');
 
@@ -1677,6 +1705,7 @@ class _SectionPage extends StatefulWidget {
     required this.onGoList,
     required this.onGoSubject,
     required this.onSwitchSection,
+    required this.onOpenBuilder,
     this.highlightStudentId,
     this.highlightExamId,
   });
@@ -1686,6 +1715,7 @@ class _SectionPage extends StatefulWidget {
   final VoidCallback onGoList;
   final VoidCallback onGoSubject;
   final ValueChanged<_Section> onSwitchSection;
+  final ValueChanged<int> onOpenBuilder;
   final int? highlightStudentId;
   final int? highlightExamId;
 
@@ -1694,13 +1724,28 @@ class _SectionPage extends StatefulWidget {
 }
 
 class _SectionPageState extends State<_SectionPage> {
-  static const double _colW = 136;
-  static const double _avgColW = 116;
-  static const double _secColW = 104;
-  static const double _rowH = 60;
-  static const double _headH = 76;
+  static const double _colW = 76;
+  static const double _totalColW = 84;
+  static const double _avgColW = 108;
+  static const double _rowH = 56;
+  static const double _headH = 90;
 
-  List<Map<String, dynamic>> _assessments = const [];
+  List<Map<String,dynamic>> _allAssessments=const [];
+  Map<String,dynamic> _book={};
+  String _period='prelims';
+  bool _targetPeriodApplied=false;
+  static const _categoryNames={'pt':'Performance Tasks / Laboratory','quiz':'Quizzes','exam':'Major Examination'};
+  Map<String,dynamic> get _preferences => Map<String,dynamic>.from(_book['preferences'] as Map? ?? {});
+  List<Map<String,dynamic>> get _assessments {
+    final result=_allAssessments.where((a)=>_period=='unclassified'?a['requires_classification']==true:a['grading_period']==_period && a['requires_classification']!=true).toList();
+    const rank={'pt':0,'quiz':1,'exam':2};
+    result.sort((a,b){final c=(rank[a['grading_category']]??3).compareTo(rank[b['grading_category']]??3);return c!=0?c:(_int(a['id'])??0).compareTo(_int(b['id'])??0);});
+    return result;
+  }
+  Map<String,dynamic> _periodGrade(Map<String,dynamic> s)=>Map<String,dynamic>.from((s['grading'] as Map?)?[_period] as Map? ?? {});
+  String _percentage(Object? v)=>v is num?'${v.toStringAsFixed(2)}%':'INC';
+  String _categoryPercentage(Map<String,dynamic> student,String key)=>_percentage((_periodGrade(student)['categories'] as Map?)?[key]?['percentage']);
+
   List<Map<String, dynamic>> _students = const [];
   bool _loading = true;
   String? _error;
@@ -1746,7 +1791,13 @@ class _SectionPageState extends State<_SectionPage> {
 
       if (!mounted) return;
       setState(() {
-        _assessments = _maps(data['assessments']);
+        _book=data;
+        _allAssessments = _maps(data['assessments']);
+        if(!_targetPeriodApplied && _activeHighlightExamId!=null){
+          _targetPeriodApplied=true;
+          final target=_allAssessments.where((a)=>_int(a['id'])==_activeHighlightExamId).firstOrNull;
+          if(target!=null)_period=target['requires_classification']==true?'unclassified':target['grading_period']?.toString()??'unclassified';
+        }
         _students = students;
         _loading = false;
       });
@@ -1785,7 +1836,7 @@ class _SectionPageState extends State<_SectionPage> {
     if (eid != null && _hScroll.hasClients) {
       final idx = _assessments.indexWhere((a) => _int(a['id']) == eid);
       if (idx > 0) {
-        final targetOffset = (idx * _colW).clamp(
+        final targetOffset = _assessmentHorizontalOffset(eid).clamp(
           0.0,
           _hScroll.position.maxScrollExtent,
         );
@@ -1806,8 +1857,10 @@ class _SectionPageState extends State<_SectionPage> {
     });
   }
 
-  List<Map<String, dynamic>> _cells(Map<String, dynamic> s) =>
-      (s['cells'] as List).cast<Map<String, dynamic>>();
+  List<Map<String,dynamic>> _cells(Map<String,dynamic> s) {
+    final byId={for(final c in _maps(s['cells'])) c['exam_id']:c};
+    return [for(final a in _assessments) byId[a['id']]??{'exam_id':a['id'],'status':'pending','score':null,'max_score':a['total_points']}];
+  }
 
   int _countFor(String f) => f == 'all'
       ? _students.length
@@ -1820,27 +1873,9 @@ class _SectionPageState extends State<_SectionPage> {
     return '$last $first'.trim();
   }
 
-  double? _studentAveragePercent(Map<String, dynamic> s) {
-    final fromServer = s['average_percentage'];
-    if (fromServer is num) return fromServer.toDouble();
-
-    double earned = 0;
-    double max = 0;
-    int count = 0;
-    for (final c in _cells(s)) {
-      if (c['status'] == 'completed') {
-        final sc = c['score'] is num ? (c['score'] as num).toDouble() : null;
-        final mx =
-            c['max_score'] is num ? (c['max_score'] as num).toDouble() : null;
-        if (sc != null && mx != null && mx > 0) {
-          earned += sc;
-          max += mx;
-          count++;
-        }
-      }
-    }
-    if (count == 0 || max <= 0) return null;
-    return (earned / max) * 100.0;
+  double? _studentAveragePercent(Map<String,dynamic> s) {
+    final grade=_periodGrade(s)['grade'];
+    return grade is num?grade.toDouble():null;
   }
 
   List<Map<String, dynamic>> get _visible {
@@ -1866,6 +1901,7 @@ class _SectionPageState extends State<_SectionPage> {
     Map<String, dynamic> cell,
     Map<String, dynamic> assessment,
   ) async {
+    if(assessment['creation_mode']=='manual'){await _editManualScore(student,cell,assessment);return;}
     final status = cell['status']?.toString() ?? 'pending';
     final examTitle = assessment['title']?.toString() ?? 'Assessment';
 
@@ -2158,6 +2194,8 @@ class _SectionPageState extends State<_SectionPage> {
         cell['attempt_id'] = null;
         student['average_percentage'] = null;
       });
+      await _load();
+      if(!mounted)return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: _navy,
@@ -2174,71 +2212,119 @@ class _SectionPageState extends State<_SectionPage> {
 
   @override
   Widget build(BuildContext context) {
-    final s = widget.subject;
-    final sec = widget.section;
-
+    final subject = widget.subject;
+    final section = widget.section;
+    final title = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'My Subjects / Section Scorebook',
+          style: TextStyle(
+            fontSize: 27,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF26334B),
+          ),
+        ),
+        const SizedBox(height: 5),
+        Text(
+          [
+            subject.code,
+            subject.name,
+            section.name,
+            subject.fullContextLine,
+          ].where((s) => s.isNotEmpty).join(' · '),
+          style: const TextStyle(fontSize: 13, color: Color(0xFF7A8AA5)),
+        ),
+      ],
+    );
     return _PageScroll(
       onRefresh: _load,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _Breadcrumb(
             items: [
               _Crumb('My Subjects', widget.onGoList),
-              _Crumb(s.crumb, widget.onGoSubject),
-              _Crumb(sec.name),
+              _Crumb(subject.crumb, widget.onGoSubject),
+              _Crumb(section.name),
             ],
           ),
-          const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, box) {
+              if (box.maxWidth < 1050)
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      '${s.name} – ${sec.name}',
-                      style: const TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w700,
-                        color: _ink,
-                      ),
+                    title,
+                    const SizedBox(height: 16),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: _loading || _error != null
+                          ? const SizedBox.shrink()
+                          : _scorebookActions(),
                     ),
-                    if (s.fullContextLine.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        s.fullContextLine,
-                        style: const TextStyle(fontSize: 14, color: _slate),
-                      ),
-                    ],
                   ],
-                ),
-              ),
-              if (s.sections.length > 1)
-                SizedBox(
-                  width: 170,
-                  child: _FilterField(
-                    label: 'Section',
-                    value: '${sec.classId}',
-                    options: [
-                      for (final item in s.sections)
-                        MapEntry('${item.classId}', item.name),
-                    ],
-                    onChanged: (val) {
-                      final targetId = int.tryParse(val);
-                      if (targetId == null || targetId == sec.classId) return;
-                      final found = s.sections.firstWhere(
-                        (e) => e.classId == targetId,
-                        orElse: () => sec,
-                      );
-                      widget.onSwitchSection(found);
-                    },
-                  ),
-                ),
-            ],
+                );
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: title),
+                  const SizedBox(width: 20),
+                  if (!_loading && _error == null) _scorebookActions(),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 24),
+          LayoutBuilder(
+            builder: (context, box) {
+              if (box.maxWidth < 700)
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _periodButtons(),
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: _sectionSelector(),
+                    ),
+                  ],
+                );
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(child: _periodButtons()),
+                  const SizedBox(width: 24),
+                  _sectionSelector(),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 20),
+          if (_period == 'unclassified') ...[
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF3F7FD),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Historical assessments need teacher confirmation before final grades can be calculated.',
+                  ),
+                  for (final a in _assessments)
+                    TextButton(
+                      onPressed: () => _classifyAssessment(a),
+                      child: Text('Classify ${a['title']}'),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
           if (_loading)
             const _Centered(child: CircularProgressIndicator(color: _navy))
           else if (_error != null)
@@ -2248,6 +2334,1931 @@ class _SectionPageState extends State<_SectionPage> {
         ],
       ),
     );
+  }
+
+  ButtonStyle get _scorebookOutline => OutlinedButton.styleFrom(
+    foregroundColor: const Color(0xFF182238),
+    backgroundColor: Colors.white,
+    side: const BorderSide(color: Color(0xFFDCE4EF)),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+    minimumSize: const Size(0, 42),
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+  );
+
+  Widget _sectionSelector() => SizedBox(
+    width: 170,
+    child: _FilterField(
+      label: 'Section',
+      value: '${widget.section.classId}',
+      options: [
+        for (final item in widget.subject.sections)
+          MapEntry('${item.classId}', item.name),
+      ],
+      onChanged: (value) {
+        final id = int.tryParse(value);
+        if (id == null || id == widget.section.classId) return;
+        final section = widget.subject.sections.firstWhere(
+          (s) => s.classId == id,
+          orElse: () => widget.section,
+        );
+        widget.onSwitchSection(section);
+      },
+    ),
+  );
+
+  Widget _periodButtons() => Wrap(
+    spacing: 8,
+    runSpacing: 8,
+    children: [
+      for (final entry in <String, String>{
+        ...gradingPeriodLabels,
+        if (_allAssessments.any((a) => a['requires_classification'] == true))
+          'unclassified': 'Needs Classification',
+      }.entries)
+        OutlinedButton(
+          onPressed: () => setState(() => _period = entry.key),
+          style: _scorebookOutline.copyWith(
+            backgroundColor: WidgetStatePropertyAll(
+              _period == entry.key ? const Color(0xFF182238) : Colors.white,
+            ),
+            foregroundColor: WidgetStatePropertyAll(
+              _period == entry.key ? Colors.white : const Color(0xFF66758E),
+            ),
+            side: WidgetStatePropertyAll(
+              BorderSide(
+                color: _period == entry.key
+                    ? const Color(0xFF182238)
+                    : const Color(0xFFDCE4EF),
+              ),
+            ),
+          ),
+          child: Text(entry.value),
+        ),
+    ],
+  );
+
+  Widget _scorebookActions() => Wrap(
+    spacing: 8,
+    runSpacing: 8,
+    alignment: WrapAlignment.end,
+    children: [
+      OutlinedButton.icon(
+        onPressed: _editPreferences,
+        style: _scorebookOutline,
+        icon: const Icon(Icons.tune, size: 16),
+        label: const Text('Grading Preferences'),
+      ),
+      OutlinedButton(
+        onPressed: _showWholeSectionReport,
+        style: _scorebookOutline,
+        child: const Text('Whole Section Report'),
+      ),
+      FilledButton.icon(
+        onPressed: _createSectionAssessment,
+        style: FilledButton.styleFrom(
+          backgroundColor: const Color(0xFF182238),
+          foregroundColor: Colors.white,
+          minimumSize: const Size(0, 42),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        ),
+        icon: const Icon(Icons.add, size: 16),
+        label: const Text('Add Assessment'),
+      ),
+    ],
+  );
+
+  Future<void> _createSectionAssessment() async {
+    final subject = widget.subject;
+    final classes = [
+      for (final section in subject.sections)
+        <String, dynamic>{
+          'id': section.classId,
+          'section': section.name,
+          'student_count': section.students,
+          'school_year': subject.schoolYear,
+          'semester': subject.semesterLabel,
+          'year_level': subject.yearLevel,
+          'subject': {
+            'id': subject.subjectId,
+            'code': subject.code,
+            'name': subject.name,
+          },
+        },
+    ];
+    final created = await showAssessmentCreation(
+      context,
+      classes: classes,
+      initialClassId: widget.section.classId,
+    );
+    if (created == null || !mounted) return;
+    if (!created.manual) {
+      widget.onOpenBuilder(created.examId);
+      return;
+    }
+    mySubjectsScorebookTarget.value = MySubjectsScorebookTarget(
+      classId: created.classId ?? widget.section.classId,
+      examId: created.examId,
+      studentId: 0,
+    );
+  }
+
+  List<String> get _scorebookGroups => [
+    ..._categoryNames.keys,
+    if (_period == 'unclassified' &&
+        _assessments.any((a) => a['grading_category'] == null))
+      'unknown',
+  ];
+  List<Map<String, dynamic>> _groupAssessments(String key) => _assessments
+      .where((a) => (a['grading_category'] ?? 'unknown') == key)
+      .toList();
+  Color _assessmentHeaderColor(String key) => switch (key) {
+    'pt' => const Color(0xFFD4E5F8),
+    'quiz' => const Color(0xFFD9F6DF),
+    'exam' => const Color(0xFFFFF1AC),
+    _ => const Color(0xFFEDF2F8),
+  };
+  double _assessmentHorizontalOffset(int examId) {
+    double offset = 0;
+    for (final group in _scorebookGroups) {
+      final items = _groupAssessments(group);
+      if (items.isEmpty) offset += _colW;
+      for (final assessment in items) {
+        if (_int(assessment['id']) == examId) return offset;
+        offset += _colW;
+      }
+      if (group != 'unknown') offset += _totalColW;
+    }
+    return 0;
+  }
+
+  Widget _scorebookCaption() => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 17),
+    child: Wrap(
+      spacing: 12,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Text(
+          '${gradingPeriodLabels[_period] ?? 'Needs Classification'} Scorebook',
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF26334B),
+          ),
+        ),
+        Text(
+          '·  ${_assessments.length} assessments · Click a student to open grade information',
+          style: const TextStyle(fontSize: 12, color: Color(0xFF7A8AA5)),
+        ),
+      ],
+    ),
+  );
+
+  Future<void> _editManualScore(
+    Map<String, dynamic> student,
+    Map<String, dynamic> cell,
+    Map<String, dynamic> assessment,
+  ) async {
+    final controller = TextEditingController(
+      text: _formatScore(cell['score'] as num?),
+    );
+    String? error;
+    bool saving = false;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setS) => AlertDialog(
+          title: Text('${assessment['column_label']} · ${assessment['title']}'),
+          content: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(_studentName(student)),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  enabled: !saving,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: InputDecoration(
+                    labelText: 'Score / ${assessment['total_points']}',
+                    helperText:
+                        'Leave blank to clear. Zero is a recorded score.',
+                    errorText: error,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(c),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      final raw = controller.text.trim();
+                      final score = raw.isEmpty ? null : num.tryParse(raw);
+                      final max = assessment['total_points'] as num;
+                      if (raw.isNotEmpty &&
+                          (score == null ||
+                              !score.isFinite ||
+                              score < 0 ||
+                              score > max)) {
+                        setS(() => error = 'Enter a score between 0 and $max.');
+                        return;
+                      }
+                      setS(() {
+                        saving = true;
+                        error = null;
+                      });
+                      try {
+                        await MySubjectsApi.saveManualScore(
+                          await _token(),
+                          classId: widget.section.classId,
+                          examId: _int(assessment['id'])!,
+                          studentId: _int(student['id'])!,
+                          score: score,
+                        );
+                        if (c.mounted) Navigator.pop(c);
+                      } catch (e) {
+                        if (c.mounted)
+                          setS(() {
+                            saving = false;
+                            error = _err(e);
+                          });
+                      }
+                    },
+              child: Text(saving ? 'Saving…' : 'Save Score'),
+            ),
+          ],
+        ),
+      ),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      controller.dispose();
+    });
+    if (mounted) await _load();
+  }
+
+  Future<void> _editPreferences() async {
+    final labels = <String, String>{
+      'pt': 'Performance Tasks / Laboratory',
+      'quiz': 'Quizzes',
+      'exam': 'Major Examination',
+      ...gradingPeriodLabels,
+    };
+    final controls = {
+      for (final k in labels.keys)
+        k: TextEditingController(text: '${_preferences[k] ?? 0}'),
+    };
+    String? error;
+    bool saving = false;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: const Color(0x990D1420),
+      builder: (c) => StatefulBuilder(
+        builder: (c, setS) {
+          Future<void> save() async {
+            final values = <String, num>{};
+            for (final e in controls.entries) {
+              final n = num.tryParse(e.value.text.trim());
+              if (n == null ||
+                  !n.isFinite ||
+                  n < 0 ||
+                  n > 100 ||
+                  (n * 100 - (n * 100).round()).abs() > 0.000001) {
+                setS(
+                  () => error =
+                      'Use weights from 0–100 with at most two decimal places.',
+                );
+                return;
+              }
+              values[e.key] = n;
+            }
+            for (final keys in [
+              const ['pt', 'quiz', 'exam'],
+              gradingPeriodLabels.keys.toList(),
+            ]) {
+              if (keys.fold<int>(
+                    0,
+                    (sum, k) => sum + (values[k]! * 100).round(),
+                  ) !=
+                  10000) {
+                setS(
+                  () => error = 'Category weights and period weights must each total exactly 100%.',
+                );
+                return;
+              }
+            }
+            setS(() {
+              saving = true;
+              error = null;
+            });
+            try {
+              await MySubjectsApi.saveGradingPreferences(
+                await _token(),
+                widget.section.classId,
+                values,
+              );
+              if (c.mounted) Navigator.pop(c);
+            } catch (e) {
+              if (c.mounted)
+                setS(() {
+                  saving = false;
+                  error = _err(e);
+                });
+            }
+          }
+
+          Widget weightRow(String key) {
+            return Container(
+              padding: const EdgeInsets.symmetric(vertical: 9),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: Color(0xFFEDF0F5))),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      labels[key]!,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFF39465E),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 84,
+                    child: Semantics(
+                      label: '${labels[key]} weight in percent',
+                      child: TextField(
+                        controller: controls[key],
+                        enabled: !saving,
+                        textAlign: TextAlign.right,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: Color(0xFF182238),
+                        ),
+                        decoration: InputDecoration(
+                          isDense: true,
+                          filled: true,
+                          fillColor: Colors.white,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(
+                              color: Color(0xFFDCE4EF),
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(
+                              color: Color(0xFFDCE4EF),
+                            ),
+                          ),
+                          disabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(
+                              color: Color(0xFFDCE4EF),
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(
+                              color: Color(0xFF7E9FD5),
+                              width: 1.5,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  const Text(
+                    '%',
+                    style: TextStyle(fontSize: 14, color: Color(0xFF60718B)),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          Widget weightGroup(String title, List<String> keys) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF33435B),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                for (final key in keys) weightRow(key),
+              ],
+            );
+          }
+
+          final outlinedStyle = OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFF182238),
+            backgroundColor: Colors.white,
+            side: const BorderSide(color: Color(0xFFDCE4EF)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(9),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            minimumSize: const Size(0, 42),
+            textStyle: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          );
+
+          return Dialog(
+            backgroundColor: Colors.white,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 20,
+              vertical: 24,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: 1000,
+                maxHeight: MediaQuery.sizeOf(c).height - 48,
+              ),
+              child: SizedBox(
+                width: 1000,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 24, 24, 18),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'Grading Preferences',
+                                  style: TextStyle(
+                                    fontSize: 21,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF26334B),
+                                  ),
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  'Configure weights for this subject and section',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Color(0xFF7A8AA5),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          SizedBox(
+                            width: 40,
+                            height: 42,
+                            child: OutlinedButton(
+                              onPressed: saving ? null : () => Navigator.pop(c),
+                              style: outlinedStyle.copyWith(
+                                padding: const WidgetStatePropertyAll(
+                                  EdgeInsets.zero,
+                                ),
+                              ),
+                              child: const Tooltip(
+                                message: 'Close',
+                                child: Icon(Icons.close, size: 18),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Flexible(
+                      fit: FlexFit.loose,
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                final category = weightGroup(
+                                  'Category weights',
+                                  const ['pt', 'quiz', 'exam'],
+                                );
+                                final periods = weightGroup(
+                                  'Grading-period weights',
+                                  gradingPeriodLabels.keys.toList(),
+                                );
+                                if (constraints.maxWidth < 650) {
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      category,
+                                      const SizedBox(height: 24),
+                                      periods,
+                                    ],
+                                  );
+                                }
+                                return Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(child: category),
+                                    const SizedBox(width: 24),
+                                    Expanded(child: periods),
+                                  ],
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 18),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                              decoration: const BoxDecoration(
+                                color: Color(0xFFF3F7FD),
+                                border: Border(
+                                  left: BorderSide(
+                                    color: Color(0xFF8FA3C4),
+                                    width: 3,
+                                  ),
+                                ),
+                              ),
+                              child: const Text(
+                                'Each group must total exactly 100%. Grade calculations update when you save. Preferences are saved for this subject and section.',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFF60718B),
+                                  height: 1.5,
+                                ),
+                              ),
+                            ),
+                            if (error != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 12),
+                                child: Text(
+                                  error!,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.red,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                      child: Wrap(
+                        alignment: WrapAlignment.end,
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          OutlinedButton(
+                            onPressed: saving ? null : () => Navigator.pop(c),
+                            style: outlinedStyle,
+                            child: const Text('Cancel'),
+                          ),
+                          FilledButton(
+                            onPressed: saving ? null : save,
+                            style: FilledButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              backgroundColor: const Color(0xFF182238),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(9),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 14,
+                              ),
+                              minimumSize: const Size(158, 42),
+                              textStyle: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            child: Text(
+                              saving ? 'Saving…' : 'Save preferences',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      for (final c in controls.values) {
+        c.dispose();
+      }
+    });
+    if (mounted) await _load();
+  }
+
+  Future<void> _classifyAssessment(Map<String, dynamic> assessment) async {
+    final s = widget.subject;
+    final classes = [
+      for (final sec in s.sections)
+        <String, dynamic>{
+          'id': sec.classId,
+          'section': sec.name,
+          'student_count': sec.students,
+          'school_year': s.schoolYear,
+          'semester': s.semesterLabel,
+          'year_level': s.yearLevel,
+          'subject': {'id': s.subjectId, 'code': s.code, 'name': s.name},
+        },
+    ];
+    // Fetch full saved details so header/instructions/assignments are preserved.
+    try {
+      final full = await ApiService.getExamById(
+        await _token(),
+        _int(assessment['id'])!,
+      );
+      if (!mounted) return;
+      await showExamDetailsModal(context, classes: classes, exam: full);
+      if (mounted) await _load();
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(_err(e))));
+    }
+  }
+
+  Future<void> _showStudentGrades(Map<String, dynamic> student) async {
+    final grading = Map<String, dynamic>.from(student['grading'] as Map? ?? {});
+    final byExam = {
+      for (final cell in _maps(student['cells'])) cell['exam_id']: cell,
+    };
+    bool expandedDetails = false;
+    const ink = Color(0xFF26334B),
+        muted = Color(0xFF7A8AA5),
+        line = Color(0xFFDCE4EF),
+        pale = Color(0xFFEDF2F8);
+    String percent(Object? value, {bool incomplete = false}) => value is num
+        ? '${value.toStringAsFixed(2)}%'
+        : incomplete
+        ? 'INC'
+        : '—';
+    String weight(String key) =>
+        _preferences[key] is num ? _formatScore(_preferences[key] as num) : '—';
+    Widget panel(Widget child) => Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: line),
+        borderRadius: BorderRadius.circular(13),
+      ),
+      child: child,
+    );
+    final outline = OutlinedButton.styleFrom(
+      foregroundColor: const Color(0xFF182238),
+      backgroundColor: Colors.white,
+      side: const BorderSide(color: line),
+      minimumSize: const Size(0, 40),
+      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+    );
+    final filled = FilledButton.styleFrom(
+      foregroundColor: Colors.white,
+      backgroundColor: const Color(0xFF182238),
+      minimumSize: const Size(0, 40),
+      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+    );
+    Widget tableCell(
+      String value, {
+      bool header = false,
+      bool bold = false,
+      bool left = false,
+    }) => Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 13),
+      child: Text(
+        value,
+        textAlign: left ? TextAlign.left : TextAlign.center,
+        style: TextStyle(
+          fontSize: 12,
+          color: header ? const Color(0xFF41516B) : ink,
+          fontWeight: header || bold ? FontWeight.w700 : FontWeight.w400,
+        ),
+      ),
+    );
+    Widget statCard(String label, String value, {String? tooltip}) {
+      final card = Container(
+        padding: const EdgeInsets.all(15),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF4F7FB),
+          border: Border.all(color: line),
+          borderRadius: BorderRadius.circular(11),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label, style: const TextStyle(fontSize: 12, color: muted)),
+            const SizedBox(height: 6),
+            Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 21,
+                fontWeight: FontWeight.w700,
+                color: ink,
+              ),
+            ),
+          ],
+        ),
+      );
+      return tooltip == null ? card : Tooltip(message: tooltip, child: card);
+    }
+
+    Widget periodDetails(String? period) {
+      final assessments = _allAssessments
+          .where((a) => a['grading_period'] == period)
+          .toList();
+      if (assessments.isEmpty)
+        return const Padding(
+          padding: EdgeInsets.symmetric(vertical: 10),
+          child: Text(
+            'No assessments in this grading period.',
+            style: TextStyle(fontSize: 12, color: muted),
+          ),
+        );
+      return LayoutBuilder(
+        builder: (context, box) => SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: box.maxWidth < 820 ? 820 : box.maxWidth,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(9),
+              child: Table(
+                border: TableBorder.all(color: line),
+                columnWidths: const {
+                  0: FlexColumnWidth(2.4),
+                  1: FlexColumnWidth(1.5),
+                  2: FlexColumnWidth(.7),
+                  3: FlexColumnWidth(.7),
+                  4: FlexColumnWidth(1),
+                  5: FlexColumnWidth(1.5),
+                },
+                children: [
+                  TableRow(
+                    decoration: const BoxDecoration(color: pale),
+                    children: [
+                      for (final title in [
+                        'Assessment',
+                        'Category',
+                        'Score',
+                        'Maximum',
+                        'Percentage',
+                        'Status',
+                      ])
+                        tableCell(
+                          title,
+                          header: true,
+                          left: title == 'Assessment',
+                        ),
+                    ],
+                  ),
+                  for (final assessment in assessments)
+                    TableRow(
+                      children: [
+                        tableCell(
+                          '${assessment['column_label']} · ${assessment['title']}',
+                          left: true,
+                        ),
+                        tableCell(
+                          _categoryNames[assessment['grading_category']] ??
+                              'Needs classification',
+                        ),
+                        tableCell(
+                          byExam[assessment['id']]?['score'] is num
+                              ? _formatScore(
+                                  byExam[assessment['id']]!['score'] as num,
+                                )
+                              : '—',
+                        ),
+                        tableCell(
+                          _formatScore(
+                            (byExam[assessment['id']]?['max_score'] ??
+                                    assessment['total_points'])
+                                as num?,
+                          ),
+                        ),
+                        tableCell(
+                          _detailAssessmentPercentage(
+                            byExam[assessment['id']] ?? const {},
+                          ),
+                        ),
+                        tableCell(
+                          '${_reportScoreStatus(byExam[assessment['id']] ?? const {})}${assessment['grade_eligible'] == true ? '' : ' · Draft, excluded'}',
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    await showDialog<void>(
+      context: context,
+      barrierColor: const Color(0x990D1420),
+      builder: (c) => StatefulBuilder(
+        builder: (c, setDialog) => Dialog(
+          backgroundColor: const Color(0xFFF4F7FB),
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 24,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 1140,
+              maxHeight: MediaQuery.sizeOf(c).height - 48,
+            ),
+            child: SizedBox(
+              width: 1140,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    panel(
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          LayoutBuilder(
+                            builder: (context, box) {
+                              final identity = Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Text(
+                                    'Student Grade Information',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: muted,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _studentName(student),
+                                    style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w700,
+                                      color: ink,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 5),
+                                  Text(
+                                    [
+                                      'Student No. ${student['student_number'] ?? ''}',
+                                      widget.section.name,
+                                      '${widget.subject.code} · ${widget.subject.name}',
+                                      widget.subject.fullContextLine,
+                                      widget.subject.schoolYear ?? '',
+                                    ].where((value) => value.isNotEmpty).join(' · '),
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: muted,
+                                      height: 1.5,
+                                    ),
+                                  ),
+                                ],
+                              );
+                              final actions = Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                alignment: WrapAlignment.end,
+                                children: [
+                                  OutlinedButton.icon(
+                                    onPressed: () => _exportReport(
+                                      pdf: true,
+                                      student: student,
+                                    ),
+                                    style: outline,
+                                    icon: const Icon(
+                                      Icons.file_download_outlined,
+                                      size: 16,
+                                    ),
+                                    label: const Text('PDF'),
+                                  ),
+                                  FilledButton.icon(
+                                    onPressed: () => _exportReport(
+                                      pdf: false,
+                                      student: student,
+                                    ),
+                                    style: filled,
+                                    icon: const Icon(
+                                      Icons.file_download_outlined,
+                                      size: 16,
+                                    ),
+                                    label: const Text('Excel'),
+                                  ),
+                                  SizedBox(
+                                    width: 40,
+                                    child: OutlinedButton(
+                                      onPressed: () => Navigator.pop(c),
+                                      style: outline.copyWith(
+                                        padding: const WidgetStatePropertyAll(
+                                          EdgeInsets.zero,
+                                        ),
+                                      ),
+                                      child: const Tooltip(
+                                        message: 'Close',
+                                        child: Icon(Icons.close, size: 18),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                              if (box.maxWidth < 800)
+                                return Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: actions,
+                                    ),
+                                    const SizedBox(height: 12),
+                                    identity,
+                                  ],
+                                );
+                              return Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(child: identity),
+                                  const SizedBox(width: 20),
+                                  actions,
+                                ],
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 18),
+                          LayoutBuilder(
+                            builder: (context, box) {
+                              final cards = [
+                                statCard(
+                                  'Final Grade',
+                                  percent(
+                                    grading['final_grade'],
+                                    incomplete: true,
+                                  ),
+                                ),
+                                statCard(
+                                  'Equivalent',
+                                  '—',
+                                  tooltip: 'A grade-equivalence scale has not been supplied.',
+                                ),
+                                statCard(
+                                  'Class Rank',
+                                  '—',
+                                  tooltip: 'Class rank is not supplied by the current gradebook.',
+                                ),
+                                statCard(
+                                  'Status',
+                                  '${grading['status'] ?? 'INC'}',
+                                ),
+                              ];
+                              final columns = box.maxWidth >= 700 ? 4 : 2;
+                              final width =
+                                  (box.maxWidth - (columns - 1) * 10) / columns;
+                              return Wrap(
+                                spacing: 10,
+                                runSpacing: 10,
+                                children: [
+                                  for (final card in cards)
+                                    SizedBox(width: width, child: card),
+                                ],
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 18),
+                          LayoutBuilder(
+                            builder: (context, box) => SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: SizedBox(
+                                width: box.maxWidth < 850 ? 850 : box.maxWidth,
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(9),
+                                  child: Table(
+                                    border: TableBorder.all(color: line),
+                                    columnWidths: const {
+                                      0: FlexColumnWidth(1.2),
+                                      1: FlexColumnWidth(1.5),
+                                      2: FlexColumnWidth(1),
+                                      3: FlexColumnWidth(1.2),
+                                      4: FlexColumnWidth(1),
+                                      5: FlexColumnWidth(1.5),
+                                    },
+                                    children: [
+                                      TableRow(
+                                        decoration: const BoxDecoration(
+                                          color: pale,
+                                        ),
+                                        children: [
+                                          for (final title in [
+                                            'Grading Period',
+                                            'Performance Tasks · ${weight('pt')}%',
+                                            'Quizzes · ${weight('quiz')}%',
+                                            'Major Exam · ${weight('exam')}%',
+                                            'Period Grade',
+                                            'Weighted Contribution',
+                                          ])
+                                            tableCell(
+                                              title,
+                                              header: true,
+                                              left: title == 'Grading Period',
+                                            ),
+                                        ],
+                                      ),
+                                      for (final period
+                                          in gradingPeriodLabels.entries)
+                                        TableRow(
+                                          children: [
+                                            Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 10,
+                                                    vertical: 12,
+                                                  ),
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    period.value,
+                                                    style: const TextStyle(
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      color: ink,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 3),
+                                                  Text(
+                                                    'Weight ${weight(period.key)}%',
+                                                    style: const TextStyle(
+                                                      fontSize: 11,
+                                                      color: muted,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            for (final category
+                                                in _categoryNames.keys)
+                                              tableCell(
+                                                percent(
+                                                  (grading[period.key]
+                                                      as Map?)?['categories']?[category]?['percentage'],
+                                                ),
+                                              ),
+                                            tableCell(
+                                              percent(
+                                                (grading[period.key]
+                                                    as Map?)?['grade'],
+                                                incomplete: true,
+                                              ),
+                                              bold: true,
+                                            ),
+                                            tableCell(
+                                              percent(
+                                                (grading[period.key]
+                                                    as Map?)?['contribution'],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Interim contribution: ${percent(grading['interim_contribution'], incomplete: true)}',
+                            style: const TextStyle(fontSize: 12, color: muted),
+                          ),
+                          if (grading['requires_classification'] == true)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 8),
+                              child: Text(
+                                'INC: historical assessments still require teacher classification.',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFFB91C1C),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    panel(
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text(
+                            'Individual Excel detail preview',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: ink,
+                            ),
+                          ),
+                          const SizedBox(height: 7),
+                          const Text(
+                            'The workbook includes all four grading periods, every assessment score and maximum, and the grade breakdown.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: muted,
+                              height: 1.5,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: OutlinedButton(
+                              onPressed: () => setDialog(
+                                () => expandedDetails = !expandedDetails,
+                              ),
+                              style: outline,
+                              child: Text(
+                                expandedDetails
+                                    ? 'Hide assessment scores'
+                                    : 'View all assessment scores',
+                              ),
+                            ),
+                          ),
+                          if (expandedDetails) ...[
+                            for (final period
+                                in gradingPeriodLabels.entries) ...[
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                  top: 18,
+                                  bottom: 8,
+                                ),
+                                child: Text(
+                                  period.value,
+                                  style: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                    color: ink,
+                                  ),
+                                ),
+                              ),
+                              periodDetails(period.key),
+                            ],
+                            if (_allAssessments.any(
+                              (a) => a['grading_period'] == null,
+                            )) ...[
+                              const Padding(
+                                padding: EdgeInsets.only(top: 18, bottom: 8),
+                                child: Text(
+                                  'Needs Classification',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                    color: ink,
+                                  ),
+                                ),
+                              ),
+                              periodDetails(null),
+                            ],
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _detailAssessmentPercentage(Map<String, dynamic> cell) {
+    final score = cell['score'], maximum = cell['max_score'];
+    return cell['status'] == 'completed' &&
+            score is num &&
+            maximum is num &&
+            score.isFinite &&
+            maximum.isFinite &&
+            maximum > 0
+        ? '${(score / maximum * 100).toStringAsFixed(2)}%'
+        : '—';
+  }
+
+  String _reportScoreStatus(Map<String, dynamic> cell) =>
+      switch (cell['status']) {
+        'completed' => 'Recorded',
+        'needs_review' => 'Needs review',
+        'absent' => 'Absent',
+        _ => 'Pending',
+      };
+
+  Future<void> _showWholeSectionReport() async {
+    final book = Map<String, dynamic>.from(_book);
+    final students = _maps(book['students']);
+    final assessments = _maps(book['assessments']);
+    final weights = Map<String, dynamic>.from(
+      book['preferences'] as Map? ?? {},
+    );
+    final cells = {
+      for (final student in students)
+        student['id']: {
+          for (final cell in _maps(student['cells'])) cell['exam_id']: cell,
+        },
+    };
+    final byPeriod = {
+      for (final period in gradingPeriodLabels.keys)
+        period: assessments
+            .where((a) => a['grading_period'] == period)
+            .toList(),
+    };
+    final horizontal = ScrollController();
+    const ink = Color(0xFF26334B),
+        muted = Color(0xFF7A8AA5),
+        grid = Color(0xFF8793A5),
+        navy = Color(0xFF182238);
+    const studentWidth = 110.0,
+        nameWidth = 245.0,
+        assessmentWidth = 62.0,
+        totalWidth = 68.0,
+        gradeWidth = 72.0;
+    const periodHeight = 32.0,
+        groupHeight = 34.0,
+        labelHeight = 46.0,
+        rowHeight = 42.0;
+    const headerHeight = periodHeight + groupHeight + labelHeight;
+    String weight(String key) =>
+        weights[key] is num ? _formatScore(weights[key] as num) : '—';
+    String percentage(Object? value, {bool incomplete = false}) => value is num
+        ? '${value.toStringAsFixed(2)}%'
+        : incomplete
+        ? 'INC'
+        : '—';
+    List<Map<String, dynamic>> items(String period, String category) =>
+        byPeriod[period]!
+            .where((a) => (a['grading_category'] ?? 'unknown') == category)
+            .toList();
+    List<String> categories(String period) => [
+      ..._categoryNames.keys,
+      if (byPeriod[period]!.any((a) => a['grading_category'] == null))
+        'unknown',
+    ];
+    double categoryWidth(String period, String category) =>
+        items(period, category).length * assessmentWidth +
+        (category == 'unknown' ? 0 : totalWidth);
+    double periodWidth(String period) =>
+        byPeriod[period]!.length * assessmentWidth +
+        3 * totalWidth +
+        gradeWidth;
+    Color categoryColor(String category) => switch (category) {
+      'pt' => const Color(0xFFD4E5F8),
+      'quiz' => const Color(0xFFD9FFE0),
+      'exam' => const Color(0xFFFFF2A5),
+      _ => const Color(0xFFEDF2F8),
+    };
+    Widget cell(
+      String text,
+      double width,
+      double height, {
+      Color background = Colors.white,
+      bool bold = false,
+      bool white = false,
+      bool left = false,
+      String? tooltip,
+    }) {
+      final result = Container(
+        width: width,
+        height: height,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        alignment: left ? Alignment.centerLeft : Alignment.center,
+        decoration: BoxDecoration(
+          color: background,
+          border: const Border(
+            right: BorderSide(color: grid),
+            bottom: BorderSide(color: grid),
+          ),
+        ),
+        child: Text(
+          text,
+          textAlign: left ? TextAlign.left : TextAlign.center,
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
+            color: white ? Colors.white : ink,
+          ),
+        ),
+      );
+      return tooltip == null
+          ? result
+          : Tooltip(message: tooltip, child: result);
+    }
+
+    Widget studentColumns() => SizedBox(
+      width: studentWidth + nameWidth,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              cell(
+                'Student No.',
+                studentWidth,
+                headerHeight,
+                background: const Color(0xFFD8E4F3),
+                bold: true,
+              ),
+              cell(
+                'Student Name',
+                nameWidth,
+                headerHeight,
+                background: const Color(0xFFD8E4F3),
+                bold: true,
+              ),
+            ],
+          ),
+          for (final student in students)
+            Row(
+              children: [
+                cell(
+                  '${student['student_number'] ?? ''}',
+                  studentWidth,
+                  rowHeight,
+                  left: true,
+                ),
+                cell(
+                  _studentName(student),
+                  nameWidth,
+                  rowHeight,
+                  left: true,
+                  tooltip: _studentName(student),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+    Widget periodColumns() => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final period in gradingPeriodLabels.entries)
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  cell(
+                    '${period.value.toUpperCase()} · ${weight(period.key)}%',
+                    periodWidth(period.key),
+                    periodHeight,
+                    background: navy,
+                    bold: true,
+                    white: true,
+                  ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final category in categories(period.key))
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            cell(
+                              category == 'unknown'
+                                  ? 'Needs Classification'
+                                  : '${category == 'pt'
+                                        ? 'PT / LAB'
+                                        : category == 'quiz'
+                                        ? 'QUIZZES'
+                                        : 'EXAM'} · ${weight(category)}%',
+                              categoryWidth(period.key, category),
+                              groupHeight,
+                              background: categoryColor(category),
+                              bold: true,
+                            ),
+                            Row(
+                              children: [
+                                for (final assessment in items(
+                                  period.key,
+                                  category,
+                                ))
+                                  cell(
+                                    '${assessment['column_label']}\n/${_formatScore(assessment['total_points'] as num?)}',
+                                    assessmentWidth,
+                                    labelHeight,
+                                    background: categoryColor(category),
+                                    bold: true,
+                                    tooltip:
+                                        '${assessment['title']}${assessment['grade_eligible'] == true ? '' : ' · Draft, excluded from grade'}',
+                                  ),
+                                if (category != 'unknown')
+                                  cell(
+                                    'Total %',
+                                    totalWidth,
+                                    labelHeight,
+                                    background: categoryColor(category),
+                                    bold: true,
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      cell(
+                        'Grade',
+                        gradeWidth,
+                        groupHeight + labelHeight,
+                        background: const Color(0xFFD8E4F3),
+                        bold: true,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+          ],
+        ),
+        for (final student in students)
+          Row(
+            children: [
+              for (final period in gradingPeriodLabels.keys) ...[
+                for (final category in categories(period)) ...[
+                  for (final assessment in items(period, category))
+                    Builder(
+                      builder: (_) {
+                        final entry =
+                            cells[student['id']]?[assessment['id']] ??
+                            <String, dynamic>{};
+                        final score = entry['score'];
+                        final status = _reportScoreStatus(entry);
+                        return cell(
+                          score is num ? _formatScore(score) : '—',
+                          assessmentWidth,
+                          rowHeight,
+                          tooltip:
+                              '${assessment['title']} · $status · Maximum ${_formatScore((entry['max_score'] ?? assessment['total_points']) as num?)}${assessment['grade_eligible'] == true ? '' : ' · Draft, excluded'}',
+                        );
+                      },
+                    ),
+                  if (category != 'unknown')
+                    cell(
+                      percentage(
+                        (student['grading']
+                            as Map?)?[period]?['categories']?[category]?['percentage'],
+                      ),
+                      totalWidth,
+                      rowHeight,
+                    ),
+                ],
+                cell(
+                  percentage(
+                    (student['grading'] as Map?)?[period]?['grade'],
+                    incomplete: true,
+                  ),
+                  gradeWidth,
+                  rowHeight,
+                  bold: true,
+                ),
+              ],
+            ],
+          ),
+      ],
+    );
+    final outline = OutlinedButton.styleFrom(
+      foregroundColor: navy,
+      backgroundColor: Colors.white,
+      side: const BorderSide(color: Color(0xFFDCE4EF)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+      minimumSize: const Size(0, 40),
+      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
+      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+    );
+    final unknown = assessments
+        .where((a) => a['grading_period'] == null)
+        .toList();
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierColor: const Color(0x990D1420),
+        builder: (c) => Dialog(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 24,
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 1440,
+              maxHeight: MediaQuery.sizeOf(c).height - 48,
+            ),
+            child: SizedBox(
+              width: 1440,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    LayoutBuilder(
+                      builder: (context, box) {
+                        final identity = Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text(
+                              'WHOLE-SECTION GRADE REPORT',
+                              style: TextStyle(fontSize: 12, color: muted),
+                            ),
+                            const SizedBox(height: 7),
+                            Text(
+                              [
+                                widget.subject.code,
+                                widget.section.name,
+                                widget.subject.schoolYear ?? '',
+                              ].where((s) => s.isNotEmpty).join(' · '),
+                              style: const TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.w700,
+                                color: ink,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              [
+                                widget.subject.name,
+                                widget.subject.semesterLabel,
+                                'All four grading periods',
+                              ].where((value) => value.isNotEmpty).join(' · '),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: muted,
+                                height: 1.5,
+                              ),
+                            ),
+                          ],
+                        );
+                        final actions = Wrap(
+                          alignment: WrapAlignment.end,
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: () => _exportReport(pdf: true),
+                              style: outline,
+                              icon: const Icon(
+                                Icons.file_download_outlined,
+                                size: 16,
+                              ),
+                              label: const Text('PDF'),
+                            ),
+                            FilledButton.icon(
+                              onPressed: () => _exportReport(pdf: false),
+                              style: FilledButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                backgroundColor: navy,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(9),
+                                ),
+                                minimumSize: const Size(0, 40),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 15,
+                                  vertical: 12,
+                                ),
+                                textStyle: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              icon: const Icon(
+                                Icons.file_download_outlined,
+                                size: 16,
+                              ),
+                              label: const Text('Excel'),
+                            ),
+                            SizedBox(
+                              width: 40,
+                              child: OutlinedButton(
+                                onPressed: () => Navigator.pop(c),
+                                style: outline.copyWith(
+                                  padding: const WidgetStatePropertyAll(
+                                    EdgeInsets.zero,
+                                  ),
+                                ),
+                                child: const Tooltip(
+                                  message: 'Close',
+                                  child: Icon(Icons.close, size: 18),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                        if (box.maxWidth < 850)
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: actions,
+                              ),
+                              const SizedBox(height: 12),
+                              identity,
+                            ],
+                          );
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: identity),
+                            const SizedBox(width: 20),
+                            actions,
+                          ],
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 22),
+                    Container(
+                      clipBehavior: Clip.antiAlias,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: grid),
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: LayoutBuilder(
+                        builder: (context, box) {
+                          if (box.maxWidth < 720)
+                            return Scrollbar(
+                              controller: horizontal,
+                              child: SingleChildScrollView(
+                                controller: horizontal,
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [studentColumns(), periodColumns()],
+                                ),
+                              ),
+                            );
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              studentColumns(),
+                              Expanded(
+                                child: Scrollbar(
+                                  controller: horizontal,
+                                  child: SingleChildScrollView(
+                                    controller: horizontal,
+                                    scrollDirection: Axis.horizontal,
+                                    child: periodColumns(),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                    if (students.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 20),
+                        child: Text(
+                          'No students are enrolled in this section.',
+                          style: TextStyle(fontSize: 13, color: muted),
+                        ),
+                      ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'All periods and assigned assessments are shown. Missing scores are shown as —; zero is a recorded score. Draft assessments are excluded from grades. Hover a score or column heading for assessment and review details.',
+                      style: TextStyle(fontSize: 12, color: muted, height: 1.5),
+                    ),
+                    if (unknown.isNotEmpty) ...[
+                      const SizedBox(height: 18),
+                      const Text(
+                        'Needs Classification',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: ink,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'These historical assessments have no confirmed grading period. Their saved scores are retained below.',
+                        style: TextStyle(fontSize: 12, color: muted),
+                      ),
+                      const SizedBox(height: 10),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                cell(
+                                  'Student No.',
+                                  studentWidth,
+                                  50,
+                                  background: const Color(0xFFD8E4F3),
+                                  bold: true,
+                                ),
+                                cell(
+                                  'Student Name',
+                                  nameWidth,
+                                  50,
+                                  background: const Color(0xFFD8E4F3),
+                                  bold: true,
+                                ),
+                                for (final assessment in unknown)
+                                  cell(
+                                    '${assessment['title']}\n/${_formatScore(assessment['total_points'] as num?)}',
+                                    130,
+                                    50,
+                                    background: const Color(0xFFEDF2F8),
+                                    bold: true,
+                                  ),
+                              ],
+                            ),
+                            for (final student in students)
+                              Row(
+                                children: [
+                                  cell(
+                                    '${student['student_number'] ?? ''}',
+                                    studentWidth,
+                                    rowHeight,
+                                    left: true,
+                                  ),
+                                  cell(
+                                    _studentName(student),
+                                    nameWidth,
+                                    rowHeight,
+                                    left: true,
+                                  ),
+                                  for (final assessment in unknown)
+                                    cell(
+                                      cells[student['id']]?[assessment['id']]?['score']
+                                              is num
+                                          ? _formatScore(
+                                              cells[student['id']]![assessment['id']]!['score']
+                                                  as num,
+                                            )
+                                          : '—',
+                                      130,
+                                      rowHeight,
+                                    ),
+                                ],
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    } finally {
+      Future<void>.delayed(
+        const Duration(milliseconds: 400),
+        horizontal.dispose,
+      );
+    }
+  }
+
+  Future<void> _exportReport({
+    required bool pdf,
+    Map<String, dynamic>? student,
+  }) async {
+    try {
+      // The full unfiltered server book is used, regardless of the selected tab.
+      final title = '${widget.subject.code} · ${widget.subject.name}';
+      final section =
+          '${widget.section.name} · ${widget.subject.fullContextLine}';
+      if (pdf) {
+        final bytes = await GradeReportService.pdf(
+          book: _book,
+          title: title,
+          section: section,
+          student: student,
+          fontRegular: (await rootBundle.load(
+            'assets/fonts/CheckMateGrades-Regular.ttf',
+          )).buffer.asUint8List(),
+          fontBold: (await rootBundle.load(
+            'assets/fonts/CheckMateGrades-Bold.ttf',
+          )).buffer.asUint8List(),
+        );
+        await Printing.sharePdf(
+          bytes: bytes,
+          filename: student == null
+              ? 'section_grades.pdf'
+              : 'student_grades_${student['id']}.pdf',
+        );
+      } else {
+        final bytes = GradeReportService.xlsx(
+          book: _book,
+          title: title,
+          section: section,
+          student: student,
+        );
+        final name = student == null
+            ? 'section_grades.xlsx'
+            : 'student_grades_${student['id']}.xlsx';
+        final file = XFile.fromData(
+          bytes,
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          name: name,
+        );
+        if (kIsWeb) {
+          await file.saveTo(name);
+        } else if ([
+              TargetPlatform.android,
+              TargetPlatform.iOS,
+            ].contains(defaultTargetPlatform)) {
+          await SharePlus.instance.share(
+            ShareParams(files: [file], subject: 'CheckMate Grade Report'),
+          );
+        } else {
+          final location = await getSaveLocation(
+            suggestedName: name,
+            acceptedTypeGroups: [
+              const XTypeGroup(label: 'Excel workbook', extensions: ['xlsx']),
+            ],
+          );
+          if (location != null) await file.saveTo(location.path);
+        }
+      }
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Export failed: ${_err(e)}')));
+    }
   }
 
   List<Widget> _content() {
@@ -2265,7 +4276,7 @@ class _SectionPageState extends State<_SectionPage> {
       return const [
         _EmptyBox(
           icon: Icons.assignment_outlined,
-          title: 'No assessments assigned to this section yet.',
+          title: 'No assessments in this grading period.',
         ),
       ];
     }
@@ -2300,6 +4311,7 @@ class _SectionPageState extends State<_SectionPage> {
                   selectedColor: _navy,
                   backgroundColor: Colors.white,
                   side: const BorderSide(color: _line),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   labelStyle: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -2349,8 +4361,7 @@ class _SectionPageState extends State<_SectionPage> {
         _table(rows),
       const SizedBox(height: 12),
       const Text(
-        'Students without a finalized scan stay Pending. Tap a Pending cell '
-        'to mark absent, or tap a Completed score to inspect or delete it.',
+        'Blank scores remain Pending; recorded zero is valid. Tap a manual column to enter or edit a score. Draft assessments do not affect grades. Click a student name for grade information.',
         style: TextStyle(fontSize: 12, color: _slate),
       ),
     ];
@@ -2404,14 +4415,14 @@ class _SectionPageState extends State<_SectionPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
+                              InkWell(onTap:()=>_showStudentGrades(s),child:Text(
                                 _studentName(s),
                                 style: const TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w700,
                                   color: _ink,
                                 ),
-                              ),
+                              )),
                               const SizedBox(height: 2),
                               Text(
                                 '${s['student_number'] ?? ''} • ${widget.section.name}',
@@ -2441,8 +4452,8 @@ class _SectionPageState extends State<_SectionPage> {
                           ),
                           child: Text(
                             avg != null
-                                ? 'Avg: ${avg.toStringAsFixed(1)}%'
-                                : 'Avg: —',
+                                ? 'Grade: ${avg.toStringAsFixed(1)}%'
+                                : 'Grade: INC',
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
@@ -2462,7 +4473,7 @@ class _SectionPageState extends State<_SectionPage> {
                       children: [
                         for (var i = 0; i < _assessments.length; i++)
                           _MobileScoreChip(
-                            title: _assessments[i]['title']?.toString() ?? '',
+                            title: '${_assessments[i]['column_label']} · ${_assessments[i]['title']} / ${_formatScore(_assessments[i]['total_points'] as num?)}',
                             cell: cells[i],
                             highlighted: isHighlighted &&
                                 (_activeHighlightExamId == null ||
@@ -2490,275 +4501,361 @@ class _SectionPageState extends State<_SectionPage> {
   // ------------------------------------------------------------
 
   Widget _table(List<Map<String, dynamic>> rows) {
-    const double leftW = 240.0;
-
-    Widget head(Widget child, double w, {Alignment align = Alignment.centerLeft}) =>
-        Container(
-          width: w,
-          height: _headH,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          alignment: align,
-          decoration: const BoxDecoration(
-            color: _bg,
-            border: Border(bottom: BorderSide(color: _line)),
-          ),
-          child: child,
-        );
-
+    const numberWidth = 116.0;
+    const nameWidth = 264.0;
+    const leftWidth = numberWidth + nameWidth;
+    const groupHeight = 38.0;
+    const labelHeight = _headH - groupHeight;
+    final groups = _scorebookGroups;
+    final items = {for (final key in groups) key: _groupAssessments(key)};
+    final displayColumns =
+        groups.fold<int>(
+          0,
+          (n, key) =>
+              n +
+              (items[key]!.isEmpty ? 1 : items[key]!.length) +
+              (key == 'unknown' ? 0 : 1),
+        ) +
+        1;
+    final minimumRight =
+        groups.fold<double>(
+          0,
+          (n, key) =>
+              n +
+              (items[key]!.isEmpty ? 1 : items[key]!.length) * _colW +
+              (key == 'unknown' ? 0 : _totalColW),
+        ) +
+        _avgColW;
+    final cellsByStudent = {
+      for (final student in rows)
+        student['id']: {
+          for (final cell in _cells(student)) cell['exam_id']: cell,
+        },
+    };
+    const grid = Color(0xFFE3E9F1);
+    Widget cell(
+      Widget child,
+      double width,
+      double height, {
+      Color background = Colors.white,
+      Alignment alignment = Alignment.center,
+    }) => Container(
+      width: width,
+      height: height,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      alignment: alignment,
+      decoration: BoxDecoration(
+        color: background,
+        border: const Border(
+          right: BorderSide(color: grid),
+          bottom: BorderSide(color: grid),
+        ),
+      ),
+      child: child,
+    );
+    Widget text(
+      String value, {
+      bool bold = false,
+      Color color = const Color(0xFF41516B),
+    }) => Text(
+      value,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        fontSize: 12,
+        fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
+        color: color,
+      ),
+    );
     return Container(
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _line),
-        boxShadow: [
-          BoxShadow(
-            color: _navy.withValues(alpha: 0.03),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        border: Border.all(color: const Color(0xFFDCE4EF)),
+        borderRadius: BorderRadius.circular(13),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Fixed Student Name & Student Number Column
-          Container(
-            width: leftW,
-            decoration: const BoxDecoration(
-              border: Border(right: BorderSide(color: _line)),
-            ),
-            child: Column(
-              children: [
-                head(
-                  const Text(
-                    'Student Name & Number',
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: _ink,
-                    ),
-                  ),
-                  leftW - 1,
-                ),
-                for (final s in rows)
-                  Builder(
-                    builder: (context) {
-                      final sid = _int(s['id']) ?? 0;
-                      final isHighlighted = _activeHighlightStudentId == sid;
-                      final rowKey =
-                          _studentRowKeys.putIfAbsent(sid, () => GlobalKey());
-
-                      return AnimatedContainer(
-                        key: rowKey,
-                        duration: const Duration(milliseconds: 350),
-                        height: _rowH,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        alignment: Alignment.centerLeft,
-                        decoration: BoxDecoration(
-                          color: isHighlighted
-                              ? _green.withValues(alpha: 0.14)
-                              : Colors.white,
-                          border: const Border(
-                            bottom: BorderSide(color: _line),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            if (isHighlighted)
-                              Container(
-                                width: 4,
-                                height: 34,
-                                margin: const EdgeInsets.only(right: 8),
-                                decoration: BoxDecoration(
-                                  color: _green,
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                              ),
-                            Expanded(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    _studentName(s),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w700,
-                                      color: _ink,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    s['student_number']?.toString() ?? '',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 11.5,
-                                      color: _slate,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-              ],
-            ),
-          ),
-          // Horizontally Scrollable Columns: Section, Assessments, Overall Average
-          Expanded(
-            child: Scrollbar(
-              controller: _hScroll,
-              child: SingleChildScrollView(
-                controller: _hScroll,
-                scrollDirection: Axis.horizontal,
+          _scorebookCaption(),
+          const Divider(height: 1, thickness: 1, color: grid),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: leftWidth,
                 child: Column(
                   children: [
                     Row(
                       children: [
-                        head(
-                          const Text(
-                            'Section',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: _ink,
-                            ),
-                          ),
-                          _secColW,
-                          align: Alignment.center,
+                        cell(
+                          text('Student No.', bold: true),
+                          numberWidth,
+                          _headH,
+                          background: const Color(0xFFEDF2F8),
+                          alignment: Alignment.centerLeft,
                         ),
-                        for (final a in _assessments)
-                          head(
-                            Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  a['title']?.toString() ?? '',
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                    color: _ink,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  '${_typeLabel(a['assessment_type']?.toString())}'
-                                  ' · v${_int(a['version']) ?? 1}',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: _slate,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            _colW,
-                          ),
-                        head(
-                          const Text(
-                            'Overall Avg',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: _ink,
-                            ),
-                          ),
-                          _avgColW,
-                          align: Alignment.center,
+                        cell(
+                          text('Student Name', bold: true),
+                          nameWidth,
+                          _headH,
+                          background: const Color(0xFFEDF2F8),
+                          alignment: Alignment.centerLeft,
                         ),
                       ],
                     ),
-                    for (final s in rows)
+                    for (final student in rows)
                       Builder(
                         builder: (context) {
-                          final sid = _int(s['id']) ?? 0;
-                          final isRowHighlighted =
-                              _activeHighlightStudentId == sid;
-                          final avg = _studentAveragePercent(s);
-
-                          return Row(
-                            children: [
-                              // Section Column
-                              AnimatedContainer(
-                                duration: const Duration(milliseconds: 350),
-                                width: _secColW,
-                                height: _rowH,
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  color: isRowHighlighted
-                                      ? _green.withValues(alpha: 0.10)
-                                      : Colors.white,
-                                  border: const Border(
-                                    bottom: BorderSide(color: _line),
+                          final id = _int(student['id']) ?? 0;
+                          final highlighted = _activeHighlightStudentId == id;
+                          final background = highlighted
+                              ? const Color(0xFFE7F7EE)
+                              : Colors.white;
+                          return AnimatedContainer(
+                            key: _studentRowKeys.putIfAbsent(
+                              id,
+                              () => GlobalKey(),
+                            ),
+                            duration: const Duration(milliseconds: 350),
+                            child: Row(
+                              children: [
+                                cell(
+                                  text('${student['student_number'] ?? ''}'),
+                                  numberWidth,
+                                  _rowH,
+                                  background: background,
+                                  alignment: Alignment.centerLeft,
+                                ),
+                                cell(
+                                  Tooltip(
+                                    message: _studentName(student),
+                                    child: InkWell(
+                                      onTap: () => _showStudentGrades(student),
+                                      child: Text(
+                                        _studentName(student),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFF2358A0),
+                                          decoration: TextDecoration.underline,
+                                          decorationColor: Color(0xFF2358A0),
+                                        ),
+                                      ),
+                                    ),
                                   ),
+                                  nameWidth,
+                                  _rowH,
+                                  background: background,
+                                  alignment: Alignment.centerLeft,
                                 ),
-                                child: _Pill(
-                                  text: widget.section.name,
-                                  background: _bg,
-                                  color: _slate,
-                                ),
-                              ),
-                              // Dynamic Exam Score Columns
-                              for (var i = 0; i < _assessments.length; i++)
-                                _ScoreCell(
-                                  width: _colW,
-                                  height: _rowH,
-                                  cell: _cells(s)[i],
-                                  highlighted: isRowHighlighted &&
-                                      (_activeHighlightExamId == null ||
-                                          _activeHighlightExamId ==
-                                              _int(_assessments[i]['id'])),
-                                  dimmed: _filter != 'all' &&
-                                      _cells(s)[i]['status'] != _filter,
-                                  onTap: () => _onCellTapped(
-                                    s,
-                                    _cells(s)[i],
-                                    _assessments[i],
-                                  ),
-                                ),
-                              // Overall Average Column
-                              AnimatedContainer(
-                                duration: const Duration(milliseconds: 350),
-                                width: _avgColW,
-                                height: _rowH,
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  color: isRowHighlighted
-                                      ? _green.withValues(alpha: 0.10)
-                                      : Colors.white,
-                                  border: const Border(
-                                    bottom: BorderSide(color: _line),
-                                    left: BorderSide(color: _line),
-                                  ),
-                                ),
-                                child: Text(
-                                  avg != null
-                                      ? '${avg.toStringAsFixed(1)}%'
-                                      : '—',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                    color: avg != null ? _ink : _slate,
-                                  ),
-                                ),
-                              ),
-                            ],
+                              ],
+                            ),
                           );
                         },
                       ),
                   ],
                 ),
               ),
-            ),
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, box) {
+                    final extra =
+                        (box.maxWidth - minimumRight).clamp(
+                          0.0,
+                          double.infinity,
+                        ) /
+                        displayColumns;
+                    final scoreWidth = _colW + extra;
+                    final totalWidth = _totalColW + extra;
+                    final gradeWidth = _avgColW + extra;
+                    return Scrollbar(
+                      controller: _hScroll,
+                      child: SingleChildScrollView(
+                        controller: _hScroll,
+                        scrollDirection: Axis.horizontal,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                for (final key in groups)
+                                  Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        width:
+                                            (items[key]!.isEmpty
+                                                    ? 1
+                                                    : items[key]!.length) *
+                                                scoreWidth +
+                                            (key == 'unknown' ? 0 : totalWidth),
+                                        height: groupHeight,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
+                                        alignment: Alignment.center,
+                                        decoration: const BoxDecoration(
+                                          color: Color(0xFF182238),
+                                          border: Border(
+                                            right: BorderSide(
+                                              color: Color(0xFF8D98AB),
+                                            ),
+                                          ),
+                                        ),
+                                        child: Text(
+                                          key == 'unknown'
+                                              ? 'Needs Classification'
+                                              : '${_categoryNames[key]} · ${_preferences[key]}%',
+                                          textAlign: TextAlign.center,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                      Row(
+                                        children: [
+                                          if (items[key]!.isEmpty)
+                                            cell(
+                                              text('—'),
+                                              scoreWidth,
+                                              labelHeight,
+                                              background:
+                                                  _assessmentHeaderColor(key),
+                                            ),
+                                          for (final assessment in items[key]!)
+                                            cell(
+                                              Tooltip(
+                                                message:
+                                                    '${assessment['title']} · ${_typeLabel(assessment['assessment_type']?.toString())}${assessment['grade_eligible'] == true ? '' : ' · Draft, excluded from grade'}',
+                                                child: Column(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    text(
+                                                      '${assessment['column_label']}',
+                                                      bold: true,
+                                                    ),
+                                                    Text(
+                                                      '/${_formatScore(assessment['total_points'] as num?)}',
+                                                      style: const TextStyle(
+                                                        fontSize: 10,
+                                                        color: Color(
+                                                          0xFF60718B,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              scoreWidth,
+                                              labelHeight,
+                                              background:
+                                                  _assessmentHeaderColor(key),
+                                            ),
+                                          if (key != 'unknown')
+                                            cell(
+                                              text('Total %', bold: true),
+                                              totalWidth,
+                                              labelHeight,
+                                              background: const Color(
+                                                0xFFEDF2F8,
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                cell(
+                                  text('Period Grade', bold: true),
+                                  gradeWidth,
+                                  _headH,
+                                  background: const Color(0xFFEDF2F8),
+                                ),
+                              ],
+                            ),
+                            for (final student in rows)
+                              Builder(
+                                builder: (context) {
+                                  final highlighted =
+                                      _activeHighlightStudentId ==
+                                      _int(student['id']);
+                                  final background = highlighted
+                                      ? const Color(0xFFE7F7EE)
+                                      : Colors.white;
+                                  return Row(
+                                    children: [
+                                      for (final key in groups) ...[
+                                        if (items[key]!.isEmpty)
+                                          cell(
+                                            text('—'),
+                                            scoreWidth,
+                                            _rowH,
+                                            background: background,
+                                          ),
+                                        for (final assessment in items[key]!)
+                                          _ScoreCell(
+                                            width: scoreWidth,
+                                            height: _rowH,
+                                            cell:
+                                                cellsByStudent[student['id']]![assessment['id']]!,
+                                            highlighted:
+                                                highlighted &&
+                                                (_activeHighlightExamId ==
+                                                        null ||
+                                                    _activeHighlightExamId ==
+                                                        _int(assessment['id'])),
+                                            dimmed:
+                                                _filter != 'all' &&
+                                                cellsByStudent[student['id']]![assessment['id']]!['status'] !=
+                                                    _filter,
+                                            onTap: () => _onCellTapped(
+                                              student,
+                                              cellsByStudent[student['id']]![assessment['id']]!,
+                                              assessment,
+                                            ),
+                                          ),
+                                        if (key != 'unknown')
+                                          cell(
+                                            text(
+                                              _categoryPercentage(student, key),
+                                            ),
+                                            totalWidth,
+                                            _rowH,
+                                            background: background,
+                                          ),
+                                      ],
+                                      cell(
+                                        text(
+                                          _percentage(
+                                            _periodGrade(student)['grade'],
+                                          ),
+                                          bold: true,
+                                        ),
+                                        gradeWidth,
+                                        _rowH,
+                                        background: background,
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -2870,64 +4967,61 @@ class _ScoreCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final status = cell['status']?.toString() ?? 'pending';
-
-    final String text;
-    final Color bg;
-    final Color fg;
-
-    switch (status) {
-      case 'completed':
-        final score = cell['score'] is num ? cell['score'] as num : null;
-        final max = cell['max_score'] is num ? cell['max_score'] as num : null;
-        text = max == null
-            ? _formatScore(score)
-            : '${_formatScore(score)} / ${_formatScore(max)}';
-        bg = _green.withValues(alpha: 0.15);
-        fg = _greenDark;
-      case 'needs_review':
-        text = 'Needs Review';
-        bg = _amber.withValues(alpha: 0.2);
-        fg = _amberDark;
-      case 'absent':
-        text = 'Absent';
-        bg = _red.withValues(alpha: 0.1);
-        fg = _red;
-      default:
-        text = 'Pending';
-        bg = _line;
-        fg = _slate;
-    }
-
+    final score = cell['score'] is num ? cell['score'] as num : null;
+    final max = cell['max_score'] is num ? cell['max_score'] as num : null;
+    final label = switch (status) {
+      'completed' => _formatScore(score),
+      'needs_review' => 'Review',
+      'absent' => 'Absent',
+      _ => '',
+    };
+    final color = switch (status) {
+      'needs_review' => _amberDark,
+      'absent' => _red,
+      _ => const Color(0xFF26334B),
+    };
+    final tooltip = status == 'completed'
+        ? 'Score ${_formatScore(score)} / ${_formatScore(max)} · Click to review'
+        : status == 'needs_review'
+        ? 'Needs review · Click to review answers'
+        : status == 'absent'
+        ? 'Absent · Click to manage'
+        : 'Missing score · Click to enter a manual score or manage absence';
     return Opacity(
       opacity: dimmed ? 0.4 : 1,
-      child: InkWell(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 350),
-          width: width,
-          height: height,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: highlighted
-                ? _green.withValues(alpha: 0.18)
-                : Colors.transparent,
-            border: const Border(bottom: BorderSide(color: _line)),
-          ),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      child: Tooltip(
+        message: tooltip,
+        child: InkWell(
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 350),
+            width: width,
+            height: height,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: bg,
-              borderRadius: BorderRadius.circular(999),
-              border: highlighted
-                  ? Border.all(color: _greenDark, width: 1.5)
-                  : null,
+              color: highlighted ? const Color(0xFFE7F7EE) : Colors.white,
+              border: const Border(
+                right: BorderSide(color: Color(0xFFE3E9F1)),
+                bottom: BorderSide(color: Color(0xFFE3E9F1)),
+              ),
             ),
-            child: Text(
-              text,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: fg,
+            child: Container(
+              width: 58,
+              height: 34,
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFBFCFE),
+                border: Border.all(
+                  color: highlighted ? _green : const Color(0xFFDCE4EF),
+                ),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, color: color),
               ),
             ),
           ),

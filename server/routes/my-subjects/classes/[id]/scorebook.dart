@@ -10,7 +10,7 @@ import 'package:server/my_subjects/my_subjects_service.dart';
 /// Deletes/resets a student's recorded score for an assessment in that section.
 Future<Response> onRequest(RequestContext context, String id) async {
   final method = context.request.method;
-  if (method != HttpMethod.get && method != HttpMethod.delete) {
+  if (method != HttpMethod.get && method != HttpMethod.delete && method != HttpMethod.put) {
     return mySubjectsMethodNotAllowed();
   }
 
@@ -19,6 +19,18 @@ Future<Response> onRequest(RequestContext context, String id) async {
     return mySubjectsBadRequest('Invalid section id');
   }
 
+  if (method == HttpMethod.put) {
+    try {
+      final body=await context.request.json();
+      if(body is! Map) return mySubjectsBadRequest('Invalid request body');
+      final eid=int.tryParse('${body['exam_id']}');
+      final sid=int.tryParse('${body['student_id']}');
+      final score=body['score']==null?null:num.tryParse('${body['score']}');
+      if(eid==null || sid==null || (body['score']!=null && score==null)) return mySubjectsBadRequest('Invalid score record');
+      await MySubjectsService.saveManualScore(teacherId:teacherIdOf(context),classId:classId,examId:eid,studentId:sid,score:score);
+      return Response.json(body:{'status':'ok'});
+    }catch(e){return mySubjectsError(e);}
+  }
   if (method == HttpMethod.delete) {
     try {
       var body = <String, dynamic>{};

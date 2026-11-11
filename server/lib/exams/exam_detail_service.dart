@@ -35,7 +35,7 @@ class ExamDetailService {
               UNION
               SELECT e.class_id
             ) q
-          ) AS class_ids
+          ) AS class_ids, e.grading_period, e.creation_mode, e.manual_max_score
         FROM exams e
         JOIN classes c ON c.id = e.class_id
         JOIN subjects s ON s.id = c.subject_id
@@ -185,6 +185,9 @@ class ExamDetailService {
       'semester': exam[16],
       'year_level': exam[17],
       'class_ids': classIds,
+      'grading_period': exam[19],
+      'creation_mode': exam[20],
+      'manual_max_score': exam[21] == null ? null : num.parse('${exam[21]}'),
       'class': {
         'id': exam[1],
         'section': exam[8],

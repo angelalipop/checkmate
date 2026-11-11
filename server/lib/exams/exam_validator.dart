@@ -83,6 +83,8 @@ class ExamValidator {
     'quiz': 5,
     'short_quiz': 5,
     'long_quiz': 15,
+    'performance_task': 5,
+    'laboratory': 5,
     'prelim': 35,
     'midterm': 35,
     'prefinal': 35,
@@ -143,6 +145,10 @@ class ExamValidator {
       case 'final_exam':
       case 'final_examination':
         return 'final';
+      case 'performance_task':
+        return 'performance_task';
+      case 'laboratory':
+        return 'laboratory';
       case 'other':
         return 'other';
     }
@@ -200,6 +206,10 @@ class ExamValidator {
       case 'final':
       case 'finals':
         return 'Finals';
+      case 'performance_task':
+        return 'Performance Task';
+      case 'laboratory':
+        return 'Laboratory';
       case 'other':
         return 'Other';
       default:

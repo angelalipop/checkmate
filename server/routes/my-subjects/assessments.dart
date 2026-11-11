@@ -59,6 +59,9 @@ Future<Response> onRequest(RequestContext context) async {
           assessmentType: body['assessment_type']?.toString() ?? '',
           description: body['description']?.toString(),
           instructions: body['instructions']?.toString(),
+          gradingPeriod: body['grading_period']?.toString(),
+          creationMode: body['creation_mode']?.toString() ?? 'builder',
+          maximumScore: num.tryParse('${body['maximum_score']}'),
         );
 
         return Response.json(

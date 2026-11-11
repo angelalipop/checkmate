@@ -200,7 +200,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
         }
       }
     } catch (_) {}
-    if (targetExam == null) return;
+    if (targetExam == null || targetExam['creation_mode']=='manual') return;
 
     for (final subj in _subjects) {
       final sections = _subjectSections(subj);
@@ -260,6 +260,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
   }
 
   bool _isActiveAndPublished(Map<String, dynamic> exam) {
+    if(exam['creation_mode']=='manual')return false;
     final status = (exam['status']?.toString() ?? '').trim().toLowerCase();
     return status == 'published' || status == 'active';
   }
@@ -423,7 +424,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
             break;
           }
         }
-        if (chosenExam == null && byId.containsKey(preferredExamId)) {
+        if (chosenExam == null && byId.containsKey(preferredExamId) && byId[preferredExamId]!['creation_mode'] != 'manual') {
           final fallbackExam = Map<String, dynamic>.from(byId[preferredExamId]!);
           activeExams.insert(0, fallbackExam);
           chosenExam = fallbackExam;
@@ -467,7 +468,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
   // =========================
 
   Future<void> _loadExamSections() async {
-    if (_selectedExam == null) return;
+    if (_selectedExam == null || _selectedExam!['creation_mode']=='manual') return;
 
     final int? examId = int.tryParse('${_selectedExam!['id']}');
     if (examId == null) {

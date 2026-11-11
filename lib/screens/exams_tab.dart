@@ -8,10 +8,12 @@ import '../services/answer_sheet_pdf_service.dart';
 import '../services/api_service.dart';
 import '../services/assessment_validator.dart';
 import '../services/auth_storage.dart';
+import '../services/my_subjects_api_service.dart';
 import '../services/question_paper_import_service.dart';
 import '../services/question_paper_pdf_service.dart';
 import 'login_screen.dart' show CmColors;
-import 'teacher_dashboard.dart' show openTeacherScansForExam;
+import 'teacher_dashboard.dart' show openTeacherScansForExam, TeacherShell, TeacherPage;
+import 'my_subjects_screen.dart' show MySubjectsScreen;
 
 // =============================================================
 // CheckMate — Teacher "Exams" tab
@@ -198,6 +200,8 @@ String _statusLabel(String s) {
       return 'Published';
     case 'archived':
       return 'Archived';
+    case 'manual':
+      return 'Manual Score';
     default:
       return 'Draft';
   }
@@ -209,6 +213,8 @@ Color _statusColor(String s) {
       return CmColors.green;
     case 'archived':
       return CmColors.slate;
+    case 'manual':
+      return Colors.blue;
     default:
       return _Brand.amber;
   }
@@ -573,11 +579,12 @@ const Map<String, String> _kAssessmentTypes = {
   'quiz': 'Quiz',
   'short_quiz': 'Short Quiz',
   'long_quiz': 'Long Quiz',
+  'performance_task': 'Performance Task',
+  'laboratory': 'Laboratory',
   'prelim': 'Prelim',
   'midterm': 'Midterm',
-  'prefinal': 'Prefinals',
+  'prefinal': 'Pre-Finals',
   'final': 'Finals',
-  'other': 'Other',
 };
 
 const List<String> _kMonthNames = <String>[
@@ -898,12 +905,358 @@ Future<int> importParsedSectionsIntoExam({
   return importedCount;
 }
 
+const gradingPeriodLabels = <String, String>{
+  'prelims': 'Prelims',
+  'midterm': 'Midterm',
+  'pre_finals': 'Pre-Finals',
+  'finals': 'Finals',
+};
+String? _majorGradingPeriod(String type) => switch (type) {
+  'prelim' => 'prelims',
+  'midterm' => 'midterm',
+  'prefinal' || 'pre_finals' => 'pre_finals',
+  'final' || 'finals' => 'finals',
+  _ => null,
+};
+
+class AssessmentCreationResult {
+  const AssessmentCreationResult(
+    this.examId, {
+    this.manual = false,
+    this.classId,
+  });
+  final int examId;
+  final bool manual;
+  final int? classId;
+}
+
+Future<AssessmentCreationResult?> showAssessmentCreation(
+  BuildContext context, {
+  required List<Map<String, dynamic>> classes,
+  int? initialClassId,
+}) async {
+  String type = 'quiz';
+  String period = 'prelims';
+  String? mode;
+  final selected = await showDialog<bool>(
+    context: context,
+    builder: (c) => StatefulBuilder(
+      builder: (c, setS) => AlertDialog(
+        title: const Text('Add assessment'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              DropdownButtonFormField<String>(
+                initialValue: type,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Assessment Type'),
+                items: [
+                  for (final e in _kAssessmentTypes.entries)
+                    DropdownMenuItem(value: e.key, child: Text(e.value)),
+                ],
+                onChanged: (v) {
+                  if (v != null)
+                    setS(() {
+                      type = v;
+                      period = _majorGradingPeriod(v) ?? period;
+                      mode = null;
+                    });
+                },
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                key: ValueKey('$type-$period'),
+                initialValue: period,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Grading Period'),
+                items: [
+                  for (final e in gradingPeriodLabels.entries)
+                    DropdownMenuItem(value: e.key, child: Text(e.value)),
+                ],
+                onChanged: _majorGradingPeriod(type) != null
+                    ? null
+                    : (v) {
+                        if (v != null) setS(() => period = v);
+                      },
+              ),
+              const SizedBox(height: 16),
+              if (['performance_task', 'laboratory'].contains(type)) ...[
+                OutlinedButton.icon(
+                  onPressed: () {
+                    mode = 'builder';
+                    Navigator.pop(c, true);
+                  },
+                  icon: const Icon(Icons.edit_document),
+                  label: const Text('Create an Assessment'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    mode = 'manual';
+                    Navigator.pop(c, true);
+                  },
+                  icon: const Icon(Icons.table_chart_outlined),
+                  label: const Text('Create Scorebook Column Only'),
+                ),
+              ] else
+                Text(
+                  ['quiz', 'short_quiz', 'long_quiz'].contains(type)
+                      ? 'Counts under Quizzes.'
+                      : 'Counts under Major Examination.',
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancel'),
+          ),
+          if (!['performance_task', 'laboratory'].contains(type))
+            FilledButton(
+              onPressed: () {
+                mode = 'builder';
+                Navigator.pop(c, true);
+              },
+              child: const Text('Continue'),
+            ),
+        ],
+      ),
+    ),
+  );
+  if (selected != true || !context.mounted) return null;
+  if (mode == 'manual')
+    return _showManualColumnForm(
+      context,
+      classes: classes,
+      type: type,
+      period: period,
+      initialClassId: initialClassId,
+    );
+  AssessmentCreationResult? manualResult;
+  final id = await showExamDetailsModal(
+    context,
+    classes: classes,
+    initialClassId: initialClassId,
+    initialAssessmentType: type,
+    initialGradingPeriod: period,
+    onManualCreated: (r) => manualResult = r,
+  );
+  return manualResult ?? (id == null ? null : AssessmentCreationResult(id));
+}
+
+Future<AssessmentCreationResult?> _showManualColumnForm(
+  BuildContext context, {
+  required List<Map<String, dynamic>> classes,
+  required String type,
+  required String period,
+  int? initialClassId,
+}) async {
+  final groups = _buildSubjectGroups(classes);
+  if (groups.isEmpty) {
+    _toast(context, 'No assigned subjects or sections.');
+    return null;
+  }
+  var group = groups.firstWhere(
+    (g) => g.classIds.contains(initialClassId),
+    orElse: () => groups.first,
+  );
+  final selected = <int>{...group.classIds};
+  final name = TextEditingController();
+  final maximum = TextEditingController(text: '30');
+  var saving = false;
+  String? error;
+  final result = await showDialog<AssessmentCreationResult>(
+    context: context,
+    barrierDismissible: false,
+    builder: (c) => StatefulBuilder(
+      builder: (c, setS) => AlertDialog(
+        title: Text('Create ${_kAssessmentTypes[type]} column'),
+        content: SizedBox(
+          width: 450,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: name,
+                  enabled: !saving,
+                  decoration: const InputDecoration(
+                    labelText: 'Assessment Name',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: group.key,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Subject'),
+                  items: [
+                    for (final g in groups)
+                      DropdownMenuItem(
+                        value: g.key,
+                        child: Text(
+                          g.displayLabel,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                  onChanged: saving
+                      ? null
+                      : (v) => setS(() {
+                          group = groups.firstWhere((g) => g.key == v);
+                          selected
+                            ..clear()
+                            ..addAll(group.classIds);
+                        }),
+                ),
+                const SizedBox(height: 12),
+                const Text('Assigned Sections'),
+                for (final sec in group.sections)
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('${sec['section'] ?? ''}'),
+                    value: selected.contains(_id(sec['id'])),
+                    onChanged: saving
+                        ? null
+                        : (v) => setS(() {
+                            final id = _id(sec['id'])!;
+                            if (v == true) {
+                              selected.add(id);
+                            } else {
+                              selected.remove(id);
+                            }
+                          }),
+                  ),
+                DropdownButtonFormField<String>(
+                  initialValue: period,
+                  decoration: const InputDecoration(
+                    labelText: 'Grading Period',
+                  ),
+                  items: [
+                    for (final e in gradingPeriodLabels.entries)
+                      DropdownMenuItem(value: e.key, child: Text(e.value)),
+                  ],
+                  onChanged: saving
+                      ? null
+                      : (v) {
+                          if (v != null) setS(() => period = v);
+                        },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: maximum,
+                  enabled: !saving,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(labelText: 'Maximum Score'),
+                ),
+                if (error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(
+                      error!,
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: saving ? null : () => Navigator.pop(c),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: saving
+                ? null
+                : () async {
+                    final max = num.tryParse(maximum.text.trim());
+                    if (name.text.trim().isEmpty ||
+                        selected.isEmpty ||
+                        max == null ||
+                        !max.isFinite ||
+                        max <= 0) {
+                      setS(
+                        () => error = 'Enter a name, sections, and positive maximum score.',
+                      );
+                      return;
+                    }
+                    setS(() {
+                      saving = true;
+                      error = null;
+                    });
+                    try {
+                      final ids = selected.toList()..sort();
+                      final record = await MySubjectsApi.createAssessment(
+                        await _token(),
+                        classIds: ids,
+                        title: name.text.trim(),
+                        assessmentType: type,
+                        gradingPeriod: period,
+                        creationMode: 'manual',
+                        maximumScore: max,
+                      );
+                      if (c.mounted)
+                        Navigator.pop(
+                          c,
+                          AssessmentCreationResult(
+                            _id(record['id'])!,
+                            manual: true,
+                            classId: ids.first,
+                          ),
+                        );
+                    } catch (e) {
+                      if (c.mounted)
+                        setS(() {
+                          saving = false;
+                          error = _err(e);
+                        });
+                    }
+                  },
+            child: Text(saving ? 'Saving…' : 'Create Column'),
+          ),
+        ],
+      ),
+    ),
+  );
+  _disposeControllersLater([name, maximum]);
+  return result;
+}
+
+void _openManualScorebook(BuildContext context, Map<String, dynamic> exam) {
+  final cid = _examClassId(exam);
+  final eid = _id(exam['id']);
+  if (cid == null || eid == null) return;
+  mySubjectsScorebookTarget.value = MySubjectsScorebookTarget(
+    classId: cid,
+    examId: eid,
+    studentId: 0,
+  );
+  final shell = context.findAncestorWidgetOfExactType<TeacherShell>();
+  if (shell != null) {
+    shell.onSelect(TeacherPage.subjects);
+  } else {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const MySubjectsScreen()));
+  }
+}
+
 Future<int?> showExamDetailsModal(
   BuildContext context, {
   required List<Map<String, dynamic>> classes,
   Map<String, dynamic>? exam,
   int? initialClassId,
   ImportedQuestionPaper? initialImportedPaper,
+  String? initialAssessmentType,
+  String? initialGradingPeriod,
+  ValueChanged<AssessmentCreationResult>? onManualCreated,
 }) async {
   final editing = exam != null;
   final examId = _id(exam?['id']);
@@ -958,14 +1311,15 @@ Future<int?> showExamDetailsModal(
 
   // Determine initial Type.
   String type = AssessmentValidator.normalizeAssessmentType(
-    exam?['assessment_type']?.toString() ??
+    initialAssessmentType ?? exam?['assessment_type']?.toString() ??
         importedPaper?.detectedAssessmentType,
     title: exam?['title']?.toString() ?? importedPaper?.detectedQuizTitle,
     description: exam?['description']?.toString(),
   );
-  if (!_kAssessmentTypes.containsKey(type)) {
-    type = 'quiz';
-  }
+  if (!_kAssessmentTypes.containsKey(type) && !(editing && type == 'other')) { type = 'quiz'; }
+  var gradingPeriod = initialGradingPeriod ?? exam?['grading_period']?.toString();
+  gradingPeriod = _majorGradingPeriod(type) ?? gradingPeriod;
+  var classificationConfirmed = !editing || _kAssessmentTypes.containsKey(exam?['assessment_type']);
 
   // Initial Quiz Name (for Quiz / Short Quiz / Long Quiz / Other).
   final rawExistingTitle = (exam?['title']?.toString() ??
@@ -1087,12 +1441,13 @@ Future<int?> showExamDetailsModal(
         }
 
         Future<void> save() async {
+          if (gradingPeriod == null || !classificationConfirmed) { setS(() => error = 'Confirm an assessment type and grading period.'); return; }
           if (siblings.isNotEmpty && selected.isEmpty) {
             setS(() => error = 'Choose at least one section.');
             return;
           }
           if (!isMajor && quizNameC.text.trim().isEmpty) {
-            setS(() => error = 'Quiz name is required.');
+            setS(() => error = 'Assessment name is required.');
             return;
           }
 
@@ -1130,6 +1485,7 @@ Future<int?> showExamDetailsModal(
                 examId: examId,
                 title: finalTitle,
                 assessmentType: type,
+                gradingPeriod: gradingPeriod,
                 classId: primaryClassId,
                 classIds: sortedClassIds,
                 description: finalDescription.isEmpty ? null : finalDescription,
@@ -1141,6 +1497,7 @@ Future<int?> showExamDetailsModal(
                 classId: primaryClassId,
                 classIds: sortedClassIds,
                 assessmentType: type,
+                gradingPeriod: gradingPeriod,
                 title: finalTitle,
                 description: finalDescription.isEmpty ? null : finalDescription,
                 instructions: cleanInst.isEmpty ? null : cleanInst,
@@ -1546,6 +1903,7 @@ Future<int?> showExamDetailsModal(
                 style: _inputText,
                 decoration: _floatingDeco('Type', hint: 'Select type'),
                 items: [
+                  if (editing && type == 'other') const DropdownMenuItem<String>(value:'other',child:Text('Other (historical)')),
                   for (final e in _kAssessmentTypes.entries)
                     DropdownMenuItem<String>(
                       value: e.key,
@@ -1555,11 +1913,25 @@ Future<int?> showExamDetailsModal(
                 onChanged: saving
                     ? null
                     : (v) {
-                        if (v != null) setS(() => type = v);
+                        if (v != null) setS(() { type = v; classificationConfirmed = true; gradingPeriod = _majorGradingPeriod(v) ?? gradingPeriod; });
                       },
               ),
               const SizedBox(height: 14),
 
+              DropdownButtonFormField<String>(
+                key: ValueKey('period-$type-$gradingPeriod'), initialValue:gradingPeriod,
+                decoration:_floatingDeco('Grading Period',hint:'Select period'),
+                items:[for(final e in gradingPeriodLabels.entries)DropdownMenuItem(value:e.key,child:Text(e.value))],
+                onChanged:saving||_majorGradingPeriod(type)!=null?null:(v)=>setS(()=>gradingPeriod=v),
+              ),
+              const SizedBox(height:14),
+              if(!editing && importedPaper==null && onManualCreated!=null && ['performance_task','laboratory'].contains(type))...[
+                OutlinedButton.icon(onPressed:saving?null:()async{
+                  final result=await _showManualColumnForm(dialogContext,classes:classes,type:type,period:gradingPeriod??'prelims',initialClassId:selected.firstOrNull);
+                  if(result!=null && dialogContext.mounted){onManualCreated(result);Navigator.pop(dialogContext,result.examId);}
+                },icon:const Icon(Icons.table_chart_outlined),label:const Text('Create Scorebook Column Only')),
+                const SizedBox(height:14),
+              ],
               // 2. Subject name dropdown
               if (subjectGroups.isNotEmpty) ...[
                 DropdownButtonFormField<String>(
@@ -1609,8 +1981,8 @@ Future<int?> showExamDetailsModal(
                   onChanged: (_) => setS(() {}),
                   style: _inputText,
                   decoration: _floatingDeco(
-                    'Quiz name',
-                    hint: 'e.g. Long Quiz 1 - Loops',
+                    ['performance_task','laboratory'].contains(type)?'Assessment name':'Quiz name',
+                    hint: ['performance_task','laboratory'].contains(type)?'Enter assessment name':'e.g. Long Quiz 1 - Loops',
                   ),
                 ),
               ] else ...[
@@ -1781,6 +2153,7 @@ class _ExamsTabState extends State<ExamsTab> {
   String? _selectedSection;
   int? _openExamId;
   bool _openedFromUpload = false;
+  bool _initialTargetResolved = false;
 
   bool _loading = true;
   String? _error;
@@ -1788,7 +2161,6 @@ class _ExamsTabState extends State<ExamsTab> {
   @override
   void initState() {
     super.initState();
-    _openExamId = widget.initialExamId;
     _loadData();
   }
 
@@ -1806,6 +2178,12 @@ class _ExamsTabState extends State<ExamsTab> {
       if (!mounted) return;
       setState(() {
         _exams = results[0];
+        if(!_initialTargetResolved){
+          _initialTargetResolved=true;
+          final initial=_exams.where((e)=>_id(e['id'])==widget.initialExamId).firstOrNull;
+          if(initial!=null && initial['creation_mode']!='manual')_openExamId=widget.initialExamId;
+          if(initial?['creation_mode']=='manual')WidgetsBinding.instance.addPostFrameCallback((_){if(mounted)_openManualScorebook(context,initial!);});
+        }
         _classes = results[1];
         _loading = false;
       });
@@ -1823,6 +2201,7 @@ class _ExamsTabState extends State<ExamsTab> {
   Future<void> _loadCounts(String token, List<_Json> exams) async {
     await Future.wait(
       exams.map((exam) async {
+        if(exam['creation_mode']=='manual') return;
         final key = exam['id']?.toString();
         final examId = _id(exam['id']);
         if (key == null || examId == null) return;
@@ -1934,11 +2313,13 @@ class _ExamsTabState extends State<ExamsTab> {
           }
         }
       }
-      final createdId = await showExamDetailsModal(
-        context,
-        classes: _classes,
-        initialClassId: preselect,
-      );
+      final created = await showAssessmentCreation(context,classes:_classes,initialClassId:preselect);
+      if(created?.manual == true){
+        await _loadData();
+        if(mounted)_openManualScorebook(context,{'id':created!.examId,'class_id':created.classId});
+        return;
+      }
+      final createdId = created?.examId;
       if (createdId != null) {
         await _loadData();
         if (!mounted) return;
@@ -1998,6 +2379,7 @@ class _ExamsTabState extends State<ExamsTab> {
   }
 
   void _openBuilder(_Json exam) {
+    if(exam['creation_mode']=='manual'){_openManualScorebook(context,exam);return;}
     final id = _id(exam['id']);
     if (id == null) {
       _toast(context, 'Invalid exam ID.');
@@ -2205,7 +2587,7 @@ class _ExamsTabState extends State<ExamsTab> {
 
   Widget _examCard(_Json exam, bool narrow) {
     final title = exam['title']?.toString() ?? 'Untitled Exam';
-    final status = exam['status']?.toString() ?? 'draft';
+    final status = exam['creation_mode']=='manual'?'manual':exam['status']?.toString() ?? 'draft';
     final counts = _counts[exam['id']?.toString() ?? ''];
 
     final info = Row(
@@ -2238,7 +2620,7 @@ class _ExamsTabState extends State<ExamsTab> {
               ),
               const SizedBox(height: 3),
               Text(
-                _examSubjectAndSectionsLabel(exam),
+                '${_examSubjectAndSectionsLabel(exam)} · ${gradingPeriodLabels[exam['grading_period']] ?? 'Period unassigned'}',
                 style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
               ),
               if (counts != null) ...[
@@ -2258,10 +2640,10 @@ class _ExamsTabState extends State<ExamsTab> {
     final open = OutlinedButton(
       style: _outlineStyle,
       onPressed: () => _openBuilder(exam),
-      child: const Row(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('Open builder'),
+          Text(exam['creation_mode']=='manual'?'Open Scorebook':'Open builder'),
           SizedBox(width: 6),
           Icon(Icons.arrow_forward, size: 16),
         ],

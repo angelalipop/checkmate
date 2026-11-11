@@ -588,6 +588,7 @@ class ApiService {
     String? instructions,
     String? status,
     String? assessmentType,
+    String? gradingPeriod,
   }) async {
     final response = await http.post(
       Uri.parse('$baseUrl/exams'),
@@ -603,6 +604,7 @@ class ApiService {
         'instructions': instructions,
         'status': status,
         'assessment_type': ?assessmentType,
+        'grading_period': ?gradingPeriod,
       }),
     );
 
@@ -706,6 +708,7 @@ class ApiService {
     List<int>? classIds,
     // quiz | short_quiz | long_quiz | prelim | midterm | prefinal | final | other
     String? assessmentType,
+    String? gradingPeriod,
     String? description,
     String? instructions,
     // draft | published | archived
@@ -718,6 +721,7 @@ class ApiService {
         'class_id': ?classId,
         'class_ids': ?classIds,
         'assessment_type': ?assessmentType,
+        'grading_period': ?gradingPeriod,
         'status': ?status,
         'title': title,
         'description': description,
