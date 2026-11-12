@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' show Rect;
 
@@ -8,6 +9,111 @@ import 'package:xml/xml.dart';
 
 import 'question_paper_pdf_service.dart';
 
+/// Configuration for a single section in the CheckMate Word questionnaire template.
+class QuestionnaireTemplateSectionConfig {
+  const QuestionnaireTemplateSectionConfig({
+    required this.questionType,
+    required this.itemCount,
+    this.pointsPerItem = 1.0,
+  });
+
+  final String questionType;
+  final int itemCount;
+  final double pointsPerItem;
+
+  double get totalPoints => itemCount * pointsPerItem;
+
+  QuestionnaireTemplateSectionConfig copyWith({
+    String? questionType,
+    int? itemCount,
+    double? pointsPerItem,
+  }) {
+    return QuestionnaireTemplateSectionConfig(
+      questionType: questionType ?? this.questionType,
+      itemCount: itemCount ?? this.itemCount,
+      pointsPerItem: pointsPerItem ?? this.pointsPerItem,
+    );
+  }
+}
+
+/// Resolved template section with its Roman-numeral Part number, optional
+/// lettered subpart (when a question type repeats), display heading, separate
+/// point-instruction line, and continuous item range.
+class ResolvedTemplateSection {
+  const ResolvedTemplateSection({
+    required this.sectionOrder,
+    required this.partNumber,
+    required this.partRoman,
+    required this.subpartLetter,
+    required this.questionType,
+    required this.heading,
+    required this.instructionLine,
+    required this.pointsInstructionLine,
+    required this.itemCount,
+    required this.pointsPerItem,
+    required this.startItem,
+    required this.endItem,
+  });
+
+  final int sectionOrder;
+  final int partNumber;
+  final String partRoman;
+  final String? subpartLetter;
+  final String questionType;
+  final String heading;
+  final String instructionLine;
+  final String pointsInstructionLine;
+  final int itemCount;
+  final double pointsPerItem;
+  final int startItem;
+  final int endItem;
+
+  double get totalPoints => itemCount * pointsPerItem;
+
+  String get itemRangeLabel =>
+      itemCount <= 0 ? '0 items' : '$startItem\u2013$endItem';
+}
+
+/// Built-in preset definition for the Upload Questionnaire template setup UI.
+class QuestionnaireTemplatePreset {
+  const QuestionnaireTemplatePreset({
+    required this.id,
+    required this.label,
+    required this.sections,
+  });
+
+  final String id;
+  final String label;
+  final List<QuestionnaireTemplateSectionConfig> sections;
+}
+
+/// Validation or discrepancy issue surfaced during questionnaire import review.
+class QuestionPaperImportIssue {
+  const QuestionPaperImportIssue({
+    required this.kind,
+    required this.message,
+    this.sectionIndex,
+    this.questionNumber,
+    this.isBlocking = false,
+  });
+
+  /// Issue category:
+  /// - `'unreadable_page'`
+  /// - `'unresolved_classification'`
+  /// - `'ambiguous_section'`
+  /// - `'duplicate_number'`
+  /// - `'missing_number'`
+  /// - `'leftover_placeholder'`
+  /// - `'incomplete_choices'`
+  /// - `'mismatched_count'`
+  /// - `'template_mismatch'`
+  final String kind;
+  final String message;
+  final int? sectionIndex;
+  final int? questionNumber;
+  final bool isBlocking;
+}
+
 class ImportedExamQuestion {
   const ImportedExamQuestion({
     required this.questionNumber,
@@ -16,14 +122,56 @@ class ImportedExamQuestion {
     required this.points,
     this.choices = const <String>[],
     this.correctAnswer,
+    this.sourceQuestionNumber,
+    this.hasLeftoverPlaceholder = false,
+    this.missingChoiceLetters = const <String>[],
+    this.classificationAmbiguous = false,
   });
 
   final int questionNumber;
+  final int? sourceQuestionNumber;
   final String questionText;
   final String questionType;
   final double points;
   final List<String> choices;
   final String? correctAnswer;
+  final bool hasLeftoverPlaceholder;
+  final List<String> missingChoiceLetters;
+  final bool classificationAmbiguous;
+
+  bool get hasIssues =>
+      hasLeftoverPlaceholder ||
+      missingChoiceLetters.isNotEmpty ||
+      classificationAmbiguous ||
+      questionText.trim().isEmpty;
+
+  ImportedExamQuestion copyWith({
+    int? questionNumber,
+    int? sourceQuestionNumber,
+    String? questionText,
+    String? questionType,
+    double? points,
+    List<String>? choices,
+    String? correctAnswer,
+    bool? hasLeftoverPlaceholder,
+    List<String>? missingChoiceLetters,
+    bool? classificationAmbiguous,
+  }) {
+    return ImportedExamQuestion(
+      questionNumber: questionNumber ?? this.questionNumber,
+      sourceQuestionNumber: sourceQuestionNumber ?? this.sourceQuestionNumber,
+      questionText: questionText ?? this.questionText,
+      questionType: questionType ?? this.questionType,
+      points: points ?? this.points,
+      choices: choices ?? this.choices,
+      correctAnswer: correctAnswer ?? this.correctAnswer,
+      hasLeftoverPlaceholder:
+          hasLeftoverPlaceholder ?? this.hasLeftoverPlaceholder,
+      missingChoiceLetters: missingChoiceLetters ?? this.missingChoiceLetters,
+      classificationAmbiguous:
+          classificationAmbiguous ?? this.classificationAmbiguous,
+    );
+  }
 }
 
 class ImportedExamSection {
@@ -32,12 +180,57 @@ class ImportedExamSection {
     required this.questionType,
     required this.defaultPoints,
     required this.questions,
+    this.partNumber,
+    this.subpartLetter,
+    this.expectedItemCount,
+    this.hasAmbiguousMetadata = false,
   });
 
   final String name;
   final String questionType;
   final double defaultPoints;
   final List<ImportedExamQuestion> questions;
+  final int? partNumber;
+  final String? subpartLetter;
+  final int? expectedItemCount;
+  final bool hasAmbiguousMetadata;
+
+  int get startQuestionNumber =>
+      questions.isEmpty ? 0 : questions.first.questionNumber;
+
+  int get endQuestionNumber =>
+      questions.isEmpty ? 0 : questions.last.questionNumber;
+
+  String get itemRangeLabel => questions.isEmpty
+      ? '0 items'
+      : '${questions.first.questionNumber}\u2013${questions.last.questionNumber}';
+
+  double get totalPoints => questions.fold<double>(
+    0.0,
+    (sum, q) => sum + (q.points > 0 ? q.points : defaultPoints),
+  );
+
+  ImportedExamSection copyWith({
+    String? name,
+    String? questionType,
+    double? defaultPoints,
+    List<ImportedExamQuestion>? questions,
+    int? partNumber,
+    String? subpartLetter,
+    int? expectedItemCount,
+    bool? hasAmbiguousMetadata,
+  }) {
+    return ImportedExamSection(
+      name: name ?? this.name,
+      questionType: questionType ?? this.questionType,
+      defaultPoints: defaultPoints ?? this.defaultPoints,
+      questions: questions ?? this.questions,
+      partNumber: partNumber ?? this.partNumber,
+      subpartLetter: subpartLetter ?? this.subpartLetter,
+      expectedItemCount: expectedItemCount ?? this.expectedItemCount,
+      hasAmbiguousMetadata: hasAmbiguousMetadata ?? this.hasAmbiguousMetadata,
+    );
+  }
 }
 
 class ImportedQuestionPaper {
@@ -53,6 +246,8 @@ class ImportedQuestionPaper {
     this.detectedEndTime,
     this.detectedReferenceNo,
     this.detectedInstructions,
+    this.unreadablePages = const <int>[],
+    this.issues = const <QuestionPaperImportIssue>[],
   });
 
   final String fileName;
@@ -66,16 +261,74 @@ class ImportedQuestionPaper {
   final String? detectedEndTime;
   final String? detectedReferenceNo;
   final String? detectedInstructions;
+  final List<int> unreadablePages;
+  final List<QuestionPaperImportIssue> issues;
 
   int get totalQuestions =>
       sections.fold<int>(0, (sum, s) => sum + s.questions.length);
+
+  double get totalPoints =>
+      sections.fold<double>(0.0, (sum, s) => sum + s.totalPoints);
+
+  bool get hasExplicitAssessmentType =>
+      detectedAssessmentType != null &&
+      detectedAssessmentType!.trim().isNotEmpty;
+
+  bool get isAssessmentTypeAmbiguous => !hasExplicitAssessmentType;
+
+  bool get hasBlockingIssues => issues.any((i) => i.isBlocking);
+
+  Map<String, double> get pointsSubtotalByType {
+    final map = <String, double>{};
+    for (final s in sections) {
+      final t = QuestionPaperImportService.normalizeQuestionType(
+        s.questionType,
+      );
+      map[t] = (map[t] ?? 0.0) + s.totalPoints;
+    }
+    return map;
+  }
+
+  Map<String, int> get itemCountSubtotalByType {
+    final map = <String, int>{};
+    for (final s in sections) {
+      final t = QuestionPaperImportService.normalizeQuestionType(
+        s.questionType,
+      );
+      map[t] = (map[t] ?? 0) + s.questions.length;
+    }
+    return map;
+  }
+
+  /// Rebuilds the paper after teacher edits in the Import Review modal,
+  /// re-applying canonical Roman-numeral Part & lettered subpart headings,
+  /// continuous question numbering, and validation checks.
+  ImportedQuestionPaper rebuildWithUpdatedSections(
+    List<ImportedExamSection> updatedSections, {
+    List<QuestionnaireTemplateSectionConfig>? expectedTemplate,
+  }) {
+    return QuestionPaperImportService.finalizeImportedPaper(
+      fileName: fileName,
+      rawSections: updatedSections,
+      detectedAssessmentType: detectedAssessmentType,
+      detectedSubjectName: detectedSubjectName,
+      detectedQuizTitle: detectedQuizTitle,
+      detectedExamDay: detectedExamDay,
+      detectedExamDate: detectedExamDate,
+      detectedStartTime: detectedStartTime,
+      detectedEndTime: detectedEndTime,
+      detectedReferenceNo: detectedReferenceNo,
+      detectedInstructions: detectedInstructions,
+      unreadablePages: unreadablePages,
+      expectedTemplate: expectedTemplate,
+    );
+  }
 }
 
 /// Parses an uploaded Questionnaire in multiple file formats (`.pdf`, `.docx`,
 /// `.doc`, `.xlsx`, `.csv`, `.tsv`, `.txt`, `.rtf`, `.odt`, `.md`, `.html`)
-/// into structured sections, questions, choices, and header metadata, and
-/// automatically organizes all uploaded questions according to their respective
-/// test types (`multiple_choice`, `true_false`, `identification`).
+/// into structured sections, questions, choices, header metadata, and
+/// teacher-review validation diagnostics.
 class QuestionPaperImportService {
   QuestionPaperImportService._();
 
@@ -94,14 +347,132 @@ class QuestionPaperImportService {
     'htm',
   ];
 
-  /// Formats an automatic section name based on 1-based [sectionOrder] and
-  /// [questionType], e.g. `"Part I: Multiple Choice"`, `"Part II: True or False"`.
-  static String autoSectionName(int sectionOrder, String questionType) {
-    return 'Part ${romanNumeral(sectionOrder)}: ${labelForType(questionType)}';
+  static const List<QuestionnaireTemplatePreset> templatePresets =
+      <QuestionnaireTemplatePreset>[
+        QuestionnaireTemplatePreset(
+          id: 'default',
+          label: 'Default \u00B7 35 Multiple Choice',
+          sections: <QuestionnaireTemplateSectionConfig>[
+            QuestionnaireTemplateSectionConfig(
+              questionType: 'multiple_choice',
+              itemCount: 35,
+              pointsPerItem: 1,
+            ),
+          ],
+        ),
+        QuestionnaireTemplatePreset(
+          id: 'mixed',
+          label: 'Mixed \u00B7 20 MC / 10 T\u2013F / 5 ID',
+          sections: <QuestionnaireTemplateSectionConfig>[
+            QuestionnaireTemplateSectionConfig(
+              questionType: 'multiple_choice',
+              itemCount: 20,
+              pointsPerItem: 1,
+            ),
+            QuestionnaireTemplateSectionConfig(
+              questionType: 'true_false',
+              itemCount: 10,
+              pointsPerItem: 1,
+            ),
+            QuestionnaireTemplateSectionConfig(
+              questionType: 'identification',
+              itemCount: 5,
+              pointsPerItem: 1,
+            ),
+          ],
+        ),
+        QuestionnaireTemplatePreset(
+          id: 'uploaded-exam',
+          label: 'Uploaded STI Midterm \u00B7 35 MC \u00D7 2 pts',
+          sections: <QuestionnaireTemplateSectionConfig>[
+            QuestionnaireTemplateSectionConfig(
+              questionType: 'multiple_choice',
+              itemCount: 35,
+              pointsPerItem: 2,
+            ),
+          ],
+        ),
+        QuestionnaireTemplatePreset(
+          id: 'sti',
+          label: 'STI example \u00B7 Two Multiple Choice sections',
+          sections: <QuestionnaireTemplateSectionConfig>[
+            QuestionnaireTemplateSectionConfig(
+              questionType: 'multiple_choice',
+              itemCount: 15,
+              pointsPerItem: 2,
+            ),
+            QuestionnaireTemplateSectionConfig(
+              questionType: 'multiple_choice',
+              itemCount: 20,
+              pointsPerItem: 3,
+            ),
+          ],
+        ),
+        QuestionnaireTemplatePreset(
+          id: 'sti-mixed',
+          label: 'Mixed STI \u00B7 15 MC (2 pts) / 20 MC (3 pts) / 5 ID / 5 T\u2013F',
+          sections: <QuestionnaireTemplateSectionConfig>[
+            QuestionnaireTemplateSectionConfig(
+              questionType: 'multiple_choice',
+              itemCount: 15,
+              pointsPerItem: 2,
+            ),
+            QuestionnaireTemplateSectionConfig(
+              questionType: 'multiple_choice',
+              itemCount: 20,
+              pointsPerItem: 3,
+            ),
+            QuestionnaireTemplateSectionConfig(
+              questionType: 'identification',
+              itemCount: 5,
+              pointsPerItem: 1,
+            ),
+            QuestionnaireTemplateSectionConfig(
+              questionType: 'true_false',
+              itemCount: 5,
+              pointsPerItem: 1,
+            ),
+          ],
+        ),
+        QuestionnaireTemplatePreset(
+          id: 'mc-50',
+          label: '50 Multiple Choice \u00B7 50 MC \u00D7 1 pt',
+          sections: <QuestionnaireTemplateSectionConfig>[
+            QuestionnaireTemplateSectionConfig(
+              questionType: 'multiple_choice',
+              itemCount: 50,
+              pointsPerItem: 1,
+            ),
+          ],
+        ),
+      ];
+
+  static String normalizeQuestionType(String? rawType) {
+    final lower = (rawType ?? '').trim().toLowerCase();
+    if (lower.contains('multiple') ||
+        lower == 'mc' ||
+        lower == 'mcq' ||
+        lower == 'multiple_choice') {
+      return 'multiple_choice';
+    }
+    if (lower.contains('true') ||
+        lower.contains('false') ||
+        lower == 'tf' ||
+        lower == 't/f' ||
+        lower == 'true_false') {
+      return 'true_false';
+    }
+    if (lower.contains('ident') ||
+        lower.contains('fill') ||
+        lower == 'id' ||
+        lower == 'identification') {
+      return 'identification';
+    }
+    return 'multiple_choice';
   }
 
   static String labelForType(String qType) {
-    switch (qType.trim().toLowerCase()) {
+    switch (normalizeQuestionType(qType)) {
       case 'multiple_choice':
         return 'Multiple Choice';
       case 'true_false':
@@ -111,6 +482,40 @@ class QuestionPaperImportService {
       default:
         return 'Multiple Choice';
     }
+  }
+
+  static String instructionForType(String qType) {
+    switch (normalizeQuestionType(qType)) {
+      case 'multiple_choice':
+        return 'Read and analyze each item. Choose the letter of the CORRECT answer.';
+      case 'identification':
+        return 'Read and analyze each item. Write the correct answer on the space provided.';
+      case 'true_false':
+        return 'Read and analyze each item. Write TRUE if the statement is correct, and FALSE if it is incorrect.';
+      default:
+        return 'Read and analyze each item carefully.';
+    }
+  }
+
+  static String formatPoints(num value) {
+    final d = value.toDouble();
+    if (d == d.roundToDouble()) {
+      return d.toInt().toString();
+    }
+    return d
+        .toStringAsFixed(2)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
+  }
+
+  static String subpartLetterFromIndex(int index) {
+    var n = index + 1;
+    var label = '';
+    while (n > 0) {
+      label = String.fromCharCode(65 + ((n - 1) % 26)) + label;
+      n = (n - 1) ~/ 26;
+    }
+    return label.isEmpty ? 'A' : label;
   }
 
   static String romanNumeral(int n) {
@@ -140,9 +545,178 @@ class QuestionPaperImportService {
     return '$n';
   }
 
+  static int? parseRomanNumeral(String raw) {
+    final clean = raw.trim().toUpperCase();
+    final direct = int.tryParse(clean);
+    if (direct != null && direct > 0) return direct;
+    const numerals = <String>[
+      'I',
+      'II',
+      'III',
+      'IV',
+      'V',
+      'VI',
+      'VII',
+      'VIII',
+      'IX',
+      'X',
+      'XI',
+      'XII',
+      'XIII',
+      'XIV',
+      'XV',
+      'XVI',
+      'XVII',
+      'XVIII',
+      'XIX',
+      'XX',
+    ];
+    final idx = numerals.indexOf(clean);
+    return idx >= 0 ? idx + 1 : null;
+  }
+
+  /// Formats a CheckMate Part heading:
+  /// - When a question type appears once (`subpartLetter == null`):
+  ///   `Part I. Multiple Choice`, `Part II. Identification`, `Part III. True or False`
+  /// - When a question type repeats (`subpartLetter != null`):
+  ///   `Part I. Multiple Choice - A. 2 pts each`, `Part I. Multiple Choice - B. 3 pts each`
+  static String formatPartHeading({
+    required int partNumber,
+    required String questionType,
+    String? subpartLetter,
+    num pointsPerItem = 1,
+  }) {
+    final roman = romanNumeral(partNumber);
+    final label = labelForType(questionType);
+    final cleanSub = subpartLetter?.trim() ?? '';
+    if (cleanSub.isEmpty) {
+      return 'Part $roman. $label';
+    }
+    final ptsStr = formatPoints(pointsPerItem);
+    return 'Part $roman. $label - $cleanSub. $ptsStr pts each';
+  }
+
+  /// Formats an automatic section name based on 1-based [sectionOrder] and
+  /// [questionType], e.g. `"Part I. Multiple Choice"` or
+  /// `"Part I. Multiple Choice - A. 2 pts each"`.
+  static String autoSectionName(
+    int sectionOrder,
+    String questionType, {
+    String? subpartLetter,
+    num? points,
+  }) {
+    return formatPartHeading(
+      partNumber: sectionOrder,
+      questionType: questionType,
+      subpartLetter: subpartLetter,
+      pointsPerItem: points ?? 1,
+    );
+  }
+
+  /// Resolves an ordered list of [QuestionnaireTemplateSectionConfig] items
+  /// into [ResolvedTemplateSection] objects with:
+  /// - One Roman-numeral Part number per distinct question type in order of first appearance.
+  /// - Lettered subparts (`A`, `B`, ...) when a question type repeats, preserving relative order.
+  /// - Plain `Part <Roman>. <Type>` heading when a question type appears once, with
+  ///   its point value recorded on `pointsInstructionLine`.
+  /// - Continuous item numbering (`startItem..endItem`) across all sections.
+  static List<ResolvedTemplateSection> resolveTemplateSections(
+    List<QuestionnaireTemplateSectionConfig> configs,
+  ) {
+    if (configs.isEmpty) return const <ResolvedTemplateSection>[];
+
+    final typeCounts = <String, int>{};
+    final partByType = <String, int>{};
+    for (final cfg in configs) {
+      final t = normalizeQuestionType(cfg.questionType);
+      typeCounts[t] = (typeCounts[t] ?? 0) + 1;
+      if (!partByType.containsKey(t)) {
+        partByType[t] = partByType.length + 1;
+      }
+    }
+
+    final seenByType = <String, int>{};
+    final resolved = <ResolvedTemplateSection>[];
+    var nextItem = 1;
+
+    for (var i = 0; i < configs.length; i++) {
+      final cfg = configs[i];
+      final t = normalizeQuestionType(cfg.questionType);
+      final count = math.max(0, cfg.itemCount);
+      final pts = cfg.pointsPerItem > 0 ? cfg.pointsPerItem : 1.0;
+      final partNum = partByType[t] ?? (i + 1);
+      final roman = romanNumeral(partNum);
+      final occIdx = seenByType[t] ?? 0;
+      seenByType[t] = occIdx + 1;
+
+      final isRepeated = (typeCounts[t] ?? 1) > 1;
+      final subpart = isRepeated ? subpartLetterFromIndex(occIdx) : null;
+      final heading = formatPartHeading(
+        partNumber: partNum,
+        questionType: t,
+        subpartLetter: subpart,
+        pointsPerItem: pts,
+      );
+      final instruction = instructionForType(t);
+      final start = count > 0 ? nextItem : nextItem;
+      final end = count > 0 ? (nextItem + count - 1) : nextItem;
+      if (count > 0) {
+        nextItem = end + 1;
+      }
+
+      final secLetter = subpart ?? subpartLetterFromIndex(i);
+      final itemWord = count == 1 ? 'item' : 'items';
+      final ptsStr = formatPoints(pts);
+      final ptWord = pts == 1 ? 'point' : 'points';
+      final pointsLine =
+          '$secLetter.  ($count $itemWord x $ptsStr $ptWord - $ptsStr pts each)';
+
+      resolved.add(
+        ResolvedTemplateSection(
+          sectionOrder: i + 1,
+          partNumber: partNum,
+          partRoman: roman,
+          subpartLetter: subpart,
+          questionType: t,
+          heading: heading,
+          instructionLine: instruction,
+          pointsInstructionLine: pointsLine,
+          itemCount: count,
+          pointsPerItem: pts,
+          startItem: start,
+          endItem: end,
+        ),
+      );
+    }
+
+    return resolved;
+  }
+
+  /// Computes canonical CheckMate section headings (`Part I. Multiple Choice - A. 2 pts each`,
+  /// `Part II. Identification`, etc.) for a list of section maps.
+  static List<String> computeSectionHeadingsForMaps(
+    List<Map<String, dynamic>> sections,
+  ) {
+    if (sections.isEmpty) return const <String>[];
+    final configs = sections.map((s) {
+      final qType = normalizeQuestionType(
+        s['question_type']?.toString() ?? s['type']?.toString(),
+      );
+      final pts =
+          double.tryParse(s['default_points']?.toString() ?? '') ?? 1.0;
+      return QuestionnaireTemplateSectionConfig(
+        questionType: qType,
+        itemCount: 1,
+        pointsPerItem: pts > 0 ? pts : 1.0,
+      );
+    }).toList();
+    return resolveTemplateSections(configs).map((r) => r.heading).toList();
+  }
+
   static ImportedQuestionPaper parseBytes({
     required Uint8List bytes,
     required String fileName,
+    List<QuestionnaireTemplateSectionConfig>? expectedTemplate,
   }) {
     final lowerName = fileName.trim().toLowerCase();
     final isZipHeader =
@@ -156,13 +730,21 @@ class QuestionPaperImportService {
 
     if (lowerName.endsWith('.xlsx')) {
       final rows = _extractRowsFromXlsx(bytes);
-      final tabular = _tryParseTabularRows(rows: rows, fileName: fileName);
+      final tabular = _tryParseTabularRows(
+        rows: rows,
+        fileName: fileName,
+        expectedTemplate: expectedTemplate,
+      );
       if (tabular != null && tabular.totalQuestions > 0) return tabular;
       final lines = rows
           .map((r) => r.where((c) => c.trim().isNotEmpty).join(' '))
           .where((l) => l.trim().isNotEmpty)
           .toList();
-      return _parseExtractedLines(lines: lines, fileName: fileName);
+      return _parseExtractedLines(
+        lines: lines,
+        fileName: fileName,
+        expectedTemplate: expectedTemplate,
+      );
     }
 
     if (lowerName.endsWith('.csv') || lowerName.endsWith('.tsv')) {
@@ -171,15 +753,26 @@ class QuestionPaperImportService {
         bytes,
         delimiter: isTsv ? '\t' : ',',
       );
-      final tabular = _tryParseTabularRows(rows: rows, fileName: fileName);
+      final tabular = _tryParseTabularRows(
+        rows: rows,
+        fileName: fileName,
+        expectedTemplate: expectedTemplate,
+      );
       if (tabular != null && tabular.totalQuestions > 0) return tabular;
       final lines = _extractLinesFromPlainText(bytes);
-      return _parseExtractedLines(lines: lines, fileName: fileName);
+      return _parseExtractedLines(
+        lines: lines,
+        fileName: fileName,
+        expectedTemplate: expectedTemplate,
+      );
     }
 
     List<String> lines;
+    var unreadablePages = const <int>[];
     if (lowerName.endsWith('.pdf') || isPdfHeader) {
-      lines = _extractLinesFromPdf(bytes);
+      final pdfResult = _extractLinesFromPdfWithDiagnostics(bytes);
+      lines = pdfResult.lines;
+      unreadablePages = pdfResult.unreadablePages;
     } else if (lowerName.endsWith('.docx')) {
       lines = _extractLinesFromDocx(bytes);
     } else if (lowerName.endsWith('.odt')) {
@@ -196,22 +789,31 @@ class QuestionPaperImportService {
       lines = _extractLinesFromPlainText(bytes);
     }
 
-    return _parseExtractedLines(lines: lines, fileName: fileName);
+    return _parseExtractedLines(
+      lines: lines,
+      fileName: fileName,
+      unreadablePages: unreadablePages,
+      expectedTemplate: expectedTemplate,
+    );
   }
 
   // ===========================================================================
   // PDF TEXT EXTRACTION (TWO-COLUMN & SINGLE-COLUMN AWARE)
   // ===========================================================================
 
-  static List<String> _extractLinesFromPdf(Uint8List bytes) {
+  static _PdfExtractionResult _extractLinesFromPdfWithDiagnostics(
+    Uint8List bytes,
+  ) {
     final document = PdfDocument(inputBytes: bytes);
     try {
       final extractor = PdfTextExtractor(document);
       final allLines = <String>[];
+      final unreadablePages = <int>[];
 
       for (var pageIdx = 0; pageIdx < document.pages.count; pageIdx++) {
         final page = document.pages[pageIdx];
         final pageWidth = page.size.width;
+        final pageHeight = page.size.height;
         final textLines = extractor.extractTextLines(
           startPageIndex: pageIdx,
           endPageIndex: pageIdx,
@@ -222,9 +824,15 @@ class QuestionPaperImportService {
             startPageIndex: pageIdx,
             endPageIndex: pageIdx,
           );
+          final pageFallbackLines = <String>[];
           for (final raw in fallback.split(RegExp(r'\r?\n'))) {
             final clean = raw.trim();
-            if (clean.isNotEmpty) allLines.add(clean);
+            if (clean.isNotEmpty) pageFallbackLines.add(clean);
+          }
+          if (pageFallbackLines.isEmpty) {
+            unreadablePages.add(pageIdx + 1);
+          } else {
+            allLines.addAll(pageFallbackLines);
           }
           continue;
         }
@@ -232,89 +840,204 @@ class QuestionPaperImportService {
         double bodyStartY = 0;
         for (final tl in textLines) {
           final t = tl.text.trim();
-          if (t.contains('Name:') ||
-              t.contains('Section:') ||
-              RegExp(r'^_{10,}$').hasMatch(t)) {
+          // Only look in the top 30% of the page for the student info / header divider
+          if (tl.bounds.top <= pageHeight * 0.30 &&
+              (t.contains('Name:') ||
+                  t.contains('Section:') ||
+                  RegExp(r'^_{10,}$').hasMatch(t))) {
             if (tl.bounds.bottom > bodyStartY) {
               bodyStartY = tl.bounds.bottom;
             }
           }
         }
-        if (bodyStartY == 0) {
-          bodyStartY = page.size.height * 0.11;
-        }
 
         final headerItems = <TextLine>[];
         final bodyItems = <TextLine>[];
+        final footerThresholdY = pageHeight * 0.945;
+
         for (final tl in textLines) {
-          if (tl.text.trim().isEmpty) continue;
-          if (tl.bounds.top <= bodyStartY + 2) {
+          final trimmed = tl.text.trim();
+          if (trimmed.isEmpty) continue;
+          // Ignore repeating page footers at very bottom of page
+          if (tl.bounds.top >= footerThresholdY &&
+              RegExp(
+                r'^(?:page\s+\d+(?:\s+of\s+\d+)?|\d+\s*/\s*\d+)$',
+                caseSensitive: false,
+              ).hasMatch(trimmed)) {
+            continue;
+          }
+          if (bodyStartY > 0 && tl.bounds.top <= bodyStartY + 2) {
             headerItems.add(tl);
           } else {
             bodyItems.add(tl);
           }
         }
 
-        headerItems.sort((a, b) {
-          final dy = a.bounds.top - b.bounds.top;
-          if (dy.abs() > 3) return dy.compareTo(0);
-          return a.bounds.left.compareTo(b.bounds.left);
-        });
-        for (final h in headerItems) {
-          for (final l in h.text.split(RegExp(r'\r?\n'))) {
-            final clean = l.trim();
-            if (clean.isNotEmpty) allLines.add(clean);
+        // Only emit page header lines on Page 1 so repeating headers on Page 2+
+        // never split a wrapped question stem or Option D across page breaks.
+        if (pageIdx == 0 && headerItems.isNotEmpty) {
+          headerItems.sort((a, b) {
+            final dy = a.bounds.top - b.bounds.top;
+            if (dy.abs() > 3) return dy.compareTo(0);
+            return a.bounds.left.compareTo(b.bounds.left);
+          });
+          for (final h in headerItems) {
+            for (final l in h.text.split(RegExp(r'\r?\n'))) {
+              final clean = l.trim();
+              if (clean.isNotEmpty) allLines.add(clean);
+            }
           }
         }
 
-        // Check if body items use a two-column layout (STI Questionnaire).
+        if (bodyItems.isEmpty) {
+          if (headerItems.isEmpty) {
+            unreadablePages.add(pageIdx + 1);
+          }
+          continue;
+        }
+
+        // Split any TextLine whose words span across the two-column center gutter
         final colSplitX = pageWidth * 0.48;
-        final leftCol = <TextLine>[];
-        final rightCol = <TextLine>[];
-        var wideBodyLines = 0;
+        final leftSegments = <_PositionedTextSegment>[];
+        final rightSegments = <_PositionedTextSegment>[];
+        final allSegments = <_PositionedTextSegment>[];
+        var wideUnbrokenLines = 0;
 
         for (final b in bodyItems) {
-          if (b.bounds.left < colSplitX &&
-              b.bounds.right > pageWidth * 0.62 &&
-              b.bounds.width > pageWidth * 0.52) {
-            wideBodyLines++;
+          final words = b.wordCollection;
+          var splitAcrossColumns = false;
+
+          if (words.length >= 2 &&
+              b.bounds.left < colSplitX &&
+              b.bounds.right > pageWidth * 0.54) {
+            final leftWords = <TextWord>[];
+            final rightWords = <TextWord>[];
+            for (final w in words) {
+              if (w.bounds.left < colSplitX) {
+                leftWords.add(w);
+              } else {
+                rightWords.add(w);
+              }
+            }
+            if (leftWords.isNotEmpty && rightWords.isNotEmpty) {
+              final leftRightEdge = leftWords
+                  .map((w) => w.bounds.right)
+                  .reduce(math.max);
+              final rightLeftEdge = rightWords
+                  .map((w) => w.bounds.left)
+                  .reduce(math.min);
+              final gutterGap = rightLeftEdge - leftRightEdge;
+              final rightText = rightWords.map((w) => w.text).join(' ').trim();
+              if (gutterGap >= 8.0 ||
+                  RegExp(
+                    r'^(?:\d{1,3}|[A-Da-d]|Part\s+[IVX\d]+)[\.\)]\s*',
+                  ).hasMatch(rightText)) {
+                splitAcrossColumns = true;
+                final lSeg = _segmentFromWords(leftWords);
+                final rSeg = _segmentFromWords(rightWords);
+                if (lSeg != null) {
+                  leftSegments.add(lSeg);
+                  allSegments.add(lSeg);
+                }
+                if (rSeg != null) {
+                  rightSegments.add(rSeg);
+                  allSegments.add(rSeg);
+                }
+              }
+            }
           }
-          if (b.bounds.left < colSplitX) {
-            leftCol.add(b);
-          } else {
-            rightCol.add(b);
+
+          if (!splitAcrossColumns) {
+            final seg = _PositionedTextSegment(
+              text: b.text.trim(),
+              bounds: b.bounds,
+            );
+            allSegments.add(seg);
+            if (b.bounds.left < colSplitX &&
+                b.bounds.right > pageWidth * 0.62 &&
+                b.bounds.width > pageWidth * 0.52) {
+              wideUnbrokenLines++;
+            }
+            if (b.bounds.left < colSplitX) {
+              leftSegments.add(seg);
+            } else {
+              rightSegments.add(seg);
+            }
           }
         }
 
-        if (rightCol.length >= 2 && wideBodyLines <= bodyItems.length ~/ 3) {
+        if (rightSegments.length >= 2 &&
+            wideUnbrokenLines <= bodyItems.length ~/ 3) {
           allLines.addAll(
-            _mergeAndSortColumnLines(leftCol, maxHorizontalGap: pageWidth * 0.18),
+            _mergeAndSortSegments(
+              leftSegments,
+              maxHorizontalGap: pageWidth * 0.18,
+            ),
           );
           allLines.addAll(
-            _mergeAndSortColumnLines(rightCol, maxHorizontalGap: pageWidth * 0.18),
+            _mergeAndSortSegments(
+              rightSegments,
+              maxHorizontalGap: pageWidth * 0.18,
+            ),
           );
         } else {
           allLines.addAll(
-            _mergeAndSortColumnLines(
-              bodyItems,
-              maxHorizontalGap: pageWidth * 0.18,
+            _mergeAndSortSegments(
+              allSegments,
+              maxHorizontalGap: pageWidth * 0.25,
             ),
           );
         }
       }
 
-      return allLines;
+      return _PdfExtractionResult(
+        lines: allLines,
+        unreadablePages: unreadablePages,
+      );
     } finally {
       document.dispose();
     }
   }
 
-  static List<String> _mergeAndSortColumnLines(
-    List<TextLine> items, {
+  static _PositionedTextSegment? _segmentFromWords(List<TextWord> words) {
+    if (words.isEmpty) return null;
+    final sb = StringBuffer();
+    double left = words.first.bounds.left;
+    double top = words.first.bounds.top;
+    double right = words.first.bounds.right;
+    double bottom = words.first.bounds.bottom;
+    Rect? prev;
+
+    for (final w in words) {
+      final wt = w.text;
+      if (wt.isEmpty) continue;
+      if (prev != null && (w.bounds.left - prev.right) > 1.2) {
+        if (!sb.toString().endsWith(' ') && !wt.startsWith(' ')) {
+          sb.write(' ');
+        }
+      }
+      sb.write(wt);
+      left = math.min(left, w.bounds.left);
+      top = math.min(top, w.bounds.top);
+      right = math.max(right, w.bounds.right);
+      bottom = math.max(bottom, w.bounds.bottom);
+      prev = w.bounds;
+    }
+
+    final clean = sb.toString().trim();
+    if (clean.isEmpty) return null;
+    return _PositionedTextSegment(
+      text: clean,
+      bounds: Rect.fromLTRB(left, top, right, bottom),
+    );
+  }
+
+  static List<String> _mergeAndSortSegments(
+    List<_PositionedTextSegment> items, {
     double maxHorizontalGap = 72.0,
   }) {
     if (items.isEmpty) return const <String>[];
-    final sorted = List<TextLine>.from(items)
+    final sorted = List<_PositionedTextSegment>.from(items)
       ..sort((a, b) {
         final dy = a.bounds.top - b.bounds.top;
         if (dy.abs() > 3.5) return dy.compareTo(0);
@@ -343,17 +1066,25 @@ class QuestionPaperImportService {
           ? 0.0
           : (item.bounds.left - prevBounds.right);
       final startsNewNumberedQuestion = RegExp(r'^\d{1,3}[\.\)]\s+').hasMatch(t);
+      final startsNewOption =
+          RegExp(r'^\*?\(?[A-Da-d][\.\)]\s+').hasMatch(t) &&
+          horizontalGap > 4.0;
+      final startsNewPartHeader = RegExp(
+        r'^Part\s+[IVX\d]+[\.\:\-\s]',
+        caseSensitive: false,
+      ).hasMatch(t);
 
-      // Do not merge across a wide column gap or when a new numbered question starts.
       if (sameRow &&
           horizontalGap <= maxHorizontalGap &&
-          !startsNewNumberedQuestion) {
+          !startsNewNumberedQuestion &&
+          !startsNewOption &&
+          !startsNewPartHeader) {
         currentLineBuffer.write(' $t');
         prevBounds = Rect.fromLTRB(
           prevBounds.left,
-          prevBounds.top,
-          item.bounds.right,
-          item.bounds.bottom,
+          math.min(prevBounds.top, item.bounds.top),
+          math.max(prevBounds.right, item.bounds.right),
+          math.max(prevBounds.bottom, item.bounds.bottom),
         );
       } else {
         flushBuffer();
@@ -576,7 +1307,9 @@ class QuestionPaperImportService {
           return code > 0 ? String.fromCharCode(code) : '';
         })
         .replaceAll(
-          RegExp(r'\{\\(?:fonttbl|colortbl|stylesheet|info|pict|\*\\[a-z]+)[^}]*\}'),
+          RegExp(
+            r'\{\\(?:fonttbl|colortbl|stylesheet|info|pict|\*\\[a-z]+)[^}]*\}',
+          ),
           '',
         )
         .replaceAll(RegExp(r'\\[a-zA-Z]+-?\d*\s?'), '')
@@ -627,7 +1360,6 @@ class QuestionPaperImportService {
       return _extractLinesFromHtml(bytes);
     }
 
-    // Extract printable ASCII / UTF-16 text runs from binary OLE .doc files
     final buffer = StringBuffer();
     for (var i = 0; i < bytes.length; i++) {
       final b = bytes[i];
@@ -691,16 +1423,18 @@ class QuestionPaperImportService {
   }
 
   /// Parses structured spreadsheet tables (CSV / TSV / XLSX) when columns like
-  /// `Question`, `Type`, `Choice A..D`, `Answer`, `Points` are present.
+  /// `Question`, `Type`, `Choice A..D`, `Answer`, `Points`, `Section` are present.
   static ImportedQuestionPaper? _tryParseTabularRows({
     required List<List<String>> rows,
     required String fileName,
+    List<QuestionnaireTemplateSectionConfig>? expectedTemplate,
   }) {
     if (rows.length < 2) return null;
 
     int headerRowIdx = -1;
     int colQuestion = -1;
     int colType = -1;
+    int colSection = -1;
     int colChoiceA = -1;
     int colChoiceB = -1;
     int colChoiceC = -1;
@@ -726,6 +1460,8 @@ class QuestionPaperImportService {
             h == 'test type' ||
             h == 'exam type') {
           colType = c;
+        } else if (h == 'section' || h == 'part' || h == 'subpart') {
+          colSection = c;
         } else if (h == 'a' ||
             h == 'choice a' ||
             h == 'option a' ||
@@ -768,7 +1504,9 @@ class QuestionPaperImportService {
 
     if (headerRowIdx < 0 || colQuestion < 0) return null;
 
-    final parsedQuestions = <ImportedExamQuestion>[];
+    final sectionBuilders = <_SectionBuilder>[];
+    _SectionBuilder? activeSec;
+
     for (var r = headerRowIdx + 1; r < rows.length; r++) {
       final row = rows[r];
       String cell(int idx) =>
@@ -778,6 +1516,7 @@ class QuestionPaperImportService {
       if (qText.isEmpty) continue;
 
       final rawType = cell(colType).toLowerCase();
+      final rawSecLabel = cell(colSection);
       final choiceA = cell(colChoiceA);
       final choiceB = cell(colChoiceB);
       final choiceC = cell(colChoiceC);
@@ -806,47 +1545,64 @@ class QuestionPaperImportService {
         qType = 'identification';
       }
 
+      final cleanPts = pts > 0 ? pts : 1.0;
+      if (activeSec == null ||
+          activeSec.questionType != qType ||
+          (rawSecLabel.isNotEmpty && activeSec.rawHeading != rawSecLabel) ||
+          (activeSec.defaultPoints - cleanPts).abs() > 0.0001) {
+        activeSec = _SectionBuilder(
+          rawHeading: rawSecLabel.isEmpty ? null : rawSecLabel,
+          questionType: qType,
+          defaultPoints: cleanPts,
+          hasExplicitHeading: rawSecLabel.isNotEmpty,
+          hasExplicitPoints: cell(colPoints).isNotEmpty,
+        );
+        sectionBuilders.add(activeSec);
+      }
+
       final normalizedAnswer = _normalizeAnswerForType(
         rawAnswer,
         qType,
         choices: choices,
       );
 
-      parsedQuestions.add(
-        ImportedExamQuestion(
-          questionNumber: parsedQuestions.length + 1,
+      activeSec.questions.add(
+        _buildValidatedQuestion(
+          questionNumber: activeSec.questions.length + 1,
+          sourceQuestionNumber: activeSec.questions.length + 1,
           questionText: qText,
           questionType: qType,
-          points: pts > 0 ? pts : 1.0,
+          points: cleanPts,
           choices: qType == 'multiple_choice' ? choices : const <String>[],
           correctAnswer: normalizedAnswer,
+          classificationAmbiguous: false,
         ),
       );
     }
 
-    if (parsedQuestions.isEmpty) return null;
+    final rawSections = sectionBuilders
+        .where((b) => b.questions.isNotEmpty)
+        .map((b) => b.toSection())
+        .toList();
+    if (rawSections.isEmpty) return null;
 
-    final organizedSections = _organizeQuestionsByTestType(parsedQuestions);
-    final totalQ = parsedQuestions.length;
-    final detectedType = totalQ >= 35
-        ? 'prelim'
-        : (totalQ >= 15 ? 'long_quiz' : 'quiz');
-
-    return ImportedQuestionPaper(
+    return finalizeImportedPaper(
       fileName: fileName,
-      sections: organizedSections,
-      detectedAssessmentType: detectedType,
+      rawSections: rawSections,
       detectedInstructions: QuestionPaperPdfService.defaultInstructionsText,
+      expectedTemplate: expectedTemplate,
     );
   }
 
   // ===========================================================================
-  // STRUCTURED QUESTION, CHOICE & METADATA PARSER
+  // STRUCTURED QUESTION, SECTION, CHOICE & METADATA PARSER
   // ===========================================================================
 
   static ImportedQuestionPaper _parseExtractedLines({
     required List<String> lines,
     required String fileName,
+    List<int> unreadablePages = const <int>[],
+    List<QuestionnaireTemplateSectionConfig>? expectedTemplate,
   }) {
     String? detectedType;
     String? detectedSubject;
@@ -859,7 +1615,7 @@ class QuestionPaperImportService {
     final noticeLines = <String>[];
 
     // 1. Inspect header lines (before the first question or section header)
-    final headerScanLimit = lines.length < 25 ? lines.length : 25;
+    final headerScanLimit = lines.length < 30 ? lines.length : 30;
     for (var i = 0; i < headerScanLimit; i++) {
       final line = lines[i].trim();
       if (line.isEmpty) continue;
@@ -870,8 +1626,14 @@ class QuestionPaperImportService {
           lower.startsWith('section:') ||
           lower.startsWith('date:') ||
           lower.startsWith('notice:') ||
+          lower.startsWith('part ') ||
           RegExp(r'^\d{1,3}[\.\)]\s+').hasMatch(line)) {
         break;
+      }
+
+      if (lower == 'questionnaire template' ||
+          lower == 'checkmate questionnaire template') {
+        continue;
       }
 
       if (RegExp(r'^page\s+\d+$', caseSensitive: false).hasMatch(line)) {
@@ -914,42 +1676,20 @@ class QuestionPaperImportService {
         continue;
       }
 
-      if (lower.contains('preliminary examination') || lower == 'prelim') {
-        detectedType ??= 'prelim';
+      final explicitAssessment = _detectExplicitAssessmentTypeFromHeader(line);
+      if (explicitAssessment != null) {
+        detectedType ??= explicitAssessment;
+        if (['quiz', 'short_quiz', 'long_quiz', 'performance_task', 'laboratory']
+            .contains(explicitAssessment)) {
+          detectedQuizTitle ??= line;
+        }
         continue;
       }
-      if (lower.contains('midterm examination') || lower == 'midterm') {
-        detectedType ??= 'midterm';
-        continue;
-      }
-      if (lower.contains('pre-final examination') ||
-          lower.contains('prefinal examination') ||
-          lower == 'prefinals' ||
-          lower == 'pre-finals') {
-        detectedType ??= 'prefinal';
-        continue;
-      }
-      if (lower.contains('final examination') || lower == 'finals') {
-        detectedType ??= 'final';
-        continue;
-      }
-      if (lower.contains('long quiz')) {
-        detectedType ??= 'long_quiz';
-        detectedQuizTitle ??= line;
-        continue;
-      }
-      if (lower.contains('short quiz')) {
-        detectedType ??= 'short_quiz';
-        detectedQuizTitle ??= line;
-        continue;
-      }
-      if (lower.contains('quiz')) {
-        detectedType ??= 'quiz';
-        detectedQuizTitle ??= line;
-        continue;
-      }
-      if (RegExp(r'\b(1st|2nd|3rd)\s+term\b', caseSensitive: false)
-              .hasMatch(line) ||
+
+      if (RegExp(
+            r'\b(1st|2nd|3rd)\s+term\b',
+            caseSensitive: false,
+          ).hasMatch(line) ||
           RegExp(r'\bSY\s*\d{4}', caseSensitive: false).hasMatch(line)) {
         continue;
       }
@@ -970,6 +1710,10 @@ class QuestionPaperImportService {
       if (clean.isEmpty) return true;
       final lower = clean.toLowerCase();
 
+      if (lower == 'questionnaire template' ||
+          lower == 'checkmate questionnaire template') {
+        return true;
+      }
       if (RegExp(r'^_{5,}$').hasMatch(clean)) return true;
       if (RegExp(
         r'^(name|section|date)\s*:\s*_*',
@@ -979,14 +1723,18 @@ class QuestionPaperImportService {
       }
       if (clean.contains('Name:___') ||
           clean.contains('Section:___') ||
-          clean.contains('Date:___')) {
+          clean.contains('Date:___') ||
+          (clean.contains('Name:') && clean.contains('Section:'))) {
         return true;
       }
-      if (RegExp(r'^page\s+\d+$', caseSensitive: false).hasMatch(clean)) {
+      if (RegExp(
+        r'^page\s+\d+(?:\s+of\s+\d+)?$',
+        caseSensitive: false,
+      ).hasMatch(clean)) {
         return true;
       }
       if (RegExp(r'^.+\s+page\s+\d+$', caseSensitive: false).hasMatch(clean) &&
-          RegExp(r'\d{5,}').hasMatch(clean)) {
+          (RegExp(r'\d{5,}').hasMatch(clean) || clean.startsWith('CM-'))) {
         return true;
       }
       if (detectedSubject != null &&
@@ -1007,9 +1755,10 @@ class QuestionPaperImportService {
       ).hasMatch(clean)) {
         return true;
       }
-      if (RegExp(r'^\d{1,2}:\d{2}\s*(am|pm)\s*[\u2013\u2014\-]',
-              caseSensitive: false)
-          .hasMatch(clean)) {
+      if (RegExp(
+        r'^\d{1,2}:\d{2}\s*(am|pm)\s*[\u2013\u2014\-]',
+        caseSensitive: false,
+      ).hasMatch(clean)) {
         return true;
       }
       if (RegExp(
@@ -1022,6 +1771,7 @@ class QuestionPaperImportService {
         'preliminary examination',
         'midterm examination',
         'pre-final examination',
+        'prefinal examination',
         'final examination',
       }.contains(lower)) {
         return true;
@@ -1032,13 +1782,34 @@ class QuestionPaperImportService {
       return false;
     }
 
-    // 3. Parse Notice, Questions, Choices, and Inferred Test Types
-    final allParsedQuestions = <ImportedExamQuestion>[];
+    // 3. Parse Notice, Ordered Sections, Questions, Choices, and Point Values
+    final sectionBuilders = <_SectionBuilder>[];
+    _SectionBuilder? currentSection;
     _QuestionBuilder? currentQuestion;
     String? currentChoiceLetter;
-    String? activeSectionType;
-    double activeDefaultPoints = 1.0;
     bool inNotice = false;
+
+    _SectionBuilder ensureSection({
+      String? inferredType,
+      double? defaultPoints,
+    }) {
+      if (currentSection != null) {
+        if (inferredType != null && currentSection!.questionType == null) {
+          currentSection!.questionType = inferredType;
+        }
+        if (defaultPoints != null && !currentSection!.hasExplicitPoints) {
+          currentSection!.defaultPoints = defaultPoints;
+        }
+        return currentSection!;
+      }
+      final created = _SectionBuilder(
+        questionType: inferredType,
+        defaultPoints: defaultPoints ?? 1.0,
+      );
+      sectionBuilders.add(created);
+      currentSection = created;
+      return created;
+    }
 
     void flushQuestion() {
       final q = currentQuestion;
@@ -1046,7 +1817,8 @@ class QuestionPaperImportService {
       currentQuestion = null;
       currentChoiceLetter = null;
 
-      final qType = _resolveQuestionType(q);
+      final resolvedTypeResult = _resolveQuestionTypeWithDiagnostics(q);
+      final qType = resolvedTypeResult.questionType;
       final normalizedChoices = <String>[];
       if (qType == 'multiple_choice') {
         for (final letter in const ['A', 'B', 'C', 'D']) {
@@ -1055,7 +1827,9 @@ class QuestionPaperImportService {
       }
 
       final cleanStem = _stripLeadingQuestionNumber(q.stem.toString().trim());
-      if (cleanStem.isEmpty) return;
+      if (cleanStem.isEmpty && normalizedChoices.every((c) => c.isEmpty)) {
+        return;
+      }
 
       final normalizedAnswer = _normalizeAnswerForType(
         q.correctAnswer,
@@ -1063,34 +1837,46 @@ class QuestionPaperImportService {
         choices: normalizedChoices,
       );
 
-      allParsedQuestions.add(
-        ImportedExamQuestion(
+      // If currentSection has no explicit heading and already contains questions
+      // of a different type, start a new section for the new type.
+      if (currentSection != null &&
+          !currentSection!.hasExplicitHeading &&
+          currentSection!.questions.isNotEmpty &&
+          currentSection!.questionType != null &&
+          currentSection!.questionType != qType) {
+        currentSection = _SectionBuilder(
+          questionType: qType,
+          defaultPoints: q.points > 0 ? q.points : 1.0,
+        );
+        sectionBuilders.add(currentSection!);
+      }
+
+      final sec = ensureSection(
+        inferredType: qType,
+        defaultPoints: q.points > 0 ? q.points : 1.0,
+      );
+      final effectivePts = q.points > 0
+          ? q.points
+          : (sec.defaultPoints > 0 ? sec.defaultPoints : 1.0);
+
+      sec.questions.add(
+        _buildValidatedQuestion(
           questionNumber: q.number,
+          sourceQuestionNumber: q.number,
           questionText: cleanStem,
           questionType: qType,
-          points: q.points > 0 ? q.points : 1.0,
+          points: effectivePts,
           choices: normalizedChoices,
           correctAnswer: normalizedAnswer,
+          classificationAmbiguous: resolvedTypeResult.isAmbiguous,
         ),
       );
     }
 
-    final stiSectionHeaderRe = RegExp(
-      r'^([A-Z]|Part\s+[IVX\d]+)[\.\)]\s*\((\d+)\s*items?\s*(?:[x\u00D7\*]\s*(\d+(?:\.\d+)?)\s*points?)?.*\)',
-      caseSensitive: false,
-    );
-    final genericSectionHeaderRe = RegExp(
-      r'^(?:Part|Section|Test)\s+([IVX\d]+|[A-Z])[\.\:\-\u00B7\s]+(.+)$',
-      caseSensitive: false,
-    );
-    final standaloneTypeHeaderRe = RegExp(
-      r'^(multiple\s+choice|true\s+or\s+false|modified\s+true\s+or\s+false|identification|fill\s+in\s+the\s+blanks?)(?:\s*\((.+)\))?\s*:?$',
-      caseSensitive: false,
-    );
-    final questionStartRe = RegExp(r'^(\d{1,3})[\.\)]\s*(.+)$');
-    final choiceStartRe = RegExp(r'^(\*)?(?:\()?([A-Da-d])[\.\)]\s+(.+)$');
+    final questionStartRe = RegExp(r'^(\d{1,3})[\.\)]\s*(.*)$');
+    final choiceStartRe = RegExp(r'^(\*)?(?:\()?([A-Da-d])[\.\)]\s*(.*)$');
     final answerLineRe = RegExp(
-      r'^(?:correct\s+)?(?:answer|ans|key)\s*(\(\s*true\s*\/\s*false\s*\))?\s*[:\-]\s*(.*)$',
+      r'^(?:correct\s+)?(?:answer|ans|key)\s*(\(\s*(?:true\s*(?:\/|or)\s*false|t\s*(?:\/|or)\s*f)\s*\))?\s*[:\-]\s*(.*)$',
       caseSensitive: false,
     );
 
@@ -1104,7 +1890,8 @@ class QuestionPaperImportService {
       }
 
       // Notice block before questions start
-      if (currentQuestion == null && allParsedQuestions.isEmpty) {
+      if (currentQuestion == null &&
+          (currentSection == null || currentSection!.questions.isEmpty)) {
         if (lower == 'notice:' || lower.startsWith('notice:')) {
           inNotice = true;
           noticeLines.add(line);
@@ -1117,65 +1904,105 @@ class QuestionPaperImportService {
         }
       }
 
-      // Detect question-type instructions / headings
-      final detectedHeaderType = _detectTypeFromLine(lower);
-      if (detectedHeaderType != null) {
-        if (lower.startsWith('read and analyze') ||
-            lower.startsWith('direction') ||
-            lower.startsWith('instruction') ||
-            standaloneTypeHeaderRe.hasMatch(line)) {
-          flushQuestion();
-          activeSectionType = detectedHeaderType;
-          final ptsMatch = RegExp(
-            r'(\d+(?:\.\d+)?)\s*(?:pts?|points?)',
-            caseSensitive: false,
-          ).firstMatch(line);
-          if (ptsMatch != null) {
-            activeDefaultPoints =
-                double.tryParse(ptsMatch.group(1)!) ?? activeDefaultPoints;
+      // Check if line is a Part / Section / Subpart heading or points instruction line
+      final parsedHeader = _tryParseSectionHeaderOrPointsLine(
+        line,
+        hasActiveQuestion: currentQuestion != null,
+        activeQuestionHasFourChoices:
+            currentQuestion != null &&
+            const ['A', 'B', 'C', 'D'].every(
+              (l) => (currentQuestion!.choices[l] ?? '').trim().isNotEmpty,
+            ),
+      );
+      if (parsedHeader != null) {
+        flushQuestion();
+        inNotice = false;
+
+        if (parsedHeader.isInstructionOrPointsLineOnly) {
+          // If the current section already has questions and a new direction line
+          // ("Read and analyze...") appears, start a new section only if it's a
+          // full direction line; if it's a points line right before questions,
+          // attach to a new section.
+          if (currentSection != null && currentSection!.questions.isNotEmpty) {
+            currentSection = _SectionBuilder(
+              questionType: parsedHeader.questionType,
+              defaultPoints: parsedHeader.pointsPerItem ?? 1.0,
+              expectedItemCount: parsedHeader.expectedItemCount,
+              subpartLetter: parsedHeader.subpartLetter,
+              hasExplicitHeading: parsedHeader.subpartLetter != null,
+              hasExplicitPoints: parsedHeader.pointsPerItem != null,
+              hasAmbiguousMetadata: parsedHeader.hasAmbiguousMetadata,
+            );
+            sectionBuilders.add(currentSection!);
+          } else {
+            final sec = ensureSection(
+              inferredType: parsedHeader.questionType,
+              defaultPoints: parsedHeader.pointsPerItem,
+            );
+            if (parsedHeader.questionType != null) {
+              sec.questionType = parsedHeader.questionType;
+            }
+            if (parsedHeader.pointsPerItem != null &&
+                parsedHeader.pointsPerItem! > 0) {
+              sec.defaultPoints = parsedHeader.pointsPerItem!;
+              sec.hasExplicitPoints = true;
+            }
+            if (parsedHeader.expectedItemCount != null) {
+              sec.expectedItemCount = parsedHeader.expectedItemCount;
+            }
+            if (parsedHeader.subpartLetter != null &&
+                sec.subpartLetter == null) {
+              sec.subpartLetter = parsedHeader.subpartLetter;
+            }
+            if (parsedHeader.hasAmbiguousMetadata) {
+              sec.hasAmbiguousMetadata = true;
+            }
           }
-          inNotice = false;
-          continue;
+        } else {
+          // Explicit Part / Section heading (e.g. "Part I. Multiple Choice - A. 2 pts each"
+          // or "Part II. Identification" or "B. (20 items x 3 points)")
+          if (currentSection != null &&
+              currentSection!.questions.isEmpty &&
+              !currentSection!.hasExplicitHeading) {
+            currentSection!
+              ..rawHeading = parsedHeader.rawHeading
+              ..partNumber = parsedHeader.partNumber
+              ..subpartLetter = parsedHeader.subpartLetter
+              ..questionType =
+                  parsedHeader.questionType ?? currentSection!.questionType
+              ..hasExplicitHeading = true
+              ..hasAmbiguousMetadata =
+                  currentSection!.hasAmbiguousMetadata ||
+                  parsedHeader.hasAmbiguousMetadata;
+            if (parsedHeader.pointsPerItem != null &&
+                parsedHeader.pointsPerItem! > 0) {
+              currentSection!.defaultPoints = parsedHeader.pointsPerItem!;
+              currentSection!.hasExplicitPoints = true;
+            }
+            if (parsedHeader.expectedItemCount != null) {
+              currentSection!.expectedItemCount =
+                  parsedHeader.expectedItemCount;
+            }
+          } else {
+            currentSection = _SectionBuilder(
+              rawHeading: parsedHeader.rawHeading,
+              partNumber: parsedHeader.partNumber,
+              subpartLetter: parsedHeader.subpartLetter,
+              questionType: parsedHeader.questionType,
+              defaultPoints: parsedHeader.pointsPerItem ?? 1.0,
+              expectedItemCount: parsedHeader.expectedItemCount,
+              hasExplicitHeading: true,
+              hasExplicitPoints: parsedHeader.pointsPerItem != null,
+              hasAmbiguousMetadata: parsedHeader.hasAmbiguousMetadata,
+            );
+            sectionBuilders.add(currentSection!);
+          }
         }
-      }
-
-      // Check STI Section Header: e.g. "A.  (35 items x 2 points)"
-      final stiSecMatch = stiSectionHeaderRe.firstMatch(line);
-      if (stiSecMatch != null) {
-        flushQuestion();
-        final pts = double.tryParse(stiSecMatch.group(3) ?? '');
-        if (pts != null && pts > 0) {
-          activeDefaultPoints = pts;
-        }
-        if (detectedHeaderType != null) {
-          activeSectionType = detectedHeaderType;
-        }
-        inNotice = false;
         continue;
       }
 
-      // Check Generic Section Header: e.g. "Part II: True or False"
-      final genSecMatch = genericSectionHeaderRe.firstMatch(line);
-      if (genSecMatch != null) {
-        flushQuestion();
-        final secTitle = line;
-        final ptsMatch = RegExp(
-          r'(\d+(?:\.\d+)?)\s*(?:pts?|points?)\s*(?:each|/item)?',
-          caseSensitive: false,
-        ).firstMatch(secTitle);
-        final pts = double.tryParse(ptsMatch?.group(1) ?? '');
-        if (pts != null && pts > 0) {
-          activeDefaultPoints = pts;
-        }
-        final secType = _detectTypeFromLine(secTitle.toLowerCase());
-        if (secType != null) {
-          activeSectionType = secType;
-        }
-        inNotice = false;
-        continue;
-      }
-
-      // Check Embedded Answer Line: e.g. "Answer: B" or "Answer (True / False): _____"
+      // Check Embedded Answer Line: e.g. "Answer: B", "Answer (T or F): ______",
+      // "Answer (True / False): ____________"
       final ansMatch = answerLineRe.firstMatch(line);
       if (ansMatch != null) {
         final hasTfMarker = ansMatch.group(1) != null;
@@ -1186,9 +2013,9 @@ class QuestionPaperImportService {
           } else {
             currentQuestion!.hasIdentificationPrompt = true;
           }
-          if (!RegExp(r'^_+$').hasMatch(rawAns)) {
+          if (!RegExp(r'^[_\-\.\s]+$').hasMatch(rawAns)) {
             final cleanAns = rawAns.replaceAll(RegExp(r'^_+|_+$'), '').trim();
-            if (cleanAns.isNotEmpty) {
+            if (cleanAns.isNotEmpty && !_isPlaceholderText(cleanAns)) {
               currentQuestion!.correctAnswer = cleanAns;
             }
           }
@@ -1233,26 +2060,28 @@ class QuestionPaperImportService {
       if (qMatch != null) {
         flushQuestion();
         inNotice = false;
-        final qNum =
-            int.tryParse(qMatch.group(1)!) ?? (allParsedQuestions.length + 1);
+        final qNum = int.tryParse(qMatch.group(1)!) ?? 1;
         var qStem = qMatch.group(2)!.trim();
 
-        // Check for inline answer at end of question stem, e.g. "...? [Answer: CPU]"
         String? inlineAnswer;
         final bracketAnsMatch = RegExp(
           r'[\[\(]\s*(?:answer|ans|key)\s*:\s*([^\]\)]+)[\]\)]\s*$',
           caseSensitive: false,
         ).firstMatch(qStem);
         if (bracketAnsMatch != null) {
-          inlineAnswer = bracketAnsMatch.group(1)!.trim();
+          final candidate = bracketAnsMatch.group(1)!.trim();
+          if (!_isPlaceholderText(candidate)) {
+            inlineAnswer = candidate;
+          }
           qStem = qStem.substring(0, bracketAnsMatch.start).trim();
         }
 
+        final sec = ensureSection();
         currentQuestion = _QuestionBuilder(
           number: qNum,
           stem: StringBuffer(qStem),
-          inferredType: activeSectionType,
-          points: activeDefaultPoints,
+          inferredType: sec.questionType,
+          points: sec.defaultPoints > 0 ? sec.defaultPoints : 1.0,
         )..correctAnswer = inlineAnswer;
         continue;
       }
@@ -1261,41 +2090,32 @@ class QuestionPaperImportService {
       if (currentQuestion != null) {
         if (currentChoiceLetter != null) {
           final prev = currentQuestion!.choices[currentChoiceLetter!] ?? '';
-          currentQuestion!.choices[currentChoiceLetter!] =
-              prev.isEmpty ? line : '$prev $line';
+          currentQuestion!.choices[currentChoiceLetter!] = prev.isEmpty
+              ? line
+              : '$prev $line';
         } else {
-          currentQuestion!.stem.write(' $line');
+          if (currentQuestion!.stem.isNotEmpty) {
+            currentQuestion!.stem.write(' ');
+          }
+          currentQuestion!.stem.write(line);
         }
       }
     }
 
     flushQuestion();
 
-    // Organize all parsed questions by their respective test types and assign
-    // sequential Part I, Part II, Part III section names.
-    final finalSections = _organizeQuestionsByTestType(allParsedQuestions);
-
-    if (detectedType == null) {
-      final totalQ = finalSections.fold<int>(
-        0,
-        (s, sec) => s + sec.questions.length,
-      );
-      if (totalQ >= 35) {
-        detectedType = 'prelim';
-      } else if (totalQ >= 15) {
-        detectedType = 'long_quiz';
-      } else {
-        detectedType = 'quiz';
-      }
-    }
+    final nonEmptySections = sectionBuilders
+        .where((b) => b.questions.isNotEmpty)
+        .map((b) => b.toSection())
+        .toList();
 
     final instructionsText = noticeLines.isNotEmpty
         ? noticeLines.join('\n')
         : QuestionPaperPdfService.defaultInstructionsText;
 
-    return ImportedQuestionPaper(
+    return finalizeImportedPaper(
       fileName: fileName,
-      sections: finalSections,
+      rawSections: nonEmptySections,
       detectedAssessmentType: detectedType,
       detectedSubjectName: detectedSubject,
       detectedQuizTitle: detectedQuizTitle,
@@ -1305,74 +2125,668 @@ class QuestionPaperImportService {
       detectedEndTime: detectedEnd,
       detectedReferenceNo: detectedRef,
       detectedInstructions: instructionsText,
+      unreadablePages: unreadablePages,
+      expectedTemplate: expectedTemplate,
     );
   }
 
-  /// Organizes all parsed questions into sections grouped by their respective
-  /// test types (`multiple_choice`, `true_false`, `identification`) in order
-  /// of appearance, preserving question sequence within each type and
-  /// auto-naming sections as `"Part I: Multiple Choice"`, `"Part II: ..."`, etc.
-  static List<ImportedExamSection> _organizeQuestionsByTestType(
-    List<ImportedExamQuestion> questions,
-  ) {
-    if (questions.isEmpty) return const <ImportedExamSection>[];
+  /// Finalizes parsed or edited sections:
+  /// 1. Assigns CheckMate Roman-numeral Part numbers (one Part per question type
+  ///    in order of first appearance) and lettered subparts (`A`, `B`, ...) when
+  ///    a question type repeats.
+  /// 2. Numbers all questions continuously `1..N` in section order while keeping
+  ///    each question's section-specific point value.
+  /// 3. Computes all validation issues (unreadable pages, unresolved classifications,
+  ///    duplicate/missing numbers, leftover placeholders, incomplete A–D choices,
+  ///    mismatched counts, and template discrepancies).
+  static ImportedQuestionPaper finalizeImportedPaper({
+    required String fileName,
+    required List<ImportedExamSection> rawSections,
+    String? detectedAssessmentType,
+    String? detectedSubjectName,
+    String? detectedQuizTitle,
+    String? detectedExamDay,
+    String? detectedExamDate,
+    String? detectedStartTime,
+    String? detectedEndTime,
+    String? detectedReferenceNo,
+    String? detectedInstructions,
+    List<int> unreadablePages = const <int>[],
+    List<QuestionnaireTemplateSectionConfig>? expectedTemplate,
+  }) {
+    final issues = <QuestionPaperImportIssue>[];
 
-    final typeOrder = <String>[];
-    final grouped = <String, List<ImportedExamQuestion>>{};
-    final pointsByType = <String, double>{};
-
-    for (final q in questions) {
-      final type = q.questionType;
-      if (!grouped.containsKey(type)) {
-        typeOrder.add(type);
-        grouped[type] = <ImportedExamQuestion>[];
-        pointsByType[type] = q.points > 0 ? q.points : 1.0;
-      }
-      grouped[type]!.add(q);
-    }
-
-    final sections = <ImportedExamSection>[];
-    for (var i = 0; i < typeOrder.length; i++) {
-      final type = typeOrder[i];
-      final rawList = grouped[type]!;
-      final defaultPts = pointsByType[type] ?? 1.0;
-
-      // Renumber sequentially 1..N while maintaining exact relative order.
-      final orderedQuestions = <ImportedExamQuestion>[];
-      for (var idx = 0; idx < rawList.length; idx++) {
-        final item = rawList[idx];
-        orderedQuestions.add(
-          ImportedExamQuestion(
-            questionNumber: idx + 1,
-            questionText: item.questionText,
-            questionType: type,
-            points: item.points > 0 ? item.points : defaultPts,
-            choices: item.choices,
-            correctAnswer: item.correctAnswer,
-          ),
-        );
-      }
-
-      sections.add(
-        ImportedExamSection(
-          name: autoSectionName(i + 1, type),
-          questionType: type,
-          defaultPoints: defaultPts,
-          questions: orderedQuestions,
+    for (final pageNum in unreadablePages) {
+      issues.add(
+        QuestionPaperImportIssue(
+          kind: 'unreadable_page',
+          message:
+              'Page $pageNum has no selectable text and could not be read.',
+          isBlocking: rawSections.isEmpty,
         ),
       );
     }
 
-    return sections;
+    if (rawSections.isEmpty) {
+      return ImportedQuestionPaper(
+        fileName: fileName,
+        sections: const <ImportedExamSection>[],
+        detectedAssessmentType: detectedAssessmentType,
+        detectedSubjectName: detectedSubjectName,
+        detectedQuizTitle: detectedQuizTitle,
+        detectedExamDay: detectedExamDay,
+        detectedExamDate: detectedExamDate,
+        detectedStartTime: detectedStartTime,
+        detectedEndTime: detectedEndTime,
+        detectedReferenceNo: detectedReferenceNo,
+        detectedInstructions: detectedInstructions,
+        unreadablePages: unreadablePages,
+        issues: issues,
+      );
+    }
+
+    // Compute Part numbers (1 per distinct question type in order of first appearance)
+    // and subpart letters (A, B, ... when a question type repeats).
+    final typeCounts = <String, int>{};
+    final partByType = <String, int>{};
+    for (final s in rawSections) {
+      final t = normalizeQuestionType(s.questionType);
+      typeCounts[t] = (typeCounts[t] ?? 0) + 1;
+      if (!partByType.containsKey(t)) {
+        partByType[t] = partByType.length + 1;
+      }
+    }
+
+    final seenByType = <String, int>{};
+    final finalizedSections = <ImportedExamSection>[];
+    var globalCursor = 1;
+
+    for (var sIdx = 0; sIdx < rawSections.length; sIdx++) {
+      final sec = rawSections[sIdx];
+      final qType = normalizeQuestionType(sec.questionType);
+      final partNum = partByType[qType] ?? (sIdx + 1);
+      final occIdx = seenByType[qType] ?? 0;
+      seenByType[qType] = occIdx + 1;
+
+      final isRepeated = (typeCounts[qType] ?? 1) > 1;
+      final subpart = isRepeated
+          ? (sec.subpartLetter?.trim().isNotEmpty == true
+                ? sec.subpartLetter!.trim().toUpperCase()
+                : subpartLetterFromIndex(occIdx))
+          : null;
+
+      final defaultPts = sec.defaultPoints > 0 ? sec.defaultPoints : 1.0;
+      final canonicalName = formatPartHeading(
+        partNumber: partNum,
+        questionType: qType,
+        subpartLetter: subpart,
+        pointsPerItem: defaultPts,
+      );
+
+      if (sec.hasAmbiguousMetadata) {
+        issues.add(
+          QuestionPaperImportIssue(
+            kind: 'ambiguous_section',
+            sectionIndex: sIdx,
+            message:
+                '$canonicalName had ambiguous or incomplete section metadata. Verify its question type and points per item.',
+            isBlocking: true,
+          ),
+        );
+      }
+
+      // Check source question numbering within this section for duplicates or gaps
+      final sectionStartGlobal = globalCursor;
+      final sourceNums = sec.questions
+          .map((q) => q.sourceQuestionNumber ?? q.questionNumber)
+          .toList();
+
+      if (sourceNums.isNotEmpty) {
+        final seenNums = <int>{};
+        final duplicates = <int>{};
+        for (final n in sourceNums) {
+          if (!seenNums.add(n)) {
+            duplicates.add(n);
+          }
+        }
+        if (duplicates.isNotEmpty) {
+          final dupList = duplicates.toList()..sort();
+          issues.add(
+            QuestionPaperImportIssue(
+              kind: 'duplicate_number',
+              sectionIndex: sIdx,
+              message:
+                  '$canonicalName has duplicate item number(s): ${dupList.join(", ")}.',
+              isBlocking: true,
+            ),
+          );
+        }
+
+        // Check for missing numbers in sequence (either 1..K or sectionStartGlobal..sectionEndGlobal)
+        final firstSource = sourceNums.first;
+        final expectedBase =
+            (firstSource == sectionStartGlobal || firstSource > 1)
+            ? firstSource
+            : 1;
+        final expectedEnd = expectedBase + sourceNums.length - 1;
+        final missingNums = <int>[];
+        for (var expected = expectedBase; expected <= expectedEnd; expected++) {
+          if (!seenNums.contains(expected)) {
+            missingNums.add(expected);
+          }
+        }
+        if (missingNums.isNotEmpty) {
+          issues.add(
+            QuestionPaperImportIssue(
+              kind: 'missing_number',
+              sectionIndex: sIdx,
+              message:
+                  '$canonicalName is missing item number(s) in sequence: ${missingNums.join(", ")}.',
+              isBlocking: true,
+            ),
+          );
+        }
+      }
+
+      if (sec.expectedItemCount != null &&
+          sec.expectedItemCount! > 0 &&
+          sec.expectedItemCount != sec.questions.length) {
+        issues.add(
+          QuestionPaperImportIssue(
+            kind: 'mismatched_count',
+            sectionIndex: sIdx,
+            message:
+                '$canonicalName header states ${sec.expectedItemCount} items, but ${sec.questions.length} ${sec.questions.length == 1 ? "item was" : "items were"} found.',
+            isBlocking: true,
+          ),
+        );
+      }
+
+      final updatedQuestions = <ImportedExamQuestion>[];
+      for (var qIdx = 0; qIdx < sec.questions.length; qIdx++) {
+        final rawQ = sec.questions[qIdx];
+        final continuousNum = globalCursor++;
+        final itemPts = rawQ.points > 0 ? rawQ.points : defaultPts;
+
+        final validatedQ = _buildValidatedQuestion(
+          questionNumber: continuousNum,
+          sourceQuestionNumber:
+              rawQ.sourceQuestionNumber ?? rawQ.questionNumber,
+          questionText: rawQ.questionText,
+          questionType: qType,
+          points: itemPts,
+          choices: qType == 'multiple_choice'
+              ? rawQ.choices
+              : const <String>[],
+          correctAnswer: rawQ.correctAnswer,
+          classificationAmbiguous: rawQ.classificationAmbiguous,
+        );
+
+        if (validatedQ.classificationAmbiguous) {
+          issues.add(
+            QuestionPaperImportIssue(
+              kind: 'unresolved_classification',
+              sectionIndex: sIdx,
+              questionNumber: continuousNum,
+              message:
+                  'Item $continuousNum in $canonicalName has an unresolved question type classification.',
+              isBlocking: true,
+            ),
+          );
+        }
+        if (validatedQ.hasLeftoverPlaceholder) {
+          issues.add(
+            QuestionPaperImportIssue(
+              kind: 'leftover_placeholder',
+              sectionIndex: sIdx,
+              questionNumber: continuousNum,
+              message:
+                  'Item $continuousNum in $canonicalName still contains template placeholder text or blank prompt.',
+              isBlocking: true,
+            ),
+          );
+        }
+        if (validatedQ.missingChoiceLetters.isNotEmpty) {
+          issues.add(
+            QuestionPaperImportIssue(
+              kind: 'incomplete_choices',
+              sectionIndex: sIdx,
+              questionNumber: continuousNum,
+              message:
+                  'Item $continuousNum in $canonicalName is missing choice(s): ${validatedQ.missingChoiceLetters.join(", ")}.',
+              isBlocking: true,
+            ),
+          );
+        }
+
+        updatedQuestions.add(validatedQ);
+      }
+
+      finalizedSections.add(
+        ImportedExamSection(
+          name: canonicalName,
+          questionType: qType,
+          defaultPoints: defaultPts,
+          questions: updatedQuestions,
+          partNumber: partNum,
+          subpartLetter: subpart,
+          expectedItemCount: sec.expectedItemCount,
+          hasAmbiguousMetadata: sec.hasAmbiguousMetadata,
+        ),
+      );
+    }
+
+    // Compare against expected template if one was selected in the current session
+    if (expectedTemplate != null && expectedTemplate.isNotEmpty) {
+      final resolvedExpected = resolveTemplateSections(expectedTemplate);
+      if (resolvedExpected.length != finalizedSections.length) {
+        issues.add(
+          QuestionPaperImportIssue(
+            kind: 'template_mismatch',
+            message:
+                'Selected template has ${resolvedExpected.length} ${resolvedExpected.length == 1 ? "section" : "sections"}, '
+                'but the uploaded file has ${finalizedSections.length} ${finalizedSections.length == 1 ? "section" : "sections"}.',
+            isBlocking: false,
+          ),
+        );
+      }
+      final compareCount = math.min(
+        resolvedExpected.length,
+        finalizedSections.length,
+      );
+      for (var i = 0; i < compareCount; i++) {
+        final exp = resolvedExpected[i];
+        final det = finalizedSections[i];
+        if (exp.questionType != det.questionType) {
+          issues.add(
+            QuestionPaperImportIssue(
+              kind: 'template_mismatch',
+              sectionIndex: i,
+              message:
+                  'Section ${i + 1}: template expected ${labelForType(exp.questionType)} (${exp.heading}), '
+                  'but detected ${labelForType(det.questionType)} (${det.name}).',
+              isBlocking: false,
+            ),
+          );
+        }
+        if (exp.itemCount != det.questions.length) {
+          issues.add(
+            QuestionPaperImportIssue(
+              kind: 'template_mismatch',
+              sectionIndex: i,
+              message:
+                  '${det.name}: template expected ${exp.itemCount} items, '
+                  'but uploaded file has ${det.questions.length} items.',
+              isBlocking: false,
+            ),
+          );
+        }
+        if ((exp.pointsPerItem - det.defaultPoints).abs() > 0.0001) {
+          issues.add(
+            QuestionPaperImportIssue(
+              kind: 'template_mismatch',
+              sectionIndex: i,
+              message:
+                  '${det.name}: template expected ${formatPoints(exp.pointsPerItem)} pts/item, '
+                  'but uploaded file has ${formatPoints(det.defaultPoints)} pts/item.',
+              isBlocking: false,
+            ),
+          );
+        }
+      }
+    }
+
+    return ImportedQuestionPaper(
+      fileName: fileName,
+      sections: finalizedSections,
+      detectedAssessmentType: detectedAssessmentType,
+      detectedSubjectName: detectedSubjectName,
+      detectedQuizTitle: detectedQuizTitle,
+      detectedExamDay: detectedExamDay,
+      detectedExamDate: detectedExamDate,
+      detectedStartTime: detectedStartTime,
+      detectedEndTime: detectedEndTime,
+      detectedReferenceNo: detectedReferenceNo,
+      detectedInstructions: detectedInstructions,
+      unreadablePages: unreadablePages,
+      issues: issues,
+    );
+  }
+
+  static ImportedExamQuestion _buildValidatedQuestion({
+    required int questionNumber,
+    required int? sourceQuestionNumber,
+    required String questionText,
+    required String questionType,
+    required double points,
+    required List<String> choices,
+    required String? correctAnswer,
+    required bool classificationAmbiguous,
+  }) {
+    final cleanStem = questionText.trim();
+    var hasPlaceholder = cleanStem.isEmpty || _isPlaceholderText(cleanStem);
+    final missingLetters = <String>[];
+    final normalizedChoices = <String>[];
+
+    if (questionType == 'multiple_choice') {
+      for (var i = 0; i < 4; i++) {
+        final letter = String.fromCharCode(65 + i);
+        final rawChoice = i < choices.length ? choices[i].trim() : '';
+        normalizedChoices.add(rawChoice);
+        if (rawChoice.isEmpty) {
+          missingLetters.add(letter);
+        } else if (_isPlaceholderText(rawChoice)) {
+          hasPlaceholder = true;
+          missingLetters.add(letter);
+        }
+      }
+    }
+
+    return ImportedExamQuestion(
+      questionNumber: questionNumber,
+      sourceQuestionNumber: sourceQuestionNumber,
+      questionText: cleanStem,
+      questionType: questionType,
+      points: points > 0 ? points : 1.0,
+      choices: normalizedChoices,
+      correctAnswer: correctAnswer,
+      hasLeftoverPlaceholder: hasPlaceholder,
+      missingChoiceLetters: missingLetters,
+      classificationAmbiguous: classificationAmbiguous,
+    );
+  }
+
+  static bool _isPlaceholderText(String raw) {
+    final clean = raw.trim();
+    if (clean.isEmpty) return true;
+    final lower = clean.toLowerCase();
+    if (RegExp(
+      r'\[\s*(?:write|enter|type)\s+(?:your\s+)?(?:question|statement|choice|option|prompt|answer).*\]',
+      caseSensitive: false,
+    ).hasMatch(clean)) {
+      return true;
+    }
+    if (lower == '[write question here]' ||
+        lower == '[write statement here]' ||
+        lower == '[write choice here]' ||
+        lower == '[write choice a here]' ||
+        lower == '[write choice b here]' ||
+        lower == '[write choice c here]' ||
+        lower == '[write choice d here]') {
+      return true;
+    }
+    if (RegExp(r'^[_\-\.\s\?]+$').hasMatch(clean)) {
+      return true;
+    }
+    return false;
+  }
+
+  static String? _detectExplicitAssessmentTypeFromHeader(String line) {
+    final clean = line.trim();
+    final lower = clean.toLowerCase();
+    if (lower.contains('preliminary examination') ||
+        RegExp(r'\bprelim(?:s|inary)?\s+exam(?:ination)?\b').hasMatch(lower) ||
+        lower == 'prelim' ||
+        lower == 'prelims') {
+      return 'prelim';
+    }
+    if (lower.contains('midterm examination') ||
+        RegExp(r'\bmidterm\s+exam(?:ination)?\b').hasMatch(lower) ||
+        lower == 'midterm' ||
+        lower == 'midterms') {
+      return 'midterm';
+    }
+    if (lower.contains('pre-final examination') ||
+        lower.contains('prefinal examination') ||
+        RegExp(r'\bpre[\-\s]?finals?\s+exam(?:ination)?\b').hasMatch(lower) ||
+        lower == 'prefinals' ||
+        lower == 'pre-finals' ||
+        lower == 'prefinal') {
+      return 'prefinal';
+    }
+    if (lower.contains('final examination') ||
+        RegExp(r'\bfinals?\s+exam(?:ination)?\b').hasMatch(lower) ||
+        lower == 'finals' ||
+        lower == 'final') {
+      return 'final';
+    }
+    if (lower.contains('long quiz')) {
+      return 'long_quiz';
+    }
+    if (lower.contains('short quiz')) {
+      return 'short_quiz';
+    }
+    if (lower.contains('quiz')) {
+      return 'quiz';
+    }
+    if (lower.contains('performance task')) {
+      return 'performance_task';
+    }
+    if (lower.contains('laboratory')) {
+      return 'laboratory';
+    }
+    return null;
+  }
+
+  /// Parses visible Part headings, lettered subparts, STI section headers,
+  /// and standalone point/instruction lines while distinguishing section
+  /// headings starting with `A.` or `B.` from multiple-choice options.
+  static _ParsedSectionHeader? _tryParseSectionHeaderOrPointsLine(
+    String line, {
+    required bool hasActiveQuestion,
+    required bool activeQuestionHasFourChoices,
+  }) {
+    final clean = line.trim();
+    final lower = clean.toLowerCase();
+
+    // 1. Direction / Instruction line (e.g. "Read and analyze each item...")
+    if (lower.startsWith('read and analyze') ||
+        lower.startsWith('direction:') ||
+        lower.startsWith('directions:') ||
+        lower.startsWith('instruction:') ||
+        lower.startsWith('instructions:')) {
+      final detectedType = _detectTypeFromLine(lower);
+      final pts = _extractPointsPerItem(clean);
+      final count = _extractItemCount(clean);
+      return _ParsedSectionHeader(
+        rawHeading: clean,
+        questionType: detectedType,
+        pointsPerItem: pts,
+        expectedItemCount: count,
+        isInstructionOrPointsLineOnly: true,
+      );
+    }
+
+    // 2. CheckMate Part Heading (with or without lettered subpart):
+    //    e.g. "Part I. Multiple Choice - A. 2 pts each"
+    //         "Part I. Multiple Choice - B. 3 pts each"
+    //         "Part II. Identification"
+    //         "Part III. True or False"
+    final partRe = RegExp(
+      r'^(?:Part|Section|Test)\s+([IVX\d]+)[\.\:\-\u00B7\s]+(.+)$',
+      caseSensitive: false,
+    );
+    final partMatch = partRe.firstMatch(clean);
+    if (partMatch != null) {
+      final rawRoman = partMatch.group(1)!.trim();
+      final partNum = parseRomanNumeral(rawRoman);
+      final remainder = partMatch.group(2)!.trim();
+      final detectedType = _detectTypeFromLine(remainder.toLowerCase());
+      final pts = _extractPointsPerItem(remainder);
+      final count = _extractItemCount(remainder);
+
+      // Extract optional subpart letter after dash, e.g. "- A. 2 pts each" or "- B (3 pts)"
+      String? subpart;
+      final subpartMatch = RegExp(
+        r'[\-\u2013\u2014\:]\s*([A-Z])(?:\b|[\.\)\:\s])',
+      ).firstMatch(remainder);
+      if (subpartMatch != null) {
+        subpart = subpartMatch.group(1)!.toUpperCase();
+      }
+
+      final hasInvalidPointsSyntax =
+          RegExp(r'\b(?:pts?|points?)\b', caseSensitive: false).hasMatch(
+            remainder,
+          ) &&
+          pts == null;
+
+      return _ParsedSectionHeader(
+        rawHeading: clean,
+        partNumber: partNum,
+        subpartLetter: subpart,
+        questionType: detectedType,
+        pointsPerItem: pts,
+        expectedItemCount: count,
+        isInstructionOrPointsLineOnly: false,
+        hasAmbiguousMetadata: detectedType == null || hasInvalidPointsSyntax,
+      );
+    }
+
+    // 3. STI / Template Points & Item Count Header:
+    //    e.g. "A.  (35 items x 2 points)"
+    //         "B.  (20 items x 3 points - 3 pts each)"
+    //         "Items 1-15 (15 items x 2 points - 2 pts each)"
+    final stiPointsLineRe = RegExp(
+      r'^(?:([A-Z])[\.\)]\s*)?\(?\s*(?:items?\s+\d+[\-\u2013\u2014]\d+\s*\(?|)(\d+)\s*items?\b(.*)$',
+      caseSensitive: false,
+    );
+    final stiMatch = stiPointsLineRe.firstMatch(clean);
+    if (stiMatch != null) {
+      final letter = stiMatch.group(1)?.toUpperCase();
+      final itemCount = int.tryParse(stiMatch.group(2) ?? '');
+      final tail = stiMatch.group(3) ?? '';
+      final pts = _extractPointsPerItem(tail) ?? _extractPointsPerItem(clean);
+      final detectedType = _detectTypeFromLine(lower);
+
+      return _ParsedSectionHeader(
+        rawHeading: clean,
+        subpartLetter: letter,
+        questionType: detectedType,
+        pointsPerItem: pts,
+        expectedItemCount: itemCount,
+        isInstructionOrPointsLineOnly: true,
+      );
+    }
+
+    // 4. Standalone Points Instruction Line:
+    //    e.g. "Points: 2 pts each", "2 points per item", "2 pts each"
+    if (RegExp(
+      r'^(?:points?(?:\s+per\s+item)?\s*[:\-]?\s*)?\d+(?:\.\d+)?\s*(?:pts?|points?)\s*(?:each|per\s+item)$',
+      caseSensitive: false,
+    ).hasMatch(clean)) {
+      final pts = _extractPointsPerItem(clean);
+      return _ParsedSectionHeader(
+        rawHeading: clean,
+        pointsPerItem: pts,
+        isInstructionOrPointsLineOnly: true,
+      );
+    }
+
+    // 5. Lettered Section Heading with Question Type:
+    //    e.g. "A. Multiple Choice (2 pts each)"
+    //         "B. Multiple Choice - 3 pts each"
+    //         "C. Identification"
+    //    Distinguished from an A-D choice option because:
+    //    - Either no question is currently active, OR
+    //    - The active question already has all four choices A-D, OR
+    //    - The line explicitly names a question type AND includes points/items metadata.
+    final letteredTypeHeaderRe = RegExp(
+      r'^([A-Z])[\.\)]\s*(Multiple\s+Choice|True\s+or\s+False|Modified\s+True\s+or\s+False|Identification|Fill\s+in\s+the\s+Blanks?)(?:\s*[\-\u2013\u2014\(\:]\s*(.+))?$',
+      caseSensitive: false,
+    );
+    final letteredMatch = letteredTypeHeaderRe.firstMatch(clean);
+    if (letteredMatch != null) {
+      final letter = letteredMatch.group(1)!.toUpperCase();
+      final typePart = letteredMatch.group(2)!;
+      final rest = letteredMatch.group(3) ?? '';
+      final pts = _extractPointsPerItem(rest);
+      final count = _extractItemCount(rest);
+      final hasMeta = pts != null || count != null;
+
+      if (!hasActiveQuestion ||
+          activeQuestionHasFourChoices ||
+          hasMeta ||
+          !const ['A', 'B', 'C', 'D'].contains(letter)) {
+        return _ParsedSectionHeader(
+          rawHeading: clean,
+          subpartLetter: letter,
+          questionType: _detectTypeFromLine(typePart.toLowerCase()),
+          pointsPerItem: pts,
+          expectedItemCount: count,
+          isInstructionOrPointsLineOnly: false,
+        );
+      }
+    }
+
+    // 6. Standalone Type Heading: e.g. "Multiple Choice (2 pts each)" or "Identification:"
+    final standaloneTypeHeaderRe = RegExp(
+      r'^(Multiple\s+Choice|True\s+or\s+False|Modified\s+True\s+or\s+False|Identification|Fill\s+in\s+the\s+Blanks?)(?:\s*[\-\u2013\u2014\(\:]\s*(.*))?$',
+      caseSensitive: false,
+    );
+    final standaloneMatch = standaloneTypeHeaderRe.firstMatch(clean);
+    if (standaloneMatch != null) {
+      final typePart = standaloneMatch.group(1)!;
+      final rest = standaloneMatch.group(2) ?? '';
+      final pts = _extractPointsPerItem(rest);
+      final count = _extractItemCount(rest);
+      return _ParsedSectionHeader(
+        rawHeading: clean,
+        questionType: _detectTypeFromLine(typePart.toLowerCase()),
+        pointsPerItem: pts,
+        expectedItemCount: count,
+        isInstructionOrPointsLineOnly: false,
+      );
+    }
+
+    return null;
+  }
+
+  static double? _extractPointsPerItem(String text) {
+    if (text.isEmpty) return null;
+    // Match "x 2 points" / "× 2 pts"
+    final multMatch = RegExp(
+      r'[x\u00D7\*]\s*(\d+(?:\.\d+)?)\s*(?:pts?|points?)\b',
+      caseSensitive: false,
+    ).firstMatch(text);
+    if (multMatch != null) {
+      final v = double.tryParse(multMatch.group(1)!);
+      if (v != null && v > 0) return v;
+    }
+
+    // Match "2 pts each" / "2 points per item" / "2 pt/item"
+    final eachMatch = RegExp(
+      r'(\d+(?:\.\d+)?)\s*(?:pts?|points?)\s*(?:each|/\s*item|per\s+item)?\b',
+      caseSensitive: false,
+    ).firstMatch(text);
+    if (eachMatch != null) {
+      final v = double.tryParse(eachMatch.group(1)!);
+      if (v != null && v > 0) return v;
+    }
+    return null;
+  }
+
+  static int? _extractItemCount(String text) {
+    if (text.isEmpty) return null;
+    final m = RegExp(
+      r'(\d+)\s*items?\b',
+      caseSensitive: false,
+    ).firstMatch(text);
+    if (m != null) {
+      final v = int.tryParse(m.group(1)!);
+      if (v != null && v > 0) return v;
+    }
+    return null;
   }
 
   static String? _detectTypeFromLine(String lower) {
     if (lower.contains('choose the letter of the correct answer') ||
+        lower.contains('choose the best answer') ||
         lower.contains('multiple choice') ||
         lower.contains('multiple-choice')) {
       return 'multiple_choice';
     }
     if (lower.contains('write true if') ||
+        lower.contains('mark t for true') ||
         lower.contains('true or false') ||
         lower.contains('true / false') ||
         lower.contains('true/false') ||
@@ -1380,6 +2794,7 @@ class QuestionPaperImportService {
       return 'true_false';
     }
     if (lower.contains('write the correct answer on the space') ||
+        lower.contains('write your answer on the line') ||
         lower.contains('identification') ||
         lower.contains('fill in the blank')) {
       return 'identification';
@@ -1387,26 +2802,28 @@ class QuestionPaperImportService {
     return null;
   }
 
-  static String _resolveQuestionType(_QuestionBuilder q) {
+  static _ResolvedQuestionType _resolveQuestionTypeWithDiagnostics(
+    _QuestionBuilder q,
+  ) {
     final nonEmptyChoices = q.choices.values
         .map((v) => v.trim())
         .where((v) => v.isNotEmpty)
         .toList();
 
     // Check if choices are just A. True / B. False
-    if (nonEmptyChoices.length == 2) {
+    if (nonEmptyChoices.length == 2 && q.inferredType != 'multiple_choice') {
       final lowerSet = nonEmptyChoices.map((c) => c.toLowerCase()).toSet();
       if (lowerSet.contains('true') && lowerSet.contains('false')) {
-        return 'true_false';
+        return const _ResolvedQuestionType('true_false', isAmbiguous: false);
       }
     }
 
-    if (nonEmptyChoices.length >= 2) {
-      return 'multiple_choice';
+    if (q.inferredType == 'multiple_choice' || q.choices.isNotEmpty) {
+      return const _ResolvedQuestionType('multiple_choice', isAmbiguous: false);
     }
 
     if (q.hasTrueFalsePrompt || _isTrueOrFalseAnswer(q.correctAnswer)) {
-      return 'true_false';
+      return const _ResolvedQuestionType('true_false', isAmbiguous: false);
     }
 
     final stemLower = q.stem.toString().trim().toLowerCase();
@@ -1416,16 +2833,19 @@ class QuestionPaperImportService {
         stemLower.startsWith('[true/false]') ||
         stemLower.endsWith('(true or false)') ||
         stemLower.endsWith('(true/false)')) {
-      return 'true_false';
+      return const _ResolvedQuestionType('true_false', isAmbiguous: false);
     }
 
     if (q.inferredType == 'true_false') {
-      return 'true_false';
+      return const _ResolvedQuestionType('true_false', isAmbiguous: false);
     }
 
-    // Any question without 2+ multiple choice options that is not True/False
-    // is an Identification question.
-    return 'identification';
+    if (q.inferredType == 'identification' || q.hasIdentificationPrompt) {
+      return const _ResolvedQuestionType('identification', isAmbiguous: false);
+    }
+
+    // No explicit section type, no choices, and no T/F or ID answer prompt
+    return const _ResolvedQuestionType('identification', isAmbiguous: true);
   }
 
   static bool _isTrueOrFalseAnswer(String? raw) {
@@ -1441,7 +2861,11 @@ class QuestionPaperImportService {
   }) {
     if (rawAnswer == null) return null;
     final clean = rawAnswer.trim();
-    if (clean.isEmpty || RegExp(r'^_+$').hasMatch(clean)) return null;
+    if (clean.isEmpty ||
+        RegExp(r'^_+$').hasMatch(clean) ||
+        _isPlaceholderText(clean)) {
+      return null;
+    }
 
     if (qType == 'multiple_choice') {
       final upper = clean.toUpperCase();
@@ -1452,7 +2876,6 @@ class QuestionPaperImportService {
       if (letterMatch != null) {
         return letterMatch.group(1)!.toUpperCase();
       }
-      // Match against option text if full choice text was given as the answer
       for (var i = 0; i < choices.length && i < 4; i++) {
         if (choices[i].trim().toLowerCase() == clean.toLowerCase()) {
           return String.fromCharCode(65 + i);
@@ -1477,7 +2900,6 @@ class QuestionPaperImportService {
 
   static String _stripLeadingQuestionNumber(String text) {
     var clean = text.trim();
-    // Strip any accidental duplicate leading question number (e.g. "2. Which...")
     while (RegExp(r'^\d{1,3}[\.\)]\s+').hasMatch(clean)) {
       clean = clean.replaceFirst(RegExp(r'^\d{1,3}[\.\)]\s+'), '').trim();
     }
@@ -1485,9 +2907,9 @@ class QuestionPaperImportService {
   }
 
   static Map<String, String> _splitInlineChoices(String line) {
-    final matches = RegExp(r'(?:^|\s{2,})([A-Da-d])[\.\)]\s+')
-        .allMatches(line)
-        .toList();
+    final matches = RegExp(
+      r'(?:^|\s{2,})([A-Da-d])[\.\)]\s+',
+    ).allMatches(line).toList();
     if (matches.length <= 1) return const <String, String>{};
 
     final result = <String, String>{};
@@ -1499,6 +2921,96 @@ class QuestionPaperImportService {
       result[letter] = line.substring(start, end).trim();
     }
     return result;
+  }
+}
+
+class _PdfExtractionResult {
+  const _PdfExtractionResult({
+    required this.lines,
+    required this.unreadablePages,
+  });
+
+  final List<String> lines;
+  final List<int> unreadablePages;
+}
+
+class _PositionedTextSegment {
+  const _PositionedTextSegment({required this.text, required this.bounds});
+
+  final String text;
+  final Rect bounds;
+}
+
+class _ResolvedQuestionType {
+  const _ResolvedQuestionType(this.questionType, {required this.isAmbiguous});
+
+  final String questionType;
+  final bool isAmbiguous;
+}
+
+class _ParsedSectionHeader {
+  const _ParsedSectionHeader({
+    required this.rawHeading,
+    this.partNumber,
+    this.subpartLetter,
+    this.questionType,
+    this.pointsPerItem,
+    this.expectedItemCount,
+    this.isInstructionOrPointsLineOnly = false,
+    this.hasAmbiguousMetadata = false,
+  });
+
+  final String rawHeading;
+  final int? partNumber;
+  final String? subpartLetter;
+  final String? questionType;
+  final double? pointsPerItem;
+  final int? expectedItemCount;
+  final bool isInstructionOrPointsLineOnly;
+  final bool hasAmbiguousMetadata;
+}
+
+class _SectionBuilder {
+  _SectionBuilder({
+    this.rawHeading,
+    this.partNumber,
+    this.subpartLetter,
+    this.questionType,
+    this.defaultPoints = 1.0,
+    this.expectedItemCount,
+    this.hasExplicitHeading = false,
+    this.hasExplicitPoints = false,
+    this.hasAmbiguousMetadata = false,
+  });
+
+  String? rawHeading;
+  int? partNumber;
+  String? subpartLetter;
+  String? questionType;
+  double defaultPoints;
+  int? expectedItemCount;
+  bool hasExplicitHeading;
+  bool hasExplicitPoints;
+  bool hasAmbiguousMetadata;
+  final List<ImportedExamQuestion> questions = <ImportedExamQuestion>[];
+
+  ImportedExamSection toSection() {
+    final resolvedType =
+        questionType ??
+        (questions.isNotEmpty
+            ? questions.first.questionType
+            : 'multiple_choice');
+    final pts = defaultPoints > 0 ? defaultPoints : 1.0;
+    return ImportedExamSection(
+      name: rawHeading ?? '',
+      questionType: resolvedType,
+      defaultPoints: pts,
+      questions: List<ImportedExamQuestion>.from(questions),
+      partNumber: partNumber,
+      subpartLetter: subpartLetter,
+      expectedItemCount: expectedItemCount,
+      hasAmbiguousMetadata: hasAmbiguousMetadata,
+    );
   }
 }
 

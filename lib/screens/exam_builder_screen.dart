@@ -10,7 +10,10 @@ import '../services/question_paper_pdf_service.dart';
 import 'answer_sheet_preview_screen.dart';
 import 'exam_preview_screen.dart';
 import 'exams_tab.dart'
-    show importParsedSectionsIntoExam, pickAndParseQuestionPaper;
+    show
+        importParsedSectionsIntoExam,
+        resequenceExamSectionHeadings,
+        showUploadQuestionnaireModal;
 import 'questions_screen.dart';
 import 'teacher_dashboard.dart' show openTeacherScansForExam;
 
@@ -79,10 +82,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
       for (final section in sections) {
         final sectionId = int.tryParse(section['id']?.toString() ?? '');
         if (sectionId == null) continue;
-        final qList = await ApiService.getQuestions(
-          token,
-          sectionId,
-        );
+        final qList = await ApiService.getQuestions(token, sectionId);
         qList.sort((a, b) {
           final na = int.tryParse(a['question_number']?.toString() ?? '') ?? 0;
           final nb = int.tryParse(b['question_number']?.toString() ?? '') ?? 0;
@@ -216,11 +216,13 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
       final token = await AuthStorage.getToken();
       if (token == null || token.isEmpty) throw Exception('Session expired.');
       await ApiService.deleteExamSection(token: token, sectionId: sectionId);
+      await resequenceExamSectionHeadings(token: token, examId: widget.examId);
       if (!mounted) return;
       await _loadExam();
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Section deleted.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Section deleted.')));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -371,7 +373,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
   }
 
   Future<void> _importPdfIntoCurrentExam() async {
-    final parsedPaper = await pickAndParseQuestionPaper(context);
+    final parsedPaper = await showUploadQuestionnaireModal(context);
     if (parsedPaper == null || !mounted) return;
     try {
       final token = await AuthStorage.getToken();
@@ -397,7 +399,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Imported $count questions from "${parsedPaper.fileName}" organized by test type.',
+            'Imported $count questions from "${parsedPaper.fileName}".',
           ),
         ),
       );
@@ -589,6 +591,10 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                               defaultPoints: points,
                             );
                           }
+                          await resequenceExamSectionHeadings(
+                            token: token,
+                            examId: widget.examId,
+                          );
                           if (dialogContext.mounted) {
                             Navigator.pop(dialogContext, true);
                           }
@@ -674,8 +680,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '${validation.assessmentLabel} Requirements '
-                    '(${validation.actualTotal} / ${validation.requiredTotal} total questions)',
+                    '${validation.assessmentLabel} Question Requirements',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 15,
@@ -687,31 +692,10 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Minimum per included question type: '
-              '${validation.requiredPerQuestionType} questions',
+              'Each included question type requires at least '
+              '${validation.requiredPerQuestionType} questions across all sections of that type.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
-            if (validation.questionTypeValidations.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 6,
-                children: validation.questionTypeValidations.map((q) {
-                  final ok = q.isValid;
-                  return Chip(
-                    visualDensity: VisualDensity.compact,
-                    avatar: Icon(
-                      ok ? Icons.check : Icons.error_outline,
-                      size: 16,
-                      color: ok ? Colors.green.shade700 : Colors.red.shade700,
-                    ),
-                    label: Text(
-                      '${q.label}: ${q.actualCount}/${q.requiredCount}',
-                    ),
-                  );
-                }).toList(),
-              ),
-            ],
             if (!isValid) ...[
               const SizedBox(height: 8),
               for (final err in validation.errors)
@@ -729,7 +713,8 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
             const SizedBox(height: 12),
             if (status == 'published')
               FilledButton.icon(
-                onPressed: () => openTeacherScansForExam(context, widget.examId),
+                onPressed: () =>
+                    openTeacherScansForExam(context, widget.examId),
                 icon: const Icon(Icons.document_scanner_outlined, size: 18),
                 label: const Text('Scan Now'),
               )
@@ -789,6 +774,17 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
           ),
         ),
       );
+    }
+
+    // Compute aggregate question counts per type across repeated sections
+    final typeTotals = <String, int>{};
+    for (final s in _sections) {
+      final sid = int.tryParse(s['id']?.toString() ?? '');
+      final qType = AssessmentValidator.normalizeQuestionType(
+        s['question_type']?.toString(),
+      );
+      final count = sid == null ? 0 : (_questions[sid]?.length ?? 0);
+      typeTotals[qType] = (typeTotals[qType] ?? 0) + count;
     }
 
     return RefreshIndicator(
@@ -926,7 +922,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                     OutlinedButton.icon(
                       onPressed: _importPdfIntoCurrentExam,
                       icon: const Icon(Icons.upload_file_outlined),
-                      label: const Text('Upload PDF'),
+                      label: const Text('Upload Questionnaire'),
                     ),
                     FilledButton.icon(
                       onPressed: () => _showSectionDialog(),
@@ -953,12 +949,20 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
               builder: (context) {
                 final section = _sections[idx];
                 final type = section['question_type']?.toString() ?? '';
+                final normType = AssessmentValidator.normalizeQuestionType(
+                  type,
+                );
                 final sectionId = int.tryParse(
                   section['id']?.toString() ?? '',
                 );
-                final qCount = sectionId == null
-                    ? 0
-                    : (_questions[sectionId]?.length ?? 0);
+                final secQs = sectionId == null
+                    ? const <Map<String, dynamic>>[]
+                    : (_questions[sectionId] ?? const <Map<String, dynamic>>[]);
+                final qCount = secQs.length;
+                final aggTypeCount = typeTotals[normType] ?? qCount;
+                final rangeLabel = secQs.isEmpty
+                    ? '0 questions'
+                    : 'Items ${secQs.first['question_number'] ?? 1}\u2013${secQs.last['question_number'] ?? qCount} ($qCount items)';
 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 12),
@@ -974,6 +978,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                                   sectionName:
                                       section['name']?.toString() ?? 'Section',
                                   questionType: type,
+                                  aggregateTypeQuestionCount: aggTypeCount,
                                 ),
                               ),
                             );
@@ -990,7 +995,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                     subtitle: Text(
                       '${_formatQuestionType(type)} • '
                       '${section['default_points'] ?? '1'} pts/item • '
-                      '$qCount/5 min questions',
+                      '$rangeLabel • $aggTypeCount/5 type min',
                     ),
                     trailing: _isPublished
                         ? null
@@ -1012,7 +1017,8 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                                     ? null
                                     : () => _deleteSection(
                                         sectionId,
-                                        section['name']?.toString() ?? 'Section',
+                                        section['name']?.toString() ??
+                                            'Section',
                                       ),
                               ),
                             ],

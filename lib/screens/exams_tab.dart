@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:printing/printing.dart';
@@ -116,8 +117,18 @@ String _typeLabel(String t) {
   }
 }
 
-String _autoSectionName(int sectionOrder, String questionType) {
-  return QuestionPaperImportService.autoSectionName(sectionOrder, questionType);
+String _autoSectionName(
+  int sectionOrder,
+  String questionType, {
+  String? subpartLetter,
+  num? points,
+}) {
+  return QuestionPaperImportService.autoSectionName(
+    sectionOrder,
+    questionType,
+    subpartLetter: subpartLetter,
+    points: points,
+  );
 }
 
 String _normalizeAnswerByType(String rawAnswer, String questionType) {
@@ -138,8 +149,6 @@ String _normalizeAnswerByType(String rawAnswer, String questionType) {
 }
 
 double _num(dynamic v) => double.tryParse(v?.toString() ?? '') ?? 0;
-
-String _fixed2(double v) => v.toStringAsFixed(2);
 
 String _trim(double v) =>
     v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(2);
@@ -750,14 +759,40 @@ List<_SubjectOptionGroup> _buildSubjectGroups(
 // Create / Edit Exam Details dialog (unified with live Paper Header Preview)
 // ---------------------------------------------------------------
 
-Future<ImportedQuestionPaper?> pickAndParseQuestionPaper(
-  BuildContext context,
-) async {
+Future<void> _saveOrShareBytes({
+  required Uint8List bytes,
+  required String fileName,
+  String mimeType =
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+}) async {
+  if (!kIsWeb) {
+    try {
+      final location = await getSaveLocation(suggestedName: fileName);
+      if (location != null && location.path.isNotEmpty) {
+        final xf = XFile.fromData(bytes, name: fileName, mimeType: mimeType);
+        await xf.saveTo(location.path);
+        return;
+      } else if (location == null) {
+        return;
+      }
+    } catch (_) {
+      // Fall back to Printing.sharePdf when getSaveLocation is unavailable.
+    }
+  }
+  await Printing.sharePdf(bytes: bytes, filename: fileName);
+}
+
+Future<ImportedQuestionPaper?> _pickAndParseFileFromDisk(
+  BuildContext context, {
+  List<QuestionnaireTemplateSectionConfig>? expectedTemplate,
+}) async {
   const typeGroup = XTypeGroup(
     label: 'Questionnaire (PDF, Word, Excel, CSV, TXT, RTF, ODT, HTML)',
     extensions: QuestionPaperImportService.supportedExtensions,
   );
-  final file = await openFile(acceptedTypeGroups: const <XTypeGroup>[typeGroup]);
+  final file = await openFile(
+    acceptedTypeGroups: const <XTypeGroup>[typeGroup],
+  );
   if (file == null) return null;
 
   try {
@@ -765,14 +800,18 @@ Future<ImportedQuestionPaper?> pickAndParseQuestionPaper(
     final parsed = QuestionPaperImportService.parseBytes(
       bytes: bytes,
       fileName: file.name,
+      expectedTemplate: expectedTemplate,
     );
     if (parsed.totalQuestions == 0) {
       if (context.mounted) {
+        final unreadableNote = parsed.unreadablePages.isNotEmpty
+            ? ' Page(s) ${parsed.unreadablePages.join(", ")} had no selectable text.'
+            : '';
         await showDialog<void>(
           context: context,
           builder: (c) => _CmDialog(
             title: 'No questions detected',
-            maxWidth: 420,
+            maxWidth: 440,
             actions: [
               FilledButton(
                 style: _primaryStyle,
@@ -783,8 +822,8 @@ Future<ImportedQuestionPaper?> pickAndParseQuestionPaper(
             child: Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Text(
-                'Could not find numbered questions (e.g. "1. ...") or tabular question rows in "${file.name}". '
-                'Please make sure the uploaded file contains selectable text with numbered items or question columns.',
+                'Could not find numbered questions (e.g. "1. ...") or tabular question rows in "${file.name}".$unreadableNote '
+                'Please make sure the uploaded file is a text-based PDF or supported document with numbered items.',
                 style: const TextStyle(fontSize: 13.5, color: _Brand.ink),
               ),
             ),
@@ -802,80 +841,1435 @@ Future<ImportedQuestionPaper?> pickAndParseQuestionPaper(
   }
 }
 
-/// Imports parsed sections and questions into [examId], automatically
-/// organizing questions according to their respective test types (`multiple_choice`,
-/// `true_false`, `identification`) and naming sections sequentially
-/// (`Part I: Multiple Choice`, `Part II: True or False`, etc.).
+/// Opens the centered "Upload Questionnaire" modal offering two paths:
+/// 1. Use a template (preset selector, Add section, question type, item count,
+///    points per item, live section order preview, and Download Word template).
+/// 2. Upload an existing file (direct upload with full import review).
+Future<ImportedQuestionPaper?> showUploadQuestionnaireModal(
+  BuildContext context, {
+  bool startInDirectMode = false,
+  ImportedQuestionPaper? initialPaper,
+}) async {
+  return showDialog<ImportedQuestionPaper>(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) => _UploadQuestionnaireDialog(
+      startInDirectMode: startInDirectMode,
+      initialPaper: initialPaper,
+    ),
+  );
+}
+
+Future<ImportedQuestionPaper?> pickAndParseQuestionPaper(
+  BuildContext context, {
+  bool directFilePickerOnly = false,
+}) async {
+  if (directFilePickerOnly) {
+    return _pickAndParseFileFromDisk(context);
+  }
+  return showUploadQuestionnaireModal(context);
+}
+
+class _EditableTemplateRow {
+  _EditableTemplateRow({
+    required this.questionType,
+    required int count,
+    required double points,
+  }) : countController = TextEditingController(text: '$count'),
+       pointsController = TextEditingController(
+         text: QuestionPaperImportService.formatPoints(points),
+       );
+
+  String questionType;
+  final TextEditingController countController;
+  final TextEditingController pointsController;
+
+  int get parsedCount => int.tryParse(countController.text.trim()) ?? 0;
+
+  double get parsedPoints =>
+      double.tryParse(pointsController.text.trim()) ?? 0.0;
+
+  bool get isValid => parsedCount > 0 && parsedPoints > 0 && parsedPoints.isFinite;
+
+  QuestionnaireTemplateSectionConfig toConfig() =>
+      QuestionnaireTemplateSectionConfig(
+        questionType: questionType,
+        itemCount: parsedCount > 0 ? parsedCount : 0,
+        pointsPerItem: parsedPoints > 0 ? parsedPoints : 1.0,
+      );
+
+  void dispose() {
+    _disposeControllersLater([countController, pointsController]);
+  }
+}
+
+class _UploadQuestionnaireDialog extends StatefulWidget {
+  const _UploadQuestionnaireDialog({
+    this.startInDirectMode = false,
+    this.initialPaper,
+  });
+
+  final bool startInDirectMode;
+  final ImportedQuestionPaper? initialPaper;
+
+  @override
+  State<_UploadQuestionnaireDialog> createState() =>
+      _UploadQuestionnaireDialogState();
+}
+
+class _UploadQuestionnaireDialogState
+    extends State<_UploadQuestionnaireDialog> {
+  late bool _templateMode = !widget.startInDirectMode;
+  String _selectedPreset = 'default';
+  final List<_EditableTemplateRow> _rows = <_EditableTemplateRow>[];
+  ImportedQuestionPaper? _reviewedPaper;
+  int? _expandedReviewSectionIdx = 0;
+  bool _downloadingTemplate = false;
+  bool _pickingFile = false;
+  String? _statusMessage;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _reviewedPaper = widget.initialPaper;
+    _applyPresetConfig(
+      QuestionPaperImportService.templatePresets.first.sections,
+      presetId: 'default',
+      resetReview: false,
+    );
+  }
+
+  @override
+  void dispose() {
+    for (final r in _rows) {
+      r.dispose();
+    }
+    super.dispose();
+  }
+
+  void _applyPresetConfig(
+    List<QuestionnaireTemplateSectionConfig> configs, {
+    required String presetId,
+    bool resetReview = true,
+  }) {
+    final oldRows = List<_EditableTemplateRow>.from(_rows);
+    _rows
+      ..clear()
+      ..addAll(
+        configs.map(
+          (c) => _EditableTemplateRow(
+            questionType: c.questionType,
+            count: c.itemCount,
+            points: c.pointsPerItem,
+          ),
+        ),
+      );
+    for (final old in oldRows) {
+      old.dispose();
+    }
+    _selectedPreset = presetId;
+    if (resetReview && _reviewedPaper != null) {
+      _reviewedPaper = _reviewedPaper!.rebuildWithUpdatedSections(
+        _reviewedPaper!.sections,
+        expectedTemplate: _templateMode ? _currentConfigs : null,
+      );
+    }
+  }
+
+  List<QuestionnaireTemplateSectionConfig> get _currentConfigs =>
+      _rows.map((r) => r.toConfig()).toList();
+
+  bool get _allRowsValid =>
+      _rows.isNotEmpty && _rows.every((r) => r.isValid);
+
+  int get _totalTemplateItems =>
+      _rows.fold<int>(0, (sum, r) => sum + (r.parsedCount > 0 ? r.parsedCount : 0));
+
+  double get _totalTemplatePoints => _rows.fold<double>(
+    0.0,
+    (sum, r) =>
+        sum +
+        ((r.parsedCount > 0 && r.parsedPoints > 0)
+            ? r.parsedCount * r.parsedPoints
+            : 0.0),
+  );
+
+  void _onSectionRowEdited() {
+    setState(() {
+      _selectedPreset = 'custom';
+      _errorMessage = null;
+      if (_reviewedPaper != null && _templateMode) {
+        _reviewedPaper = _reviewedPaper!.rebuildWithUpdatedSections(
+          _reviewedPaper!.sections,
+          expectedTemplate: _currentConfigs,
+        );
+      }
+    });
+  }
+
+  Future<void> _downloadWordTemplate() async {
+    if (!_allRowsValid || _totalTemplateItems <= 0 || _downloadingTemplate) {
+      return;
+    }
+    setState(() {
+      _downloadingTemplate = true;
+      _errorMessage = null;
+    });
+    try {
+      final bytes = await QuestionPaperPdfService.generateTemplateDocx(
+        sections: _currentConfigs,
+      );
+      await _saveOrShareBytes(
+        bytes: bytes,
+        fileName: 'checkmate_questionnaire_template.docx',
+      );
+      if (!mounted) return;
+      setState(() {
+        _statusMessage =
+            'Downloaded Word template ($_totalTemplateItems items · ${_trim(_totalTemplatePoints)} pts). '
+            'Fill in the questions in Word, export as a text-based PDF, and upload it below.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _errorMessage = _err(e));
+    } finally {
+      if (mounted) setState(() => _downloadingTemplate = false);
+    }
+  }
+
+  Future<void> _pickQuestionnaireFile() async {
+    if (_pickingFile) return;
+    setState(() {
+      _pickingFile = true;
+      _errorMessage = null;
+    });
+    try {
+      final picked = await _pickAndParseFileFromDisk(
+        context,
+        expectedTemplate:
+            (_templateMode && _allRowsValid) ? _currentConfigs : null,
+      );
+      if (!mounted) return;
+      if (picked != null) {
+        setState(() {
+          _reviewedPaper = picked;
+          _expandedReviewSectionIdx = 0;
+          _statusMessage = null;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _pickingFile = false);
+    }
+  }
+
+  Future<void> _editReviewedSection(int secIdx) async {
+    final paper = _reviewedPaper;
+    if (paper == null || secIdx < 0 || secIdx >= paper.sections.length) return;
+    final sec = paper.sections[secIdx];
+    var selectedType = sec.questionType;
+    final ptsC = TextEditingController(
+      text: QuestionPaperImportService.formatPoints(sec.defaultPoints),
+    );
+    String? err;
+
+    final updated = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setS) => _CmDialog(
+          title: 'Edit detected section',
+          subtitle: sec.name,
+          maxWidth: 420,
+          actions: [
+            OutlinedButton(
+              style: _outlineStyle,
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: _primaryStyle,
+              onPressed: () {
+                final pts = double.tryParse(ptsC.text.trim());
+                if (pts == null || pts <= 0) {
+                  setS(() => err = 'Enter points greater than zero.');
+                  return;
+                }
+                Navigator.pop(c, true);
+              },
+              child: const Text('Apply'),
+            ),
+          ],
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Field(
+                'Question type',
+                DropdownButtonFormField<String>(
+                  initialValue: selectedType,
+                  isExpanded: true,
+                  style: _inputText,
+                  decoration: _deco('Question type'),
+                  items: [
+                    for (final t in _kTypes)
+                      DropdownMenuItem(value: t, child: Text(_typeLabel(t))),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) setS(() => selectedType = v);
+                  },
+                ),
+              ),
+              _Field(
+                'Points per item',
+                TextField(
+                  controller: ptsC,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  style: _inputText,
+                  decoration: _deco('1'),
+                ),
+              ),
+              if (err != null) _ErrorText(err!),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final newPts = double.tryParse(ptsC.text.trim()) ?? sec.defaultPoints;
+    _disposeControllersLater([ptsC]);
+
+    if (updated == true && mounted) {
+      final sectionsCopy = List<ImportedExamSection>.from(paper.sections);
+      final updatedQs = sec.questions.map((q) {
+        final currentChoices = selectedType == 'multiple_choice'
+            ? (q.choices.length == 4
+                  ? q.choices
+                  : <String>[
+                      for (var i = 0; i < 4; i++)
+                        i < q.choices.length ? q.choices[i] : '',
+                    ])
+            : const <String>[];
+        return q.copyWith(
+          questionType: selectedType,
+          points: newPts,
+          choices: currentChoices,
+          classificationAmbiguous: false,
+        );
+      }).toList();
+
+      sectionsCopy[secIdx] = sec.copyWith(
+        questionType: selectedType,
+        defaultPoints: newPts,
+        questions: updatedQs,
+        hasAmbiguousMetadata: false,
+      );
+
+      setState(() {
+        _reviewedPaper = paper.rebuildWithUpdatedSections(
+          sectionsCopy,
+          expectedTemplate:
+              (_templateMode && _allRowsValid) ? _currentConfigs : null,
+        );
+      });
+    }
+  }
+
+  Future<void> _editReviewedQuestion(int secIdx, int qIdx) async {
+    final paper = _reviewedPaper;
+    if (paper == null || secIdx < 0 || secIdx >= paper.sections.length) return;
+    final sec = paper.sections[secIdx];
+    final isNew = qIdx < 0 || qIdx >= sec.questions.length;
+    final existingQ = isNew ? null : sec.questions[qIdx];
+
+    final stemC = TextEditingController(text: existingQ?.questionText ?? '');
+    final ptsC = TextEditingController(
+      text: QuestionPaperImportService.formatPoints(
+        existingQ?.points ?? sec.defaultPoints,
+      ),
+    );
+    final choiceCs = List<TextEditingController>.generate(
+      4,
+      (i) => TextEditingController(
+        text: (existingQ != null && i < existingQ.choices.length)
+            ? existingQ.choices[i]
+            : '',
+      ),
+    );
+    String? err;
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setS) => _CmDialog(
+          title: isNew
+              ? 'Add item to ${sec.name}'
+              : 'Edit Item ${existingQ!.questionNumber}',
+          subtitle: _typeLabel(sec.questionType),
+          maxWidth: 480,
+          actions: [
+            OutlinedButton(
+              style: _outlineStyle,
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: _primaryStyle,
+              onPressed: () {
+                if (stemC.text.trim().isEmpty) {
+                  setS(() => err = 'Question text is required.');
+                  return;
+                }
+                final pts = double.tryParse(ptsC.text.trim());
+                if (pts == null || pts <= 0) {
+                  setS(() => err = 'Enter points greater than zero.');
+                  return;
+                }
+                if (sec.questionType == 'multiple_choice' &&
+                    choiceCs.any((cc) => cc.text.trim().isEmpty)) {
+                  setS(() => err = 'Fill in all four choices (A, B, C, D).');
+                  return;
+                }
+                Navigator.pop(c, true);
+              },
+              child: const Text('Save item'),
+            ),
+          ],
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Field(
+                'Question prompt',
+                TextField(
+                  controller: stemC,
+                  minLines: 2,
+                  maxLines: 5,
+                  style: _inputText,
+                  decoration: _deco('Enter question text'),
+                ),
+              ),
+              _Field(
+                'Points',
+                TextField(
+                  controller: ptsC,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  style: _inputText,
+                  decoration: _deco('1'),
+                ),
+              ),
+              if (sec.questionType == 'multiple_choice') ...[
+                for (var i = 0; i < 4; i++)
+                  _Field(
+                    'Choice ${String.fromCharCode(65 + i)}',
+                    TextField(
+                      controller: choiceCs[i],
+                      style: _inputText,
+                      decoration: _deco('Choice ${String.fromCharCode(65 + i)}'),
+                    ),
+                  ),
+              ],
+              if (err != null) _ErrorText(err!),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final newStem = stemC.text.trim();
+    final newPts = double.tryParse(ptsC.text.trim()) ?? sec.defaultPoints;
+    final newChoices = sec.questionType == 'multiple_choice'
+        ? choiceCs.map((c) => c.text.trim()).toList()
+        : const <String>[];
+    _disposeControllersLater([stemC, ptsC, ...choiceCs]);
+
+    if (saved == true && mounted) {
+      final sectionsCopy = List<ImportedExamSection>.from(paper.sections);
+      final qList = List<ImportedExamQuestion>.from(sec.questions);
+      final updatedItem = ImportedExamQuestion(
+        questionNumber: existingQ?.questionNumber ?? (qList.length + 1),
+        sourceQuestionNumber: null,
+        questionText: newStem,
+        questionType: sec.questionType,
+        points: newPts,
+        choices: newChoices,
+        correctAnswer: existingQ?.correctAnswer,
+        classificationAmbiguous: false,
+      );
+      if (isNew) {
+        qList.add(updatedItem);
+      } else {
+        qList[qIdx] = updatedItem;
+      }
+      // Normalize source numbers in this section after manual edit/add
+      for (var i = 0; i < qList.length; i++) {
+        qList[i] = qList[i].copyWith(sourceQuestionNumber: i + 1);
+      }
+      sectionsCopy[secIdx] = sec.copyWith(
+        questions: qList,
+        expectedItemCount: qList.length,
+      );
+      setState(() {
+        _reviewedPaper = paper.rebuildWithUpdatedSections(
+          sectionsCopy,
+          expectedTemplate:
+              (_templateMode && _allRowsValid) ? _currentConfigs : null,
+        );
+      });
+    }
+  }
+
+  void _deleteReviewedQuestion(int secIdx, int qIdx) {
+    final paper = _reviewedPaper;
+    if (paper == null || secIdx < 0 || secIdx >= paper.sections.length) return;
+    final sec = paper.sections[secIdx];
+    if (qIdx < 0 || qIdx >= sec.questions.length) return;
+
+    final sectionsCopy = List<ImportedExamSection>.from(paper.sections);
+    final qList = List<ImportedExamQuestion>.from(sec.questions)
+      ..removeAt(qIdx);
+    for (var i = 0; i < qList.length; i++) {
+      qList[i] = qList[i].copyWith(sourceQuestionNumber: i + 1);
+    }
+    if (qList.isEmpty) {
+      sectionsCopy.removeAt(secIdx);
+    } else {
+      sectionsCopy[secIdx] = sec.copyWith(
+        questions: qList,
+        expectedItemCount: qList.length,
+      );
+    }
+    setState(() {
+      _reviewedPaper = paper.rebuildWithUpdatedSections(
+        sectionsCopy,
+        expectedTemplate:
+            (_templateMode && _allRowsValid) ? _currentConfigs : null,
+      );
+    });
+  }
+
+  void _continueToExamDetails() {
+    final paper = _reviewedPaper;
+    if (paper == null || paper.totalQuestions == 0) {
+      setState(() => _errorMessage = 'Upload a questionnaire file first.');
+      return;
+    }
+    if (paper.hasBlockingIssues) {
+      final firstBlocking = paper.issues.firstWhere((i) => i.isBlocking);
+      setState(() {
+        _errorMessage =
+            'Please resolve the flagged issue before continuing: ${firstBlocking.message}';
+        if (firstBlocking.sectionIndex != null) {
+          _expandedReviewSectionIdx = firstBlocking.sectionIndex;
+        }
+      });
+      return;
+    }
+    Navigator.pop(context, paper);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final resolvedTemplate = _allRowsValid
+        ? QuestionPaperImportService.resolveTemplateSections(_currentConfigs)
+        : const <ResolvedTemplateSection>[];
+
+    // Calculate repeated question type subtotals in template preview
+    final templateTypeCounts = <String, int>{};
+    final templateTypePoints = <String, double>{};
+    for (final r in resolvedTemplate) {
+      templateTypeCounts[r.questionType] =
+          (templateTypeCounts[r.questionType] ?? 0) + 1;
+      templateTypePoints[r.questionType] =
+          (templateTypePoints[r.questionType] ?? 0.0) + r.totalPoints;
+    }
+
+    return _CmDialog(
+      title: 'Upload Questionnaire',
+      subtitle:
+          'Start from a reusable template or upload an existing questionnaire.',
+      maxWidth: 680,
+      actions: [
+        OutlinedButton(
+          style: _outlineStyle,
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        if (_reviewedPaper != null)
+          OutlinedButton.icon(
+            style: _outlineStyle,
+            onPressed: _pickingFile ? null : _pickQuestionnaireFile,
+            icon: const Icon(Icons.upload_file_outlined, size: 16),
+            label: const Text('Upload different file'),
+          ),
+        FilledButton(
+          style: _primaryStyle,
+          onPressed:
+              (_reviewedPaper != null && _reviewedPaper!.totalQuestions > 0)
+              ? _continueToExamDetails
+              : null,
+          child: Text(
+            _reviewedPaper != null && _reviewedPaper!.totalQuestions > 0
+                ? 'Continue to Exam Details (${_reviewedPaper!.totalQuestions} items)'
+                : 'Continue to Exam Details',
+          ),
+        ),
+      ],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Mode Toggle Buttons: "Use a template" vs "Upload an existing file"
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              FilledButton(
+                style: _templateMode ? _primaryStyle : _outlineStyle,
+                onPressed: () {
+                  if (!_templateMode) {
+                    setState(() {
+                      _templateMode = true;
+                      _errorMessage = null;
+                      if (_reviewedPaper != null && _allRowsValid) {
+                        _reviewedPaper = _reviewedPaper!
+                            .rebuildWithUpdatedSections(
+                              _reviewedPaper!.sections,
+                              expectedTemplate: _currentConfigs,
+                            );
+                      }
+                    });
+                  }
+                },
+                child: const Text('Use a template'),
+              ),
+              OutlinedButton(
+                style: !_templateMode ? _primaryStyle : _outlineStyle,
+                onPressed: () {
+                  if (_templateMode) {
+                    setState(() {
+                      _templateMode = false;
+                      _errorMessage = null;
+                      if (_reviewedPaper != null) {
+                        _reviewedPaper = _reviewedPaper!
+                            .rebuildWithUpdatedSections(
+                              _reviewedPaper!.sections,
+                              expectedTemplate: null,
+                            );
+                      }
+                    });
+                  }
+                },
+                child: const Text('Upload an existing file'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // 1. Set up the Word template (visible in Template mode)
+          if (_templateMode) ...[
+            _Card(
+              padding: 14,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    '1. Set up the Word template',
+                    style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w800,
+                      color: _Brand.ink,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    key: ValueKey('preset-$_selectedPreset'),
+                    initialValue: _selectedPreset,
+                    isExpanded: true,
+                    style: _inputText,
+                    decoration: _floatingDeco('Template'),
+                    items: [
+                      for (final p
+                          in QuestionPaperImportService.templatePresets)
+                        DropdownMenuItem<String>(
+                          value: p.id,
+                          child: Text(
+                            p.label,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      const DropdownMenuItem<String>(
+                        value: 'custom',
+                        child: Text('Custom setup'),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      if (v == null || v == 'custom') return;
+                      final match = QuestionPaperImportService.templatePresets
+                          .where((p) => p.id == v)
+                          .firstOrNull;
+                      if (match != null) {
+                        setState(() {
+                          _applyPresetConfig(match.sections, presetId: match.id);
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Section rows
+                  for (var idx = 0; idx < _rows.length; idx++)
+                    Padding(
+                      key: ValueKey('tpl-row-$idx'),
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 10, right: 8),
+                            child: Text(
+                              '${QuestionPaperImportService.subpartLetterFromIndex(idx)}.',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 13.5,
+                                color: _Brand.ink,
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            flex: 4,
+                            child: DropdownButtonFormField<String>(
+                              initialValue: _rows[idx].questionType,
+                              isExpanded: true,
+                              style: _inputText,
+                              decoration: _floatingDeco('Question type'),
+                              items: [
+                                for (final t in _kTypes)
+                                  DropdownMenuItem<String>(
+                                    value: t,
+                                    child: Text(
+                                      _typeLabel(t),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (v) {
+                                if (v != null) {
+                                  _rows[idx].questionType = v;
+                                  _onSectionRowEdited();
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 2,
+                            child: TextField(
+                              controller: _rows[idx].countController,
+                              keyboardType: TextInputType.number,
+                              onChanged: (_) => _onSectionRowEdited(),
+                              style: _inputText,
+                              decoration: _floatingDeco('Items'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 2,
+                            child: TextField(
+                              controller: _rows[idx].pointsController,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              onChanged: (_) => _onSectionRowEdited(),
+                              style: _inputText,
+                              decoration: _floatingDeco('Pts / item'),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          IconButton(
+                            tooltip:
+                                'Remove section ${QuestionPaperImportService.subpartLetterFromIndex(idx)}',
+                            onPressed: _rows.length <= 1
+                                ? null
+                                : () {
+                                    final removed = _rows.removeAt(idx);
+                                    removed.dispose();
+                                    _onSectionRowEdited();
+                                  },
+                            icon: const Icon(
+                              Icons.close,
+                              size: 18,
+                              color: CmColors.slate,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      style: _outlineStyle,
+                      onPressed: () {
+                        _rows.add(
+                          _EditableTemplateRow(
+                            questionType: 'multiple_choice',
+                            count: 5,
+                            points: 1,
+                          ),
+                        );
+                        _onSectionRowEdited();
+                      },
+                      icon: const Icon(Icons.add, size: 17),
+                      label: const Text('Add section'),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Final section order & continuous numbering preview
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: CmColors.bg,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: CmColors.line),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _allRowsValid
+                              ? '$_totalTemplateItems total items \u00B7 ${_trim(_totalTemplatePoints)} total points'
+                              : 'Enter a positive whole item count and points greater than zero for each section.',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w800,
+                            color: _allRowsValid
+                                ? _Brand.ink
+                                : Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                        if (_allRowsValid && resolvedTemplate.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          for (final r in resolvedTemplate)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      r.heading,
+                                      style: const TextStyle(
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: _Brand.ink,
+                                      ),
+                                    ),
+                                  ),
+                                  Text(
+                                    'Items ${r.itemRangeLabel} (${r.itemCount}) \u00B7 ${_trim(r.totalPoints)} pts',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: CmColors.slate,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          for (final entry in templateTypeCounts.entries)
+                            if (entry.value > 1)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Text(
+                                  '${_typeLabel(entry.key)} subtotal: ${_trim(templateTypePoints[entry.key] ?? 0)} points',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: _Brand.inkSoft,
+                                  ),
+                                ),
+                              ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: FilledButton.icon(
+                      style: _primaryStyle,
+                      onPressed:
+                          (!_allRowsValid ||
+                              _totalTemplateItems <= 0 ||
+                              _downloadingTemplate)
+                          ? null
+                          : _downloadWordTemplate,
+                      icon: _downloadingTemplate
+                          ? const _Spin()
+                          : const Icon(Icons.file_download_outlined, size: 18),
+                      label: const Text('Download Word template'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Open the downloaded Word template (.docx) in Microsoft Word. '
+                    'Fill in the question prompts and A\u2013D choices, keep the Part headings, '
+                    'point instructions, and numbering, then export as a text-based PDF and upload it below. '
+                    'Enter the answer keys in CheckMate after import.',
+                    style: TextStyle(fontSize: 12, color: CmColors.slate),
+                  ),
+                  if (_statusMessage != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      _statusMessage!,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: CmColors.green,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
+
+          // 2. Upload and review (or 1. Upload and review in direct mode)
+          _Card(
+            padding: 14,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  _templateMode ? '2. Upload and review' : '1. Upload and review',
+                  style: const TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w800,
+                    color: _Brand.ink,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _templateMode
+                      ? 'Select the completed questionnaire PDF (or Word file) to classify and review before importing.'
+                      : 'Select an existing questionnaire (PDF, Word, Excel, CSV, TXT, RTF, ODT, or HTML) to classify and review.',
+                  style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
+                ),
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: FilledButton.icon(
+                    style: _reviewedPaper == null ? _primaryStyle : _outlineStyle,
+                    onPressed: _pickingFile ? null : _pickQuestionnaireFile,
+                    icon: _pickingFile
+                        ? const _Spin()
+                        : const Icon(Icons.upload_file_outlined, size: 18),
+                    label: Text(
+                      _reviewedPaper == null
+                          ? 'Select questionnaire file'
+                          : 'Change file (${_reviewedPaper!.fileName})',
+                    ),
+                  ),
+                ),
+                if (_reviewedPaper != null) ...[
+                  const SizedBox(height: 14),
+                  _buildImportReviewPanel(_reviewedPaper!),
+                ],
+                if (_errorMessage != null) ...[
+                  const SizedBox(height: 10),
+                  _ErrorText(_errorMessage!),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImportReviewPanel(ImportedQuestionPaper paper) {
+    final typeSubtotals = paper.pointsSubtotalByType;
+    final itemSubtotals = paper.itemCountSubtotalByType;
+    final typeSectionCounts = <String, int>{};
+    for (final s in paper.sections) {
+      final t = QuestionPaperImportService.normalizeQuestionType(s.questionType);
+      typeSectionCounts[t] = (typeSectionCounts[t] ?? 0) + 1;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Summary card
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: CmColors.bg,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: CmColors.line),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(
+                    Icons.fact_check_outlined,
+                    size: 18,
+                    color: _Brand.ink,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${paper.fileName} \u00B7 ${paper.sections.length} ${paper.sections.length == 1 ? "section" : "sections"} '
+                      '\u00B7 ${paper.totalQuestions} ${paper.totalQuestions == 1 ? "item" : "items"} '
+                      '\u00B7 ${_trim(paper.totalPoints)} total points',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: _Brand.ink,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              for (final entry in typeSectionCounts.entries)
+                if (entry.value > 1)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      '${_typeLabel(entry.key)} subtotal across ${entry.value} sections: '
+                      '${itemSubtotals[entry.key] ?? 0} items \u00B7 '
+                      '${_trim(typeSubtotals[entry.key] ?? 0)} points',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: _Brand.inkSoft,
+                      ),
+                    ),
+                  ),
+              const SizedBox(height: 4),
+              Text(
+                paper.hasExplicitAssessmentType
+                    ? 'Suggested assessment type from heading: '
+                          '${_kAssessmentTypes[paper.detectedAssessmentType] ?? paper.detectedAssessmentType} '
+                          '(you will confirm or change this in Exam Details).'
+                    : 'No explicit assessment-type heading detected in file \u2014 '
+                          'you will choose whether this is a Quiz or Major Exam in Exam Details.',
+                style: const TextStyle(fontSize: 12, color: CmColors.slate),
+              ),
+            ],
+          ),
+        ),
+
+        // Issues & Discrepancies list
+        if (paper.issues.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _Brand.amber.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: _Brand.amber.withValues(alpha: 0.6)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.warning_amber_rounded,
+                      size: 18,
+                      color: _Brand.ink,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        paper.hasBlockingIssues
+                            ? 'Review required (${paper.issues.length} ${paper.issues.length == 1 ? "issue" : "issues"} flagged)'
+                            : 'Template comparison notes (${paper.issues.length})',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: _Brand.ink,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                for (final issue in paper.issues)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      '\u2022 ${issue.message}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: issue.isBlocking
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                        color: issue.isBlocking
+                            ? Theme.of(context).colorScheme.error
+                            : _Brand.ink,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+
+        const SizedBox(height: 12),
+        const Text(
+          'Detected Sections & Questions (click a section to review or edit items)',
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w800,
+            color: _Brand.ink,
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        for (var sIdx = 0; sIdx < paper.sections.length; sIdx++)
+          _buildReviewSectionCard(paper.sections[sIdx], sIdx),
+      ],
+    );
+  }
+
+  Widget _buildReviewSectionCard(ImportedExamSection sec, int sIdx) {
+    final expanded = _expandedReviewSectionIdx == sIdx;
+    final hasSecIssues =
+        sec.hasAmbiguousMetadata || sec.questions.any((q) => q.hasIssues);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: hasSecIssues ? _Brand.amber : CmColors.line,
+            width: hasSecIssues ? 1.4 : 1.0,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () => setState(() {
+                _expandedReviewSectionIdx = expanded ? null : sIdx;
+              }),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+                child: Row(
+                  children: [
+                    _Badge('${sIdx + 1}'.padLeft(2, '0'), size: 28),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            sec.name,
+                            style: const TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w800,
+                              color: _Brand.ink,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${_typeLabel(sec.questionType)} \u00B7 '
+                            'Items ${sec.itemRangeLabel} (${sec.questions.length} ${sec.questions.length == 1 ? "item" : "items"}) \u00B7 '
+                            '${_trim(sec.defaultPoints)} ${sec.defaultPoints == 1 ? "pt" : "pts"}/item \u00B7 '
+                            '${_trim(sec.totalPoints)} pts total',
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              color: CmColors.slate,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: () => _editReviewedSection(sIdx),
+                      icon: const Icon(Icons.edit_outlined, size: 15),
+                      label: const Text(
+                        'Edit section',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ),
+                    Icon(
+                      expanded
+                          ? Icons.keyboard_arrow_down
+                          : Icons.chevron_right,
+                      size: 18,
+                      color: CmColors.slate,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (expanded) ...[
+              const Divider(height: 1, color: CmColors.line),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 280),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.all(12),
+                  itemCount: sec.questions.length,
+                  separatorBuilder: (_, _) =>
+                      const Divider(height: 14, color: CmColors.line),
+                  itemBuilder: (context, qIdx) {
+                    final q = sec.questions[qIdx];
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                '${q.questionNumber}. ${q.questionText.isEmpty ? "[Blank question prompt]" : q.questionText}',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: q.hasIssues
+                                      ? Theme.of(context).colorScheme.error
+                                      : _Brand.ink,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              '${_trim(q.points)} ${q.points == 1 ? "pt" : "pts"}',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                color: CmColors.slate,
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Edit item ${q.questionNumber}',
+                              visualDensity: VisualDensity.compact,
+                              iconSize: 16,
+                              onPressed: () => _editReviewedQuestion(sIdx, qIdx),
+                              icon: const Icon(
+                                Icons.edit_outlined,
+                                color: CmColors.slate,
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Remove item ${q.questionNumber}',
+                              visualDensity: VisualDensity.compact,
+                              iconSize: 16,
+                              onPressed: () =>
+                                  _deleteReviewedQuestion(sIdx, qIdx),
+                              icon: const Icon(
+                                Icons.delete_outline,
+                                color: CmColors.slate,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (sec.questionType == 'multiple_choice') ...[
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 4,
+                            children: [
+                              for (var cIdx = 0; cIdx < 4; cIdx++)
+                                Builder(
+                                  builder: (context) {
+                                    final letter = String.fromCharCode(
+                                      65 + cIdx,
+                                    );
+                                    final text = cIdx < q.choices.length
+                                        ? q.choices[cIdx].trim()
+                                        : '';
+                                    final isMissing = q.missingChoiceLetters
+                                        .contains(letter);
+                                    return Text(
+                                      '$letter. ${text.isEmpty ? "[Missing]" : text}',
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: isMissing
+                                            ? FontWeight.w700
+                                            : FontWeight.w500,
+                                        color: isMissing
+                                            ? Theme.of(
+                                                context,
+                                              ).colorScheme.error
+                                            : CmColors.slate,
+                                      ),
+                                    );
+                                  },
+                                ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    );
+                  },
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => _editReviewedQuestion(sIdx, -1),
+                    icon: const Icon(Icons.add, size: 16),
+                    label: const Text(
+                      'Add missing item to section',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Re-sequences CheckMate Roman-numeral Part and lettered subpart headings
+/// across all sections of [examId] that use automatic `Part ...` naming.
+Future<void> resequenceExamSectionHeadings({
+  required String token,
+  required int examId,
+}) async {
+  try {
+    final raw = await ApiService.getExamSections(token, examId);
+    final sorted = List<_Json>.from(raw)
+      ..sort((a, b) {
+        final oa = int.tryParse(a['section_order']?.toString() ?? '') ?? 0;
+        final ob = int.tryParse(b['section_order']?.toString() ?? '') ?? 0;
+        if (oa != ob) return oa.compareTo(ob);
+        final ida = _id(a['id']) ?? 0;
+        final idb = _id(b['id']) ?? 0;
+        return ida.compareTo(idb);
+      });
+    final headings = QuestionPaperImportService.computeSectionHeadingsForMaps(
+      sorted,
+    );
+    for (var i = 0; i < sorted.length && i < headings.length; i++) {
+      final s = sorted[i];
+      final sid = _id(s['id']);
+      if (sid == null) continue;
+      final currentName = (s['name']?.toString() ?? '').trim();
+      final qType = s['question_type']?.toString() ?? 'multiple_choice';
+      final pts = _num(s['default_points']) > 0
+          ? _num(s['default_points'])
+          : 1.0;
+      if (currentName.isEmpty ||
+          RegExp(
+            r'^Part\s+[IVX\d]+[\.\:\-\u00B7\s]',
+            caseSensitive: false,
+          ).hasMatch(currentName)) {
+        final targetName = headings[i];
+        if (currentName != targetName) {
+          await ApiService.updateExamSection(
+            token: token,
+            sectionId: sid,
+            name: targetName,
+            defaultPoints: pts,
+            questionType: qType,
+          );
+        }
+      }
+    }
+  } catch (_) {}
+}
+
+/// Imports reviewed sections and questions into [examId], preserving each
+/// section as a distinct ordered section with its own Part/subpart heading,
+/// question type, default points, continuous item numbers, and per-item points.
+///
+/// Safe to retry if a network error interrupts creation midway through:
+/// existing sections at the target `section_order` and existing questions at
+/// the target `question_number` are reused rather than duplicated.
 Future<int> importParsedSectionsIntoExam({
   required String token,
   required int examId,
   required ImportedQuestionPaper paper,
   int startingSectionOrder = 1,
-  List<_Json>? existingSections,
-  Map<int, List<_Json>>? existingQuestionsBySection,
+  List<Map<String, dynamic>>? existingSections,
+  Map<int, List<Map<String, dynamic>>>? existingQuestionsBySection,
 }) async {
   var importedCount = 0;
-  final currentSections = List<_Json>.from(existingSections ?? const <_Json>[]);
-  var order = currentSections.isEmpty
-      ? startingSectionOrder
-      : (currentSections.fold<int>(0, (m, s) {
-            final o = int.tryParse(s['section_order']?.toString() ?? '') ?? 0;
-            return o > m ? o : m;
-          }) +
-          1);
+  final currentSections = existingSections != null
+      ? List<_Json>.from(existingSections)
+      : await ApiService.getExamSections(token, examId);
+  currentSections.sort((a, b) {
+    final oa = int.tryParse(a['section_order']?.toString() ?? '') ?? 0;
+    final ob = int.tryParse(b['section_order']?.toString() ?? '') ?? 0;
+    if (oa != ob) return oa.compareTo(ob);
+    final ida = _id(a['id']) ?? 0;
+    final idb = _id(b['id']) ?? 0;
+    return ida.compareTo(idb);
+  });
 
-  for (final sec in paper.sections) {
+  // Compute starting global question number if appending to an exam that already has questions
+  var baseQuestionOffset = 0;
+  if (startingSectionOrder > 1 && existingQuestionsBySection != null) {
+    for (final qList in existingQuestionsBySection.values) {
+      for (final eq in qList) {
+        final qn = int.tryParse(eq['question_number']?.toString() ?? '') ?? 0;
+        if (qn > baseQuestionOffset) baseQuestionOffset = qn;
+      }
+    }
+  }
+
+  for (var secIdx = 0; secIdx < paper.sections.length; secIdx++) {
+    final sec = paper.sections[secIdx];
     if (sec.questions.isEmpty) continue;
 
-    // Check if a section for this questionType already exists in the exam
-    int? sectionId;
-    int existingQuestionMax = 0;
+    final targetOrder = startingSectionOrder + secIdx;
+    final defaultPts = sec.defaultPoints > 0 ? sec.defaultPoints : 1.0;
+    final sectionName = sec.name.trim().isNotEmpty
+        ? sec.name.trim()
+        : _autoSectionName(
+            targetOrder,
+            sec.questionType,
+            subpartLetter: sec.subpartLetter,
+            points: defaultPts,
+          );
 
-    for (var idx = 0; idx < currentSections.length; idx++) {
-      final existingSec = currentSections[idx];
-      final existingType =
-          (existingSec['question_type']?.toString() ?? '').trim().toLowerCase();
-      if (existingType == sec.questionType) {
-        sectionId = _id(existingSec['id']);
-        if (sectionId != null) {
-          final secOrder =
-              int.tryParse(existingSec['section_order']?.toString() ?? '') ??
-              (idx + 1);
-          final expectedName = _autoSectionName(secOrder, sec.questionType);
-          if ((existingSec['name']?.toString() ?? '') != expectedName) {
-            try {
-              await ApiService.updateExamSection(
-                token: token,
-                sectionId: sectionId,
-                name: expectedName,
-                defaultPoints: _num(existingSec['default_points']) > 0
-                    ? _num(existingSec['default_points'])
-                    : sec.defaultPoints,
-                questionType: sec.questionType,
-              );
-            } catch (_) {}
-          }
-          final existingQs =
-              existingQuestionsBySection?[sectionId] ?? const <_Json>[];
-          for (final eq in existingQs) {
-            final qn = int.tryParse(eq['question_number']?.toString() ?? '') ?? 0;
-            if (qn > existingQuestionMax) existingQuestionMax = qn;
-          }
-        }
+    // Retry-safe check: see if a section at targetOrder was already created
+    _Json? matchedSection;
+    for (final existing in currentSections) {
+      final existingOrder =
+          int.tryParse(existing['section_order']?.toString() ?? '') ?? 0;
+      if (existingOrder == targetOrder) {
+        matchedSection = existing;
         break;
       }
     }
 
-    if (sectionId == null) {
-      final secOrder = order++;
-      final autoName = _autoSectionName(secOrder, sec.questionType);
+    int? sectionId = _id(matchedSection?['id']);
+    if (sectionId != null) {
+      try {
+        await ApiService.updateExamSection(
+          token: token,
+          sectionId: sectionId,
+          name: sectionName,
+          defaultPoints: defaultPts,
+          questionType: sec.questionType,
+        );
+      } catch (_) {}
+    } else {
       final createdSec = await ApiService.createExamSection(
         token: token,
         examId: examId,
-        name: autoName,
+        name: sectionName,
         questionType: sec.questionType,
-        sectionOrder: secOrder,
-        defaultPoints: sec.defaultPoints,
+        sectionOrder: targetOrder,
+        defaultPoints: defaultPts,
       );
       sectionId = _id(createdSec['id']);
       currentSections.add(createdSec);
@@ -883,25 +2277,62 @@ Future<int> importParsedSectionsIntoExam({
 
     if (sectionId == null) continue;
 
+    // Fetch existing questions in this section so retries never duplicate items
+    final existingQs =
+        existingQuestionsBySection?[sectionId] ??
+        await ApiService.getQuestions(token, sectionId);
+    final existingByNumber = <int, _Json>{};
+    for (final eq in existingQs) {
+      final qn = int.tryParse(eq['question_number']?.toString() ?? '');
+      if (qn != null) existingByNumber[qn] = eq;
+    }
+
     for (var i = 0; i < sec.questions.length; i++) {
       final q = sec.questions[i];
+      final targetQNum =
+          baseQuestionOffset + (q.questionNumber > 0 ? q.questionNumber : (i + 1));
       final normalizedAnswer = q.correctAnswer == null
           ? null
           : _normalizeAnswerByType(q.correctAnswer!, sec.questionType);
-      await ApiService.createQuestion(
-        token: token,
-        sectionId: sectionId,
-        questionNumber: existingQuestionMax + i + 1,
-        questionText: q.questionText,
-        points: q.points > 0 ? q.points : sec.defaultPoints,
-        choices: sec.questionType == 'multiple_choice' ? q.choices : null,
-        correctAnswer: (normalizedAnswer == null || normalizedAnswer.isEmpty)
-            ? null
-            : normalizedAnswer,
-      );
+      final effectivePoints = q.points > 0 ? q.points : defaultPts;
+      final existingQ = existingByNumber[targetQNum];
+      final existingQId = _id(existingQ?['id']);
+
+      if (existingQ != null && existingQId != null) {
+        final normalizedExistingAnswer =
+            normalizedAnswer == null || normalizedAnswer.isEmpty
+                ? existingQ['correct_answer']?.toString()
+                : normalizedAnswer;
+
+        await ApiService.updateQuestion(
+          token: token,
+          questionId: existingQId,
+          questionText: q.questionText,
+          points: effectivePoints,
+          choices: sec.questionType == 'multiple_choice' ? q.choices : null,
+          correctAnswer: normalizedExistingAnswer,
+        );
+      } else {
+        final normalizedCreatedAnswer =
+            normalizedAnswer == null || normalizedAnswer.isEmpty
+                ? null
+                : normalizedAnswer;
+
+        await ApiService.createQuestion(
+          token: token,
+          sectionId: sectionId,
+          questionNumber: targetQNum,
+          questionText: q.questionText,
+          points: effectivePoints,
+          choices: sec.questionType == 'multiple_choice' ? q.choices : null,
+          correctAnswer: normalizedCreatedAnswer,
+        );
+      }
       importedCount++;
     }
   }
+
+  await resequenceExamSectionHeadings(token: token, examId: examId);
   return importedCount;
 }
 
@@ -941,82 +2372,26 @@ Future<AssessmentCreationResult?> showAssessmentCreation(
   final selected = await showDialog<bool>(
     context: context,
     builder: (c) => StatefulBuilder(
-      builder: (c, setS) => AlertDialog(
-        title: const Text('Add assessment'),
-        content: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              DropdownButtonFormField<String>(
-                initialValue: type,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Assessment Type'),
-                items: [
-                  for (final e in _kAssessmentTypes.entries)
-                    DropdownMenuItem(value: e.key, child: Text(e.value)),
-                ],
-                onChanged: (v) {
-                  if (v != null)
-                    setS(() {
-                      type = v;
-                      period = _majorGradingPeriod(v) ?? period;
-                      mode = null;
-                    });
-                },
-              ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                key: ValueKey('$type-$period'),
-                initialValue: period,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Grading Period'),
-                items: [
-                  for (final e in gradingPeriodLabels.entries)
-                    DropdownMenuItem(value: e.key, child: Text(e.value)),
-                ],
-                onChanged: _majorGradingPeriod(type) != null
-                    ? null
-                    : (v) {
-                        if (v != null) setS(() => period = v);
-                      },
-              ),
-              const SizedBox(height: 16),
-              if (['performance_task', 'laboratory'].contains(type)) ...[
-                OutlinedButton.icon(
-                  onPressed: () {
-                    mode = 'builder';
-                    Navigator.pop(c, true);
-                  },
-                  icon: const Icon(Icons.edit_document),
-                  label: const Text('Create an Assessment'),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    mode = 'manual';
-                    Navigator.pop(c, true);
-                  },
-                  icon: const Icon(Icons.table_chart_outlined),
-                  label: const Text('Create Scorebook Column Only'),
-                ),
-              ] else
-                Text(
-                  ['quiz', 'short_quiz', 'long_quiz'].contains(type)
-                      ? 'Counts under Quizzes.'
-                      : 'Counts under Major Examination.',
-                ),
-            ],
-          ),
-        ),
+      builder: (c, setS) => _CmDialog(
+        title: 'Add assessment',
+        maxWidth: 500,
         actions: [
           TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: _Brand.inkSoft,
+              minimumSize: const Size(0, 40),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              textStyle: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 13.5,
+              ),
+            ),
             onPressed: () => Navigator.pop(c, false),
             child: const Text('Cancel'),
           ),
           if (!['performance_task', 'laboratory'].contains(type))
             FilledButton(
+              style: _amberStyle,
               onPressed: () {
                 mode = 'builder';
                 Navigator.pop(c, true);
@@ -1024,11 +2399,84 @@ Future<AssessmentCreationResult?> showAssessmentCreation(
               child: const Text('Continue'),
             ),
         ],
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: type,
+              isExpanded: true,
+              style: _inputText,
+              decoration: _floatingDeco('Assessment Type'),
+              items: [
+                for (final e in _kAssessmentTypes.entries)
+                  DropdownMenuItem(value: e.key, child: Text(e.value)),
+              ],
+              onChanged: (v) {
+                if (v != null) {
+                  setS(() {
+                    type = v;
+                    period = _majorGradingPeriod(v) ?? period;
+                    mode = null;
+                  });
+                }
+              },
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              key: ValueKey('$type-$period'),
+              initialValue: period,
+              isExpanded: true,
+              style: _inputText,
+              decoration: _floatingDeco(
+                'Grading Period',
+                locked: _majorGradingPeriod(type) != null,
+              ),
+              items: [
+                for (final e in gradingPeriodLabels.entries)
+                  DropdownMenuItem(value: e.key, child: Text(e.value)),
+              ],
+              onChanged: _majorGradingPeriod(type) != null
+                  ? null
+                  : (v) {
+                      if (v != null) setS(() => period = v);
+                    },
+            ),
+            const SizedBox(height: 16),
+            if (['performance_task', 'laboratory'].contains(type)) ...[
+              OutlinedButton.icon(
+                style: _outlineStyle,
+                onPressed: () {
+                  mode = 'builder';
+                  Navigator.pop(c, true);
+                },
+                icon: const Icon(Icons.edit_document),
+                label: const Text('Create an Assessment'),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                style: _outlineStyle,
+                onPressed: () {
+                  mode = 'manual';
+                  Navigator.pop(c, true);
+                },
+                icon: const Icon(Icons.table_chart_outlined),
+                label: const Text('Create Scorebook Column Only'),
+              ),
+            ] else
+              Text(
+                ['quiz', 'short_quiz', 'long_quiz'].contains(type)
+                    ? 'Counts under Quizzes.'
+                    : 'Counts under Major Examination.',
+                style: const TextStyle(color: CmColors.slate, fontSize: 13),
+              ),
+          ],
+        ),
       ),
     ),
   );
   if (selected != true || !context.mounted) return null;
-  if (mode == 'manual')
+  if (mode == 'manual') {
     return _showManualColumnForm(
       context,
       classes: classes,
@@ -1036,6 +2484,7 @@ Future<AssessmentCreationResult?> showAssessmentCreation(
       period: period,
       initialClassId: initialClassId,
     );
+  }
   AssessmentCreationResult? manualResult;
   final id = await showExamDetailsModal(
     context,
@@ -1073,155 +2522,179 @@ Future<AssessmentCreationResult?> _showManualColumnForm(
     context: context,
     barrierDismissible: false,
     builder: (c) => StatefulBuilder(
-      builder: (c, setS) => AlertDialog(
-        title: Text('Create ${_kAssessmentTypes[type]} column'),
-        content: SizedBox(
-          width: 450,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextFormField(
-                  controller: name,
-                  enabled: !saving,
-                  decoration: const InputDecoration(
-                    labelText: 'Assessment Name',
-                  ),
+      builder: (c, setS) => PopScope(
+        canPop: !saving,
+        child: _CmDialog(
+          title: 'Create ${_kAssessmentTypes[type]} column',
+          maxWidth: 500,
+          actions: [
+            TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: _Brand.inkSoft,
+                minimumSize: const Size(0, 40),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                textStyle: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13.5,
                 ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: group.key,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Subject'),
-                  items: [
-                    for (final g in groups)
-                      DropdownMenuItem(
-                        value: g.key,
-                        child: Text(
-                          g.displayLabel,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+              ),
+              onPressed: saving ? null : () => Navigator.pop(c),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: _amberStyle,
+              onPressed: saving
+                  ? null
+                  : () async {
+                      final max = num.tryParse(maximum.text.trim());
+                      if (name.text.trim().isEmpty ||
+                          selected.isEmpty ||
+                          max == null ||
+                          !max.isFinite ||
+                          max <= 0) {
+                        setS(
+                          () => error = 'Enter a name, sections, and positive maximum score.',
+                        );
+                        return;
+                      }
+                      setS(() {
+                        saving = true;
+                        error = null;
+                      });
+                      try {
+                        final ids = selected.toList()..sort();
+                        final record = await MySubjectsApi.createAssessment(
+                          await _token(),
+                          classIds: ids,
+                          title: name.text.trim(),
+                          assessmentType: type,
+                          gradingPeriod: period,
+                          creationMode: 'manual',
+                          maximumScore: max,
+                        );
+                        if (c.mounted) {
+                          Navigator.pop(
+                            c,
+                            AssessmentCreationResult(
+                              _id(record['id'])!,
+                              manual: true,
+                              classId: ids.first,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (c.mounted) {
+                          setS(() {
+                            saving = false;
+                            error = _err(e);
+                          });
+                        }
+                      }
+                    },
+              child: Text(saving ? 'Saving…' : 'Create Column'),
+            ),
+          ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextFormField(
+                controller: name,
+                enabled: !saving,
+                style: _inputText,
+                decoration: _floatingDeco('Assessment Name'),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: group.key,
+                isExpanded: true,
+                style: _inputText,
+                decoration: _floatingDeco('Subject'),
+                items: [
+                  for (final g in groups)
+                    DropdownMenuItem(
+                      value: g.key,
+                      child: Text(
+                        g.displayLabel,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                  ],
+                    ),
+                ],
+                onChanged: saving
+                    ? null
+                    : (v) => setS(() {
+                        group = groups.firstWhere((g) => g.key == v);
+                        selected
+                          ..clear()
+                          ..addAll(group.classIds);
+                      }),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Assigned Sections',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: _Brand.ink,
+                ),
+              ),
+              const SizedBox(height: 4),
+              for (final sec in group.sections)
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  activeColor: _Brand.ink,
+                  dense: true,
+                  title: Text('${sec['section'] ?? ''}', style: _inputText),
+                  value: selected.contains(_id(sec['id'])),
                   onChanged: saving
                       ? null
                       : (v) => setS(() {
-                          group = groups.firstWhere((g) => g.key == v);
-                          selected
-                            ..clear()
-                            ..addAll(group.classIds);
+                          final id = _id(sec['id'])!;
+                          if (v == true) {
+                            selected.add(id);
+                          } else {
+                            selected.remove(id);
+                          }
                         }),
                 ),
-                const SizedBox(height: 12),
-                const Text('Assigned Sections'),
-                for (final sec in group.sections)
-                  CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text('${sec['section'] ?? ''}'),
-                    value: selected.contains(_id(sec['id'])),
-                    onChanged: saving
-                        ? null
-                        : (v) => setS(() {
-                            final id = _id(sec['id'])!;
-                            if (v == true) {
-                              selected.add(id);
-                            } else {
-                              selected.remove(id);
-                            }
-                          }),
-                  ),
-                DropdownButtonFormField<String>(
-                  initialValue: period,
-                  decoration: const InputDecoration(
-                    labelText: 'Grading Period',
-                  ),
-                  items: [
-                    for (final e in gradingPeriodLabels.entries)
-                      DropdownMenuItem(value: e.key, child: Text(e.value)),
-                  ],
-                  onChanged: saving
-                      ? null
-                      : (v) {
-                          if (v != null) setS(() => period = v);
-                        },
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: period,
+                isExpanded: true,
+                style: _inputText,
+                decoration: _floatingDeco('Grading Period'),
+                items: [
+                  for (final e in gradingPeriodLabels.entries)
+                    DropdownMenuItem(value: e.key, child: Text(e.value)),
+                ],
+                onChanged: saving
+                    ? null
+                    : (v) {
+                        if (v != null) setS(() => period = v);
+                      },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: maximum,
+                enabled: !saving,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
                 ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: maximum,
-                  enabled: !saving,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
+                style: _inputText,
+                decoration: _floatingDeco('Maximum Score'),
+              ),
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    error!,
+                    style: const TextStyle(color: Colors.red),
                   ),
-                  decoration: const InputDecoration(labelText: 'Maximum Score'),
                 ),
-                if (error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Text(
-                      error!,
-                      style: const TextStyle(color: Colors.red),
-                    ),
-                  ),
-              ],
-            ),
+            ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: saving ? null : () => Navigator.pop(c),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: saving
-                ? null
-                : () async {
-                    final max = num.tryParse(maximum.text.trim());
-                    if (name.text.trim().isEmpty ||
-                        selected.isEmpty ||
-                        max == null ||
-                        !max.isFinite ||
-                        max <= 0) {
-                      setS(
-                        () => error = 'Enter a name, sections, and positive maximum score.',
-                      );
-                      return;
-                    }
-                    setS(() {
-                      saving = true;
-                      error = null;
-                    });
-                    try {
-                      final ids = selected.toList()..sort();
-                      final record = await MySubjectsApi.createAssessment(
-                        await _token(),
-                        classIds: ids,
-                        title: name.text.trim(),
-                        assessmentType: type,
-                        gradingPeriod: period,
-                        creationMode: 'manual',
-                        maximumScore: max,
-                      );
-                      if (c.mounted)
-                        Navigator.pop(
-                          c,
-                          AssessmentCreationResult(
-                            _id(record['id'])!,
-                            manual: true,
-                            classId: ids.first,
-                          ),
-                        );
-                    } catch (e) {
-                      if (c.mounted)
-                        setS(() {
-                          saving = false;
-                          error = _err(e);
-                        });
-                    }
-                  },
-            child: Text(saving ? 'Saving…' : 'Create Column'),
-          ),
-        ],
       ),
     ),
   );
@@ -1309,17 +2782,42 @@ Future<int?> showExamDetailsModal(
   }
   final selected = Set<int>.of(initialIds);
 
-  // Determine initial Type.
+  // Determine initial Assessment Type (treated separately from question type).
+  // When importing a questionnaire:
+  // - If initialAssessmentType was explicitly passed, use and confirm it.
+  // - If the uploaded document has an explicit heading (e.g. "Midterm Examination"),
+  //   prefill it as a suggestion that the teacher confirms in this step.
+  // - If the uploaded document is ambiguous, ask the teacher to choose.
+  final hasExplicitInitialType =
+      initialAssessmentType != null && initialAssessmentType.trim().isNotEmpty;
+  final hasSuggestedImportType =
+      importedPaper != null && importedPaper.hasExplicitAssessmentType;
+  final isAmbiguousImportType =
+      !editing &&
+      !hasExplicitInitialType &&
+      importedPaper != null &&
+      importedPaper.isAssessmentTypeAmbiguous;
+
   String type = AssessmentValidator.normalizeAssessmentType(
-    initialAssessmentType ?? exam?['assessment_type']?.toString() ??
+    initialAssessmentType ??
+        exam?['assessment_type']?.toString() ??
         importedPaper?.detectedAssessmentType,
     title: exam?['title']?.toString() ?? importedPaper?.detectedQuizTitle,
     description: exam?['description']?.toString(),
   );
-  if (!_kAssessmentTypes.containsKey(type) && !(editing && type == 'other')) { type = 'quiz'; }
-  var gradingPeriod = initialGradingPeriod ?? exam?['grading_period']?.toString();
-  gradingPeriod = _majorGradingPeriod(type) ?? gradingPeriod;
-  var classificationConfirmed = !editing || _kAssessmentTypes.containsKey(exam?['assessment_type']);
+  if (!_kAssessmentTypes.containsKey(type) && !(editing && type == 'other')) {
+    type = 'quiz';
+  }
+  String? selectedTypeValue = isAmbiguousImportType ? null : type;
+  var gradingPeriod =
+      initialGradingPeriod ?? exam?['grading_period']?.toString();
+  if (selectedTypeValue != null) {
+    gradingPeriod = _majorGradingPeriod(selectedTypeValue) ?? gradingPeriod;
+  }
+  var classificationConfirmed = editing
+      ? _kAssessmentTypes.containsKey(exam['assessment_type'])
+      : (!isAmbiguousImportType);
+  int? createdExamIdForRetry;
 
   // Initial Quiz Name (for Quiz / Short Quiz / Long Quiz / Other).
   final rawExistingTitle = (exam?['title']?.toString() ??
@@ -1441,7 +2939,15 @@ Future<int?> showExamDetailsModal(
         }
 
         Future<void> save() async {
-          if (gradingPeriod == null || !classificationConfirmed) { setS(() => error = 'Confirm an assessment type and grading period.'); return; }
+          if (selectedTypeValue == null ||
+              gradingPeriod == null ||
+              !classificationConfirmed) {
+            setS(
+              () => error =
+                  'Please choose and confirm an assessment type and grading period.',
+            );
+            return;
+          }
           if (siblings.isNotEmpty && selected.isEmpty) {
             setS(() => error = 'Choose at least one section.');
             return;
@@ -1477,12 +2983,12 @@ Future<int?> showExamDetailsModal(
             final token = await _token();
             final cleanInst = instC.text.trim();
 
-            int? savedExamId = examId;
-            if (editing) {
-              if (examId == null) throw Exception('Invalid exam ID.');
+            int? savedExamId = examId ?? createdExamIdForRetry;
+            if (editing || savedExamId != null) {
+              if (savedExamId == null) throw Exception('Invalid exam ID.');
               await ApiService.updateExam(
                 token: token,
-                examId: examId,
+                examId: savedExamId,
                 title: finalTitle,
                 assessmentType: type,
                 gradingPeriod: gradingPeriod,
@@ -1504,16 +3010,19 @@ Future<int?> showExamDetailsModal(
                 status: 'draft',
               );
               savedExamId = _id(created['id']) ?? 0;
-              if (importedPaper != null && savedExamId > 0) {
-                await importParsedSectionsIntoExam(
-                  token: token,
-                  examId: savedExamId,
-                  paper: importedPaper!,
-                );
+              if (savedExamId > 0) {
+                createdExamIdForRetry = savedExamId;
               }
             }
+            if (!editing && importedPaper != null && savedExamId > 0) {
+              await importParsedSectionsIntoExam(
+                token: token,
+                examId: savedExamId,
+                paper: importedPaper!,
+              );
+            }
             if (dialogContext.mounted) {
-              Navigator.pop(dialogContext, savedExamId ?? 0);
+              Navigator.pop(dialogContext, savedExamId);
             }
           } catch (e) {
             setS(() {
@@ -1806,104 +3315,169 @@ Future<int?> showExamDetailsModal(
                       color: CmColors.green.withValues(alpha: 0.4),
                     ),
                   ),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(
-                        Icons.upload_file_outlined,
-                        size: 20,
-                        color: _Brand.ink,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              importedPaper!.fileName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: _Brand.ink,
-                              ),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.upload_file_outlined,
+                            size: 20,
+                            color: _Brand.ink,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  importedPaper!.fileName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: _Brand.ink,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '${importedPaper!.totalQuestions} questions across '
+                                  '${importedPaper!.sections.length} '
+                                  '${importedPaper!.sections.length == 1 ? "section" : "sections"} '
+                                  '· ${_trim(importedPaper!.totalPoints)} total points.',
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    color: CmColors.slate,
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 2),
-                            Text(
-                              '${importedPaper!.totalQuestions} questions automatically organized into '
-                              '${importedPaper!.sections.length} '
-                              '${importedPaper!.sections.length == 1 ? "section" : "sections"} by test type.',
-                              style: const TextStyle(
-                                fontSize: 11.5,
-                                color: CmColors.slate,
-                              ),
+                          ),
+                          TextButton(
+                            onPressed: saving
+                                ? null
+                                : () async {
+                                    final reviewed =
+                                        await showUploadQuestionnaireModal(
+                                          dialogContext,
+                                          initialPaper: importedPaper,
+                                        );
+                                    if (reviewed != null) {
+                                      setS(() {
+                                        importedPaper = reviewed;
+                                        if (reviewed.detectedAssessmentType !=
+                                                null &&
+                                            _kAssessmentTypes.containsKey(
+                                              reviewed.detectedAssessmentType,
+                                            )) {
+                                          type =
+                                              reviewed.detectedAssessmentType!;
+                                          selectedTypeValue = type;
+                                          classificationConfirmed = true;
+                                          gradingPeriod =
+                                              _majorGradingPeriod(type) ??
+                                              gradingPeriod;
+                                        }
+                                        if (reviewed.detectedQuizTitle !=
+                                                null &&
+                                            !AssessmentValidator.isMajorExamination(
+                                              type,
+                                            )) {
+                                          quizNameC.text =
+                                              reviewed.detectedQuizTitle!;
+                                        }
+                                        if (reviewed.detectedExamDay != null) {
+                                          examDayC.text =
+                                              reviewed.detectedExamDay!;
+                                        }
+                                        if (reviewed.detectedExamDate != null) {
+                                          examDateText =
+                                              reviewed.detectedExamDate!;
+                                        }
+                                        if (reviewed.detectedStartTime !=
+                                            null) {
+                                          startTimeText =
+                                              reviewed.detectedStartTime!;
+                                        }
+                                        if (reviewed.detectedEndTime != null) {
+                                          endTimeText =
+                                              reviewed.detectedEndTime!;
+                                        }
+                                        if (reviewed.detectedReferenceNo !=
+                                            null) {
+                                          refNoC.text =
+                                              reviewed.detectedReferenceNo!;
+                                        }
+                                      });
+                                    }
+                                  },
+                            child: const Text(
+                              'Review / Change',
+                              style: TextStyle(fontSize: 12),
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                      TextButton(
-                        onPressed: saving
-                            ? null
-                            : () async {
-                                final repicked =
-                                    await pickAndParseQuestionPaper(
-                                      dialogContext,
-                                    );
-                                if (repicked != null) {
-                                  setS(() {
-                                    importedPaper = repicked;
-                                    if (repicked.detectedAssessmentType !=
-                                            null &&
-                                        _kAssessmentTypes.containsKey(
-                                          repicked.detectedAssessmentType,
-                                        )) {
-                                      type = repicked.detectedAssessmentType!;
-                                    }
-                                    if (repicked.detectedQuizTitle != null &&
-                                        !AssessmentValidator.isMajorExamination(
-                                          type,
-                                        )) {
-                                      quizNameC.text =
-                                          repicked.detectedQuizTitle!;
-                                    }
-                                    if (repicked.detectedExamDay != null) {
-                                      examDayC.text = repicked.detectedExamDay!;
-                                    }
-                                    if (repicked.detectedExamDate != null) {
-                                      examDateText = repicked.detectedExamDate!;
-                                    }
-                                    if (repicked.detectedStartTime != null) {
-                                      startTimeText =
-                                          repicked.detectedStartTime!;
-                                    }
-                                    if (repicked.detectedEndTime != null) {
-                                      endTimeText = repicked.detectedEndTime!;
-                                    }
-                                    if (repicked.detectedReferenceNo != null) {
-                                      refNoC.text =
-                                          repicked.detectedReferenceNo!;
-                                    }
-                                  });
-                                }
-                              },
-                        child: const Text(
-                          'Change file',
-                          style: TextStyle(fontSize: 12),
+                      const SizedBox(height: 6),
+                      for (final sec in importedPaper!.sections)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            '• ${sec.name} (Items ${sec.itemRangeLabel} · ${_trim(sec.totalPoints)} pts)',
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              color: _Brand.inkSoft,
+                            ),
+                          ),
                         ),
-                      ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 10),
+                if (hasSuggestedImportType && selectedTypeValue != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Text(
+                      'Suggested from document heading: ${_kAssessmentTypes[selectedTypeValue] ?? selectedTypeValue}. '
+                      'Confirm or change the Assessment Type below.',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: CmColors.green,
+                      ),
+                    ),
+                  )
+                else if (selectedTypeValue == null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Text(
+                      'Assessment type is not specified in the uploaded document. '
+                      'Please choose whether this questionnaire is a Quiz or Major Exam below.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: _Brand.inkSoft,
+                      ),
+                    ),
+                  ),
               ],
               // 1. Type dropdown (top)
               DropdownButtonFormField<String>(
-                initialValue: type,
+                key: ValueKey('assessment-type-$selectedTypeValue'),
+                initialValue: selectedTypeValue,
                 isExpanded: true,
                 style: _inputText,
-                decoration: _floatingDeco('Type', hint: 'Select type'),
+                decoration: _floatingDeco(
+                  'Assessment Type',
+                  hint: 'Select assessment type',
+                ),
                 items: [
-                  if (editing && type == 'other') const DropdownMenuItem<String>(value:'other',child:Text('Other (historical)')),
+                  if (editing && type == 'other')
+                    const DropdownMenuItem<String>(
+                      value: 'other',
+                      child: Text('Other (historical)'),
+                    ),
                   for (final e in _kAssessmentTypes.entries)
                     DropdownMenuItem<String>(
                       value: e.key,
@@ -1913,7 +3487,18 @@ Future<int?> showExamDetailsModal(
                 onChanged: saving
                     ? null
                     : (v) {
-                        if (v != null) setS(() { type = v; classificationConfirmed = true; gradingPeriod = _majorGradingPeriod(v) ?? gradingPeriod; });
+                        if (v != null) {
+                          setS(() {
+                            type = v;
+                            selectedTypeValue = v;
+                            classificationConfirmed = true;
+                            gradingPeriod =
+                                _majorGradingPeriod(v) ??
+                                gradingPeriod ??
+                                'prelims';
+                            error = null;
+                          });
+                        }
                       },
               ),
               const SizedBox(height: 14),
@@ -2282,9 +3867,9 @@ class _ExamsTabState extends State<ExamsTab> {
                   Icons.picture_as_pdf_outlined,
                   color: _Brand.ink,
                 ),
-                title: const Text('Upload Question Paper PDF'),
+                title: const Text('Upload Questionnaire'),
                 subtitle: const Text(
-                  'Upload a PDF, Word, Excel, CSV, or text file and configure its answer key.',
+                  'Use a Word template or upload an existing questionnaire.',
                 ),
                 onTap: () => Navigator.pop(sheetContext, 'pdf'),
               ),
@@ -3029,7 +4614,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     }
     if (_showCentralizedSaveButton) {
       final savedOk = await _saveAllQuestionsAndAnswers();
-      if (!savedOk) return;
+      if (!savedOk || !mounted) return;
     }
 
     final exam = _exam;
@@ -3236,6 +4821,10 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                   _expandedId = newSid;
                 }
               }
+              await resequenceExamSectionHeadings(
+                token: token,
+                examId: widget.examId,
+              );
               if (dialogContext.mounted) Navigator.pop(dialogContext, true);
             } catch (e) {
               setS(() {
@@ -3347,33 +4936,11 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
       }
       if (_expandedId == sectionId) _expandedId = null;
 
-      // Re-sequence remaining sections' auto-generated Part I, Part II names
-      final remaining = await ApiService.getExamSections(token, widget.examId);
-      final sortedRemaining = _sortSections(remaining);
-      for (var i = 0; i < sortedRemaining.length; i++) {
-        final s = sortedRemaining[i];
-        final sid = _id(s['id']);
-        if (sid == null) continue;
-        final qType = s['question_type']?.toString() ?? 'multiple_choice';
-        final currentName = (s['name']?.toString() ?? '').trim();
-        if (RegExp(r'^Part\s+[IVX\d]+\s*[:\u00B7\-]', caseSensitive: false)
-            .hasMatch(currentName)) {
-          final updatedName = _autoSectionName(i + 1, qType);
-          if (currentName != updatedName) {
-            try {
-              await ApiService.updateExamSection(
-                token: token,
-                sectionId: sid,
-                name: updatedName,
-                defaultPoints: _num(s['default_points']) > 0
-                    ? _num(s['default_points'])
-                    : 1,
-                questionType: qType,
-              );
-            } catch (_) {}
-          }
-        }
-      }
+      // Re-sequence remaining sections' auto-generated Part & subpart headings
+      await resequenceExamSectionHeadings(
+        token: token,
+        examId: widget.examId,
+      );
 
       await _load(silent: true);
       if (!mounted) return;
@@ -4182,8 +5749,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${v.assessmentLabel} Question Requirements · '
-                      '${v.actualTotal} / ${v.requiredTotal} total questions',
+                      '${v.assessmentLabel} Question Requirements',
                       style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w800,
@@ -4238,36 +5804,6 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 ),
             ],
           ),
-          if (v.questionTypeValidations.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: [
-                for (final qt in v.questionTypeValidations)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: (qt.isValid ? CmColors.green : _Brand.amber)
-                          .withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      '${qt.label}: ${qt.actualCount}/${qt.requiredCount}'
-                      '${qt.isValid ? '' : ' (need ${qt.missingCount} more)'}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: _Brand.ink,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ],
           if (!ok) ...[
             const SizedBox(height: 8),
             for (final err in v.errors)
@@ -4462,8 +5998,8 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                           const SizedBox(height: 2),
                           Text(
                             '${_typeLabel(type)} · '
-                            '${_fixed2(_num(section['default_points']))} pts/item · '
-                            '${qs.length} ${qs.length == 1 ? 'question' : 'questions'}'
+                            '${_trim(_num(section['default_points']))} ${_num(section['default_points']) == 1 ? 'pt' : 'pts'}/item · '
+                            '${qs.isEmpty ? '0 questions' : 'Items ${qs.first['question_number'] ?? 1}–${qs.last['question_number'] ?? qs.length} (${qs.length} ${qs.length == 1 ? 'question' : 'questions'})'}'
                             '${drafts.isNotEmpty ? ' (+${drafts.length} unsaved)' : ''}',
                             style: const TextStyle(
                               fontSize: 11.5,

@@ -215,6 +215,10 @@ class _StudentsScreenState extends State<StudentsScreen> {
   // ADD STUDENT MANUALLY
   // =========================
 
+  static const _studentDialogBackdrop = Color(0x8C121E39);
+  static const _studentDialogPanel = Color(0xFFFBFDFF);
+  static const _studentDialogShadow = Color(0x800B1C45);
+
   Future<void> _showAddStudentDialog({
     required _AssignedSection section,
   }) async {
@@ -234,6 +238,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
     final result = await showDialog<bool>(
       context: context,
+      barrierColor: _studentDialogBackdrop,
       barrierDismissible: false,
       builder: (dialogContext) {
         var saving = false;
@@ -553,7 +558,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
             return PopScope(
               canPop: !saving,
               child: Dialog(
-                backgroundColor: Colors.white,
+                backgroundColor: _studentDialogPanel,
+                shadowColor: _studentDialogShadow,
+                elevation: 16,
                 surfaceTintColor: Colors.transparent,
                 insetPadding: const EdgeInsets.all(24),
                 shape: RoundedRectangleBorder(
@@ -1765,6 +1772,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
     try {
       result = await showDialog<Map<String, dynamic>>(
         context: context,
+        barrierColor: _studentDialogBackdrop,
         barrierDismissible: false,
         builder: (dialogContext) {
           var saving = false;
@@ -1780,13 +1788,105 @@ class _StudentsScreenState extends State<StudentsScreen> {
                     (entry['original_username'] as String).trim();
               }).length;
 
-              return AlertDialog(
-                title: Text(
-                  'Student emails · ${section.name}',
-                  style: const TextStyle(
-                    color: CmColors.navy,
-                    fontWeight: FontWeight.w700,
+              final filledCount = entries.where((entry) {
+                final controller = entry['controller'] as TextEditingController;
+                return controller.text.trim().isNotEmpty;
+              }).length;
+              final theme = Theme.of(context);
+              final borderColor = theme.colorScheme.outlineVariant;
+              final cardColor = theme.colorScheme.surface;
+
+              Widget templateStep({
+                required IconData icon,
+                required String step,
+                required String title,
+                required String subtitle,
+                required VoidCallback? onPressed,
+              }) {
+                return OutlinedButton(
+                  onPressed: onPressed,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: CmColors.navy,
+                    backgroundColor: cardColor,
+                    padding: const EdgeInsets.all(10),
+                    side: BorderSide(color: borderColor),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primaryContainer,
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Icon(icon, size: 18),
+                      ),
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              step,
+                              style: const TextStyle(
+                                fontSize: 10,
+                                letterSpacing: 1,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              title,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            Text(
+                              subtitle,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w400,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              return AlertDialog(
+                backgroundColor: _studentDialogPanel,
+                shadowColor: _studentDialogShadow,
+                elevation: 16,
+                surfaceTintColor: Colors.transparent,
+                title: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Student emails · ${section.name}',
+                        style: const TextStyle(
+                          color: CmColors.navy,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close',
+                      constraints: const BoxConstraints.tightFor(
+                        width: 32,
+                        height: 32,
+                      ),
+                      padding: EdgeInsets.zero,
+                      onPressed: saving
+                          ? null
+                          : () => Navigator.of(dialogContext).pop(),
+                      icon: const Icon(Icons.close, size: 18),
+                    ),
+                  ],
                 ),
                 content: SizedBox(
                   width: 520,
@@ -1795,7 +1895,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Text(
-                        '${entries.length} unique student${entries.length == 1 ? '' : 's'}',
+                        '${entries.length} student${entries.length == 1 ? '' : 's'} · '
+                        '$filledCount of ${entries.length} emails filled',
                         style: const TextStyle(
                           color: CmColors.slate,
                           fontSize: 13,
@@ -1803,353 +1904,370 @@ class _StudentsScreenState extends State<StudentsScreen> {
                       ),
                       const SizedBox(height: 12),
 
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          const Text(
-                            'Download the template first, fill in the students’ email addresses, '
-                            'then upload the completed file. Review the changes before saving.',
-                            style: TextStyle(
-                              color: CmColors.slate,
-                              fontSize: 12,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          OutlinedButton.icon(
-                            onPressed: saving
-                                ? null
-                                : () async {
-                                    const mime =
-                                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+                      const Divider(height: 1),
+                      const SizedBox(height: 12),
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          const gap = 10.0;
+                          final stepWidth = constraints.maxWidth >= 440
+                              ? (constraints.maxWidth - gap) / 2
+                              : constraints.maxWidth;
+                          return Wrap(
+                            spacing: gap,
+                            runSpacing: gap,
+                            children: [
+                              SizedBox(
+                                width: stepWidth,
+                                child: templateStep(
+                                  icon: Icons.download_outlined,
+                                  step: 'STEP 1',
+                                  title: 'Download template',
+                                  subtitle: 'Excel-ready file with your class list',
+                                  onPressed: saving
+                                      ? null
+                                      : () async {
+                                          const mime =
+                                              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-                                    try {
-                                      final bytes =
-                                          StudentEmailExcelService.buildTemplate(
-                                            entries: entries,
-                                          );
+                                          try {
+                                            final bytes =
+                                                StudentEmailExcelService.buildTemplate(
+                                                  entries: entries,
+                                                );
 
-                                      final safeSection = section.name
-                                          .replaceAll(
-                                            RegExp(r'[^A-Za-z0-9_-]'),
-                                            '_',
-                                          );
+                                            final safeSection = section.name
+                                                .replaceAll(
+                                                  RegExp(r'[^A-Za-z0-9_-]'),
+                                                  '_',
+                                                );
 
-                                      final fileName =
-                                          'CheckMate_Student_Emails_$safeSection.xlsx';
+                                            final fileName =
+                                                'CheckMate_Student_Emails_$safeSection.xlsx';
 
-                                      final file = XFile.fromData(
-                                        Uint8List.fromList(bytes),
-                                        name: fileName,
-                                        mimeType: mime,
-                                      );
+                                            final file = XFile.fromData(
+                                              Uint8List.fromList(bytes),
+                                              name: fileName,
+                                              mimeType: mime,
+                                            );
 
-                                      final isDesktop =
-                                          defaultTargetPlatform ==
-                                              TargetPlatform.windows ||
-                                          defaultTargetPlatform ==
-                                              TargetPlatform.macOS ||
-                                          defaultTargetPlatform ==
-                                              TargetPlatform.linux;
+                                            final isDesktop =
+                                                defaultTargetPlatform ==
+                                                    TargetPlatform.windows ||
+                                                defaultTargetPlatform ==
+                                                    TargetPlatform.macOS ||
+                                                defaultTargetPlatform ==
+                                                    TargetPlatform.linux;
 
-                                      if (kIsWeb) {
-                                        await file.saveTo(fileName);
-                                      } else if (isDesktop) {
-                                        final location = await getSaveLocation(
-                                          suggestedName: fileName,
-                                          acceptedTypeGroups: const [
-                                            XTypeGroup(
+                                            if (kIsWeb) {
+                                              await file.saveTo(fileName);
+                                            } else if (isDesktop) {
+                                              final location = await getSaveLocation(
+                                                suggestedName: fileName,
+                                                acceptedTypeGroups: const [
+                                                  XTypeGroup(
+                                                    label: 'Excel',
+                                                    extensions: ['xlsx'],
+                                                  ),
+                                                ],
+                                              );
+
+                                              if (location == null) return;
+
+                                              await file.saveTo(location.path);
+                                            } else {
+                                              await SharePlus.instance.share(
+                                                ShareParams(
+                                                  files: [file],
+                                                  subject:
+                                                      'Student emails - ${section.name}',
+                                                ),
+                                              );
+                                            }
+
+                                            if (!dialogContext.mounted) return;
+
+                                            setDialogState(() {
+                                              importMessage = 'Excel template prepared successfully.';
+                                            });
+                                          } catch (e) {
+                                            if (!dialogContext.mounted) return;
+
+                                            setDialogState(() {
+                                              importMessage = 'Download failed: $e';
+                                            });
+                                          }
+                                        },
+                                ),
+                              ),
+                              SizedBox(
+                                width: stepWidth,
+                                child: templateStep(
+                                  icon: Icons.upload_file_outlined,
+                                  step: 'STEP 2',
+                                  title: 'Upload filled template',
+                                  subtitle: 'Choose the file you filled in',
+                                  onPressed: saving
+                                      ? null
+                                      : () async {
+                                          try {
+                                            const xlsxType = XTypeGroup(
                                               label: 'Excel',
                                               extensions: ['xlsx'],
-                                            ),
-                                          ],
-                                        );
+                                              mimeTypes: [
+                                                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                                              ],
+                                            );
 
-                                        if (location == null) return;
+                                            final file = await openFile(
+                                              acceptedTypeGroups: [xlsxType],
+                                            );
 
-                                        await file.saveTo(location.path);
-                                      } else {
-                                        await SharePlus.instance.share(
-                                          ShareParams(
-                                            files: [file],
-                                            subject:
-                                                'Student emails - ${section.name}',
-                                          ),
-                                        );
-                                      }
+                                            if (file == null) return;
 
-                                      if (!dialogContext.mounted) return;
+                                            final bytes = await file.readAsBytes();
+                                            final imported =
+                                                StudentEmailExcelService.parse(bytes);
 
-                                      setDialogState(() {
-                                        importMessage = 'Excel template prepared successfully.';
-                                      });
-                                    } catch (e) {
-                                      if (!dialogContext.mounted) return;
+                                            final entriesByNumber =
+                                                <String, Map<String, dynamic>>{
+                                                  for (final entry in entries)
+                                                    (entry['student_number']
+                                                                as String)
+                                                            .trim()
+                                                            .toLowerCase():
+                                                        entry,
+                                                };
 
-                                      setDialogState(() {
-                                        importMessage = 'Download failed: $e';
-                                      });
-                                    }
-                                  },
-                            icon: const Icon(Icons.download_outlined),
-                            label: const Text(
-                              'Step 1 — Download Excel Template',
-                            ),
-                          ),
-
-                          OutlinedButton.icon(
-                            onPressed: saving
-                                ? null
-                                : () async {
-                                    try {
-                                      const xlsxType = XTypeGroup(
-                                        label: 'Excel',
-                                        extensions: ['xlsx'],
-                                        mimeTypes: [
-                                          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                                        ],
-                                      );
-
-                                      final file = await openFile(
-                                        acceptedTypeGroups: [xlsxType],
-                                      );
-
-                                      if (file == null) return;
-
-                                      final bytes = await file.readAsBytes();
-                                      final imported =
-                                          StudentEmailExcelService.parse(bytes);
-
-                                      final entriesByNumber =
-                                          <String, Map<String, dynamic>>{
-                                            for (final entry in entries)
-                                              (entry['student_number']
-                                                          as String)
-                                                      .trim()
-                                                      .toLowerCase():
-                                                  entry,
-                                          };
-
-                                      final matchedNumbers = imported
-                                          .where(
-                                            (row) =>
-                                                entriesByNumber.containsKey(
-                                                  row.studentNumber
+                                            final matchedNumbers = imported
+                                                .where(
+                                                  (row) =>
+                                                      entriesByNumber.containsKey(
+                                                        row.studentNumber
+                                                            .trim()
+                                                            .toLowerCase(),
+                                                      ),
+                                                )
+                                                .map(
+                                                  (row) => row.studentNumber
                                                       .trim()
                                                       .toLowerCase(),
-                                                ),
-                                          )
-                                          .map(
-                                            (row) => row.studentNumber
-                                                .trim()
-                                                .toLowerCase(),
-                                          )
-                                          .toSet();
+                                                )
+                                                .toSet();
 
-                                      if (matchedNumbers.isEmpty) {
-                                        throw const FormatException(
-                                          'This Excel file has no students matching the selected section.',
-                                        );
-                                      }
+                                            if (matchedNumbers.isEmpty) {
+                                              throw const FormatException(
+                                                'This Excel file has no students matching the selected section.',
+                                              );
+                                            }
 
-                                      final numberCounts = <String, int>{};
-                                      final emailCounts = <String, int>{};
+                                            final numberCounts = <String, int>{};
+                                            final emailCounts = <String, int>{};
 
-                                      for (final row in imported) {
-                                        final number = row.studentNumber
-                                            .trim()
-                                            .toLowerCase();
-                                        final email = row.email
-                                            .trim()
-                                            .toLowerCase();
+                                            for (final row in imported) {
+                                              final number = row.studentNumber
+                                                  .trim()
+                                                  .toLowerCase();
+                                              final email = row.email
+                                                  .trim()
+                                                  .toLowerCase();
 
-                                        numberCounts.update(
-                                          number,
-                                          (count) => count + 1,
-                                          ifAbsent: () => 1,
-                                        );
+                                              numberCounts.update(
+                                                number,
+                                                (count) => count + 1,
+                                                ifAbsent: () => 1,
+                                              );
 
-                                        if (email.isNotEmpty) {
-                                          emailCounts.update(
-                                            email,
-                                            (count) => count + 1,
-                                            ifAbsent: () => 1,
-                                          );
-                                        }
-                                      }
+                                              if (email.isNotEmpty) {
+                                                emailCounts.update(
+                                                  email,
+                                                  (count) => count + 1,
+                                                  ifAbsent: () => 1,
+                                                );
+                                              }
+                                            }
 
-                                      final emailOwners =
-                                          <String, Set<String>>{};
+                                            final emailOwners =
+                                                <String, Set<String>>{};
 
-                                      for (final entry in entries) {
-                                        final number =
-                                            (entry['student_number'] as String)
-                                                .trim()
-                                                .toLowerCase();
+                                            for (final entry in entries) {
+                                              final number =
+                                                  (entry['student_number'] as String)
+                                                      .trim()
+                                                      .toLowerCase();
 
-                                        final email =
-                                            (entry['controller']
-                                                    as TextEditingController)
-                                                .text
-                                                .trim()
-                                                .toLowerCase();
+                                              final email =
+                                                  (entry['controller']
+                                                          as TextEditingController)
+                                                      .text
+                                                      .trim()
+                                                      .toLowerCase();
 
-                                        if (email.isNotEmpty) {
-                                          emailOwners
-                                              .putIfAbsent(email, () => {})
-                                              .add(number);
-                                        }
-                                      }
+                                              if (email.isNotEmpty) {
+                                                emailOwners
+                                                    .putIfAbsent(email, () => {})
+                                                    .add(number);
+                                              }
+                                            }
 
-                                      final pending = <Map<String, dynamic>>[];
-                                      final messages = <String>[];
+                                            final pending = <Map<String, dynamic>>[];
+                                            final messages = <String>[];
 
-                                      var unknownCount = 0;
-                                      var invalidCount = 0;
-                                      var duplicateCount = 0;
-                                      var skippedExistingCount = 0;
-                                      var blankCount = 0;
+                                            var unknownCount = 0;
+                                            var invalidCount = 0;
+                                            var duplicateCount = 0;
+                                            var skippedExistingCount = 0;
+                                            var blankCount = 0;
 
-                                      for (final row in imported) {
-                                        final number = row.studentNumber
-                                            .trim()
-                                            .toLowerCase();
-                                        final email = row.email.trim();
-                                        final normalizedEmail = email
-                                            .toLowerCase();
+                                            for (final row in imported) {
+                                              final number = row.studentNumber
+                                                  .trim()
+                                                  .toLowerCase();
+                                              final email = row.email.trim();
+                                              final normalizedEmail = email
+                                                  .toLowerCase();
 
-                                        final entry = entriesByNumber[number];
+                                              final entry = entriesByNumber[number];
 
-                                        if (entry == null) {
-                                          unknownCount++;
-                                          continue;
-                                        }
+                                              if (entry == null) {
+                                                unknownCount++;
+                                                continue;
+                                              }
 
-                                        if (numberCounts[number] != 1) {
-                                          duplicateCount++;
-                                          continue;
-                                        }
+                                              if (numberCounts[number] != 1) {
+                                                duplicateCount++;
+                                                continue;
+                                              }
 
-                                        if (email.isEmpty) {
-                                          blankCount++;
-                                          continue;
-                                        }
+                                              if (email.isEmpty) {
+                                                blankCount++;
+                                                continue;
+                                              }
 
-                                        final controller =
-                                            entry['controller']
-                                                as TextEditingController;
+                                              final controller =
+                                                  entry['controller']
+                                                      as TextEditingController;
 
-                                        final currentEmail = controller.text
-                                            .trim();
+                                              final currentEmail = controller.text
+                                                  .trim();
 
-                                        if (currentEmail.isNotEmpty &&
-                                            !replaceExistingEmails) {
-                                          skippedExistingCount++;
-                                          continue;
-                                        }
+                                              if (currentEmail.isNotEmpty &&
+                                                  !replaceExistingEmails) {
+                                                skippedExistingCount++;
+                                                continue;
+                                              }
 
-                                        if (StudentValidation.studentEmailUsername(
-                                              email,
-                                            ) !=
-                                            null) {
-                                          invalidCount++;
-                                          messages.add(
-                                            'Invalid email username: ${row.studentNumber}',
-                                          );
-                                          continue;
-                                        }
-                                        if ((emailCounts[normalizedEmail] ??
-                                                0) >
-                                            1) {
-                                          duplicateCount++;
-                                          messages.add(
-                                            'Duplicate Excel email: $normalizedEmail',
-                                          );
-                                          continue;
-                                        }
+                                              if (StudentValidation.studentEmailUsername(
+                                                    email,
+                                                  ) !=
+                                                  null) {
+                                                invalidCount++;
+                                                messages.add(
+                                                  'Invalid email username: ${row.studentNumber}',
+                                                );
+                                                continue;
+                                              }
+                                              if ((emailCounts[normalizedEmail] ??
+                                                      0) >
+                                                  1) {
+                                                duplicateCount++;
+                                                messages.add(
+                                                  'Duplicate Excel email: $normalizedEmail',
+                                                );
+                                                continue;
+                                              }
 
-                                        final owners =
-                                            emailOwners[normalizedEmail] ?? {};
+                                              final owners =
+                                                  emailOwners[normalizedEmail] ?? {};
 
-                                        if (owners.any(
-                                          (owner) => owner != number,
-                                        )) {
-                                          duplicateCount++;
-                                          messages.add(
-                                            'Email already belongs to another student: $normalizedEmail',
-                                          );
-                                          continue;
-                                        }
+                                              if (owners.any(
+                                                (owner) => owner != number,
+                                              )) {
+                                                duplicateCount++;
+                                                messages.add(
+                                                  'Email already belongs to another student: $normalizedEmail',
+                                                );
+                                                continue;
+                                              }
 
-                                        pending.add({
-                                          'controller': controller,
-                                          'email': email,
-                                        });
-                                      }
+                                              pending.add({
+                                                'controller': controller,
+                                                'email': email,
+                                              });
+                                            }
 
-                                      if (!dialogContext.mounted) return;
+                                            if (!dialogContext.mounted) return;
 
-                                      setDialogState(() {
-                                        for (final item in pending) {
-                                          (item['controller']
-                                                      as TextEditingController)
-                                                  .text =
-                                              item['email'] as String;
-                                        }
+                                            setDialogState(() {
+                                              for (final item in pending) {
+                                                (item['controller']
+                                                            as TextEditingController)
+                                                        .text =
+                                                    item['email'] as String;
+                                              }
 
-                                        final parts = <String>[
-                                          '${pending.length} email(s) filled in.',
-                                          if (unknownCount > 0)
-                                            '$unknownCount unknown student(s)',
-                                          if (invalidCount > 0)
-                                            '$invalidCount invalid email(s)',
-                                          if (duplicateCount > 0)
-                                            '$duplicateCount duplicate(s)',
-                                          if (skippedExistingCount > 0)
-                                            '$skippedExistingCount existing email(s) kept',
-                                          if (blankCount > 0)
-                                            '$blankCount blank email(s) kept',
-                                        ];
+                                              final parts = <String>[
+                                                '${pending.length} email(s) filled in.',
+                                                if (unknownCount > 0)
+                                                  '$unknownCount unknown student(s)',
+                                                if (invalidCount > 0)
+                                                  '$invalidCount invalid email(s)',
+                                                if (duplicateCount > 0)
+                                                  '$duplicateCount duplicate(s)',
+                                                if (skippedExistingCount > 0)
+                                                  '$skippedExistingCount existing email(s) kept',
+                                                if (blankCount > 0)
+                                                  '$blankCount blank email(s) kept',
+                                              ];
 
-                                        importMessage = parts.join(' ');
-                                        if (messages.isNotEmpty) {
-                                          importMessage =
-                                              '$importMessage\n${messages.take(5).join('\n')}';
-                                        }
-                                      });
-                                    } catch (e) {
-                                      if (!dialogContext.mounted) return;
+                                              importMessage = parts.join(' ');
+                                              if (messages.isNotEmpty) {
+                                                importMessage =
+                                                    '$importMessage\n${messages.take(5).join('\n')}';
+                                              }
+                                            });
+                                          } catch (e) {
+                                            if (!dialogContext.mounted) return;
 
-                                      setDialogState(() {
-                                        importMessage =
-                                            'Upload failed: ${e.toString().replaceFirst('FormatException: ', '')}';
-                                      });
-                                    }
-                                  },
-                            icon: const Icon(Icons.upload_file_outlined),
-                            label: const Text(
-                              'Step 2 — Upload Filled Excel Template',
-                            ),
-                          ),
-                        ],
+                                            setDialogState(() {
+                                              importMessage =
+                                                  'Upload failed: ${e.toString().replaceFirst('FormatException: ', '')}';
+                                            });
+                                          }
+                                        },
+                                ),
+                              ),
+                            ],
+                          );
+                        },
                       ),
-
-                      CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        dense: true,
-                        value: replaceExistingEmails,
-                        onChanged: saving
-                            ? null
-                            : (value) {
-                                setDialogState(() {
-                                  replaceExistingEmails = value ?? false;
-                                });
-                              },
-                        title: const Text(
-                          'Replace emails that are already filled in',
-                          style: TextStyle(fontSize: 13),
+                      const SizedBox(height: 12),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: _studentDialogPanel,
+                          border: Border.all(color: borderColor),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: SwitchListTile(
+                          dense: true,
+                          value: replaceExistingEmails,
+                          onChanged: saving
+                              ? null
+                              : (value) {
+                                  setDialogState(() {
+                                    replaceExistingEmails = value;
+                                  });
+                                },
+                          title: const Text(
+                            'Replace existing emails',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          subtitle: const Text(
+                            'Overwrite emails that are already filled in',
+                            style: TextStyle(fontSize: 11),
+                          ),
                         ),
                       ),
+                      const SizedBox(height: 12),
 
                       if (importMessage != null) ...[
                         Text(
@@ -2180,179 +2298,233 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                   textAlign: TextAlign.center,
                                 ),
                               )
-                            : ListView.separated(
-                                itemCount: entries.length,
-                                separatorBuilder: (_, _) =>
-                                    const Divider(height: 20),
-                                itemBuilder: (context, index) {
-                                  final entry = entries[index];
-                                  final controller =
-                                      entry['controller']
-                                          as TextEditingController;
+                            : Container(
+                                clipBehavior: Clip.antiAlias,
+                                decoration: BoxDecoration(
+                                  color: _studentDialogPanel,
+                                  border: Border.all(color: borderColor),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: ListView.separated(
+                                  padding: EdgeInsets.zero,
+                                  itemCount: entries.length,
+                                  separatorBuilder: (_, _) => Divider(
+                                    height: 1,
+                                    color: borderColor,
+                                  ),
+                                  itemBuilder: (context, index) {
+                                    final entry = entries[index];
+                                    final controller =
+                                        entry['controller']
+                                            as TextEditingController;
 
-                                  return Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        entry['name'] as String,
-                                        style: const TextStyle(
-                                          color: CmColors.navy,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        entry['student_number'] as String,
-                                        style: const TextStyle(
-                                          color: CmColors.slate,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      TextField(
-                                        controller: controller,
-                                        enabled: !saving,
-                                        keyboardType:
-                                            TextInputType.emailAddress,
-                                        autocorrect: false,
-                                        inputFormatters: [
-                                          FilteringTextInputFormatter.deny(
-                                            RegExp(r'\s'),
+                                    return Padding(
+                                      padding: const EdgeInsets.all(10),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            entry['name'] as String,
+                                            style: const TextStyle(
+                                              color: CmColors.navy,
+                                              fontWeight: FontWeight.w700,
+                                            ),
                                           ),
-                                          LengthLimitingTextInputFormatter(
-                                            255 - studentEmailDomain.length,
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            entry['student_number'] as String,
+                                            style: const TextStyle(
+                                              color: CmColors.slate,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          TextField(
+                                            controller: controller,
+                                            enabled: !saving,
+                                            keyboardType:
+                                                TextInputType.emailAddress,
+                                            autocorrect: false,
+                                            inputFormatters: [
+                                              FilteringTextInputFormatter.deny(
+                                                RegExp(r'\s'),
+                                              ),
+                                              LengthLimitingTextInputFormatter(
+                                                255 - studentEmailDomain.length,
+                                              ),
+                                            ],
+                                            decoration:
+                                                _fieldDecoration(
+                                                  fillColor: CmColors.bg,
+                                                ).copyWith(
+                                                  isDense: true,
+                                                  enabledBorder: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(9),
+                                                    borderSide: BorderSide(color: borderColor),
+                                                  ),
+                                                  hintText: 'Enter email username',
+                                                  prefixIcon: const Icon(
+                                                    Icons.email_outlined,
+                                                    size: 19,
+                                                  ),
+                                                  suffixText: studentEmailDomain,
+                                                  errorText:
+                                                      controller.text.trim().isEmpty
+                                                      ? null
+                                                      : StudentValidation.studentEmailUsername(
+                                                          controller.text,
+                                                        ),
+                                                ),
+                                            onChanged: (_) {
+                                              setDialogState(() {});
+                                            },
                                           ),
                                         ],
-                                        decoration:
-                                            _fieldDecoration(
-                                              fillColor: CmColors.bg,
-                                            ).copyWith(
-                                              hintText: 'Enter email username',
-                                              prefixIcon: const Icon(
-                                                Icons.email_outlined,
-                                                size: 19,
-                                              ),
-                                              suffixText: studentEmailDomain,
-                                              errorText:
-                                                  controller.text.trim().isEmpty
-                                                  ? null
-                                                  : StudentValidation.studentEmailUsername(
-                                                      controller.text,
-                                                    ),
-                                            ),
-                                        onChanged: (_) {
-                                          setDialogState(() {});
-                                        },
                                       ),
-                                    ],
-                                  );
-                                },
+                                    );
+                                  },
+                                ),
                               ),
                       ),
                     ],
                   ),
                 ),
                 actions: [
-                  TextButton(
-                    onPressed: saving
-                        ? null
-                        : () => Navigator.of(dialogContext).pop(),
-                    child: const Text('Cancel'),
-                  ),
-                  FilledButton(
-                    onPressed: saving || changedCount == 0
-                        ? null
-                        : () async {
-                            final invalidEntries = entries.where((entry) {
-                              final controller =
-                                  entry['controller'] as TextEditingController;
-
-                              return StudentValidation.studentEmailUsername(
-                                    controller.text,
-                                  ) !=
-                                  null;
-                            }).toList();
-
-                            if (invalidEntries.isNotEmpty) {
-                              setDialogState(() {
-                                saveError = 'Please correct the invalid email usernames before saving.';
-                              });
-                              return;
-                            }
-
-                            final updates = entries
-                                .where((entry) {
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          changedCount == 0
+                              ? 'No changes yet'
+                              : '$changedCount unsaved change${changedCount == 1 ? '' : 's'}',
+                          style: const TextStyle(
+                            color: CmColors.slate,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: saving
+                            ? null
+                            : () => Navigator.of(dialogContext).pop(),
+                        child: const Text('Cancel'),
+                      ),
+                      FilledButton(
+                        onPressed: saving || changedCount == 0
+                            ? null
+                            : () async {
+                                final invalidEntries = entries.where((entry) {
                                   final controller =
-                                      entry['controller']
-                                          as TextEditingController;
+                                      entry['controller'] as TextEditingController;
 
-                                  return controller.text.trim() !=
-                                      (entry['original_username'] as String)
-                                          .trim();
-                                })
-                                .map((entry) {
-                                  final username =
-                                      (entry['controller']
-                                              as TextEditingController)
-                                          .text
-                                          .trim();
+                                  return StudentValidation.studentEmailUsername(
+                                        controller.text,
+                                      ) !=
+                                      null;
+                                }).toList();
 
-                                  return <String, dynamic>{
-                                    'student_number': entry['student_number'],
-                                    'email': username.isEmpty
-                                        ? null
-                                        : '$username$studentEmailDomain',
-                                  };
-                                })
-                                .toList();
+                                if (invalidEntries.isNotEmpty) {
+                                  setDialogState(() {
+                                    saveError = 'Please correct the invalid email usernames before saving.';
+                                  });
+                                  return;
+                                }
 
-                            setDialogState(() {
-                              saving = true;
-                              saveError = null;
-                            });
+                                final updates = entries
+                                    .where((entry) {
+                                      final controller =
+                                          entry['controller']
+                                              as TextEditingController;
 
-                            try {
-                              final token = await AuthStorage.getToken();
-                              if (token == null || token.isEmpty) {
-                                throw Exception(
-                                  'Authentication token not found.',
-                                );
-                              }
+                                      return controller.text.trim() !=
+                                          (entry['original_username'] as String)
+                                              .trim();
+                                    })
+                                    .map((entry) {
+                                      final username =
+                                          (entry['controller']
+                                                  as TextEditingController)
+                                              .text
+                                              .trim();
 
-                              final response =
-                                  await ApiService.updateStudentEmails(
-                                    token: token,
-                                    section: section.name,
-                                    updates: updates,
-                                  );
+                                      return <String, dynamic>{
+                                        'student_number': entry['student_number'],
+                                        'email': username.isEmpty
+                                            ? null
+                                            : '$username$studentEmailDomain',
+                                      };
+                                    })
+                                    .toList();
 
-                              if (dialogContext.mounted) {
-                                Navigator.of(dialogContext).pop(response);
-                              }
-                            } catch (e) {
-                              setDialogState(() {
-                                saving = false;
-                                saveError = e.toString().replaceFirst(
-                                  'Exception: ',
-                                  '',
-                                );
-                              });
-                            }
-                          },
-                    style: FilledButton.styleFrom(
-                      backgroundColor: CmColors.navy,
-                    ),
-                    child: saving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : Text('Save changes ($changedCount)'),
+                                setDialogState(() {
+                                  saving = true;
+                                  saveError = null;
+                                });
+
+                                try {
+                                  final token = await AuthStorage.getToken();
+                                  if (token == null || token.isEmpty) {
+                                    throw Exception(
+                                      'Authentication token not found.',
+                                    );
+                                  }
+
+                                  final response =
+                                      await ApiService.updateStudentEmails(
+                                        token: token,
+                                        section: section.name,
+                                        updates: updates,
+                                      );
+
+                                  if (dialogContext.mounted) {
+                                    Navigator.of(dialogContext).pop(response);
+                                  }
+                                } catch (e) {
+                                  setDialogState(() {
+                                    saving = false;
+                                    saveError = e.toString().replaceFirst(
+                                      'Exception: ',
+                                      '',
+                                    );
+                                  });
+                                }
+                              },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: CmColors.navy,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        ),
+                        child: saving
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Text('Save changes'),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white24,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Text('$changedCount'),
+                                  ),
+                                ],
+                              ),
+                      ),
+                    ],
                   ),
                 ],
               );

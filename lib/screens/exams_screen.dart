@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import 'exam_builder_screen.dart';
-import 'exams_tab.dart' show pickAndParseQuestionPaper, showExamDetailsModal;
+import 'exams_tab.dart'
+    show
+        showExamDetailsModal,
+        showUploadQuestionnaireModal;
 
 class ExamsScreen extends StatefulWidget {
   const ExamsScreen({super.key});
@@ -98,6 +101,8 @@ class _ExamsScreenState extends State<ExamsScreen> {
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
+      backgroundColor: Colors.white,
+      constraints: const BoxConstraints(maxWidth: 560),
       builder: (sheetContext) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
@@ -107,7 +112,9 @@ class _ExamsScreenState extends State<ExamsScreen> {
             children: [
               Text(
                 'Create Exam',
-                style: Theme.of(sheetContext).textTheme.titleLarge,
+                style: Theme.of(sheetContext).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
               ),
               const SizedBox(height: 12),
               ListTile(
@@ -120,9 +127,9 @@ class _ExamsScreenState extends State<ExamsScreen> {
               ),
               ListTile(
                 leading: const Icon(Icons.picture_as_pdf_outlined),
-                title: const Text('Upload Question Paper PDF'),
+                title: const Text('Upload Questionnaire'),
                 subtitle: const Text(
-                  'Use an existing PDF and configure its answer key.',
+                  'Use a Word template or upload an existing questionnaire.',
                 ),
                 onTap: () => Navigator.pop(sheetContext, 'pdf'),
               ),
@@ -135,7 +142,7 @@ class _ExamsScreenState extends State<ExamsScreen> {
     if (choice == 'builder') {
       await _showAddExamDialog();
     } else if (choice == 'pdf') {
-      final parsedPaper = await pickAndParseQuestionPaper(context);
+      final parsedPaper = await showUploadQuestionnaireModal(context);
       if (parsedPaper == null || !mounted) return;
       int? selectedClassId;
       if (_selectedSection != null) {

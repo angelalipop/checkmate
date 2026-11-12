@@ -7,9 +7,11 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import 'assessment_validator.dart';
+import 'question_paper_import_service.dart';
 import 'sti_logo_data.dart';
 
-/// Shared layout model and generator for CheckMate STI College Questionnaires.
+/// Shared layout model and generator for CheckMate STI College Questionnaires
+/// and Word-editable Questionnaire Templates.
 ///
 /// Supports two distinct STI College assessment layouts based on the uploaded
 /// reference documents:
@@ -21,7 +23,7 @@ import 'sti_logo_data.dart';
 /// Both the on-screen preview / printable PDF ([generate]) and the Microsoft
 /// Word document ([generateDocx]) are rendered from the exact same
 /// [_QuestionPaperPlan] so pagination, column arrangement, headers, notices,
-/// and questions are 100% consistent.
+/// section headings, and continuous question numbers are 100% consistent.
 class QuestionPaperPdfService {
   QuestionPaperPdfService._();
 
@@ -69,11 +71,16 @@ class QuestionPaperPdfService {
     return input
         // Dashes & minus signs -> standard hyphen-minus
         .replaceAll(
-          RegExp(r'[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]'),
+          RegExp(
+            r'[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]',
+          ),
           '-',
         )
         // Bullets & middle dots in plain text -> hyphen or middot
-        .replaceAll(RegExp(r'[\u2022\u2023\u25E6\u2043\u2219\u25AA\u25CF]'), '-')
+        .replaceAll(
+          RegExp(r'[\u2022\u2023\u25E6\u2043\u2219\u25AA\u25CF]'),
+          '-',
+        )
         // Smart single quotes / primes -> straight apostrophe
         .replaceAll(RegExp(r'[\u2018\u2019\u201A\u201B\u2032\u02BC]'), "'")
         // Smart double quotes / double primes -> straight quote
@@ -84,6 +91,125 @@ class QuestionPaperPdfService {
         .replaceAll(RegExp(r'[\u00A0\u2000-\u200A\u202F\u205F\u3000]'), ' ')
         // Zero-width characters -> remove
         .replaceAll(RegExp(r'[\u200B-\u200D\uFEFF]'), '');
+  }
+
+  /// Generates a Word-editable (`.docx`) questionnaire template from the
+  /// teacher-configured [sections].
+  ///
+  /// - Uses CheckMate's Roman-numeral Part headings (`Part I. Multiple Choice - A. 2 pts each`,
+  ///   `Part I. Multiple Choice - B. 3 pts each`, `Part II. Identification`, `Part III. True or False`).
+  /// - Records standalone section point values on a separate instruction line
+  ///   so both the Part heading and point value remain readable in Word and in
+  ///   the exported PDF.
+  /// - Numbers blank question prompts continuously across all sections (`1..N`).
+  /// - Includes four separately labeled `A.`–`D.` choice blanks for Multiple Choice,
+  ///   `Answer (T or F): ______` for True or False, and `Answer: ____________________`
+  ///   for Identification.
+  static Future<Uint8List> generateTemplateDocx({
+    required List<QuestionnaireTemplateSectionConfig> sections,
+    String? title,
+    String? subjectName,
+    String? assessmentType,
+  }) async {
+    final syntheticData = _buildTemplateSyntheticExamData(
+      sections: sections,
+      title: title,
+      subjectName: subjectName,
+      assessmentType: assessmentType,
+    );
+    return generateDocx(
+      exam: syntheticData.exam,
+      sections: syntheticData.sections,
+      questions: syntheticData.questions,
+    );
+  }
+
+  /// Generates a PDF version of the questionnaire template (for testing or
+  /// direct PDF preview/export of a template).
+  static Future<Uint8List> generateTemplatePdf({
+    required List<QuestionnaireTemplateSectionConfig> sections,
+    String? title,
+    String? subjectName,
+    String? assessmentType,
+  }) async {
+    final syntheticData = _buildTemplateSyntheticExamData(
+      sections: sections,
+      title: title,
+      subjectName: subjectName,
+      assessmentType: assessmentType,
+    );
+    return generate(
+      exam: syntheticData.exam,
+      sections: syntheticData.sections,
+      questions: syntheticData.questions,
+    );
+  }
+
+  static _SyntheticExamData _buildTemplateSyntheticExamData({
+    required List<QuestionnaireTemplateSectionConfig> sections,
+    String? title,
+    String? subjectName,
+    String? assessmentType,
+  }) {
+    final resolved = QuestionPaperImportService.resolveTemplateSections(
+      sections,
+    );
+    final examMap = <String, dynamic>{
+      'id': '',
+      'title': (title != null && title.trim().isNotEmpty)
+          ? title.trim()
+          : 'Questionnaire Template',
+      'subject_name': (subjectName != null && subjectName.trim().isNotEmpty)
+          ? subjectName.trim()
+          : 'Subject Name',
+      if (assessmentType != null && assessmentType.trim().isNotEmpty)
+        'assessment_type': assessmentType.trim(),
+      'instructions': defaultInstructionsText,
+    };
+
+    final sectionMaps = <Map<String, dynamic>>[];
+    final questionsBySection = <int, List<Map<String, dynamic>>>{};
+
+    for (var i = 0; i < resolved.length; i++) {
+      final r = resolved[i];
+      final sid = i + 1;
+      sectionMaps.add(<String, dynamic>{
+        'id': sid,
+        'name': r.heading,
+        'question_type': r.questionType,
+        'section_order': r.sectionOrder,
+        'default_points': r.pointsPerItem,
+      });
+
+      final qList = <Map<String, dynamic>>[];
+      for (var n = 0; n < r.itemCount; n++) {
+        final qNum = r.startItem + n;
+        final isTf = r.questionType == 'true_false';
+        qList.add(<String, dynamic>{
+          'id': qNum,
+          'section_id': sid,
+          'question_number': qNum,
+          'question_text': isTf
+              ? '[Write statement here]'
+              : '[Write question here]',
+          'points': r.pointsPerItem,
+          if (r.questionType == 'multiple_choice')
+            'choices': const <String>[
+              '[Write choice A here]',
+              '[Write choice B here]',
+              '[Write choice C here]',
+              '[Write choice D here]',
+            ],
+        });
+      }
+      questionsBySection[sid] = qList;
+    }
+
+    return _SyntheticExamData(
+      exam: examMap,
+      sections: sectionMaps,
+      questions: questionsBySection,
+    );
   }
 
   /// Generates the assessment-specific Questionnaire PDF bytes used by both
@@ -263,6 +389,11 @@ class QuestionPaperPdfService {
       activeSections.add(s);
     }
 
+    final canonicalHeadings =
+        QuestionPaperImportService.computeSectionHeadingsForMaps(
+          activeSections,
+        );
+
     final firstSectionType = activeSections.isNotEmpty
         ? AssessmentValidator.normalizeQuestionType(
             activeSections.first['question_type']?.toString() ??
@@ -290,7 +421,7 @@ class QuestionPaperPdfService {
       ),
     );
 
-    // 2. Active sections & their questions (strictly ordered by question_number)
+    // 2. Active sections & their questions (numbered continuously in section order)
     var globalQuestionNumber = 0;
 
     for (var sIdx = 0; sIdx < activeSections.length; sIdx++) {
@@ -311,10 +442,21 @@ class QuestionPaperPdfService {
             return ida.compareTo(idb);
           });
 
+      final rawSectionName = (section['name']?.toString() ?? '').trim();
+      final sectionHeading =
+          (sIdx < canonicalHeadings.length &&
+              (rawSectionName.isEmpty ||
+                  RegExp(
+                    r'^Part\s+[IVX\d]+[\.\:\-\s]',
+                    caseSensitive: false,
+                  ).hasMatch(rawSectionName)))
+          ? canonicalHeadings[sIdx]
+          : rawSectionName;
+
       final sectionLetter = String.fromCharCode(65 + (sIdx % 26));
       final instructionText = _instructionForQuestionType(
         qType,
-        sectionName: section['name']?.toString(),
+        sectionName: sectionHeading,
       );
       final pointsSummary = _buildSectionPointsHeader(
         sectionLetter: sectionLetter,
@@ -323,9 +465,11 @@ class QuestionPaperPdfService {
       );
 
       final headerBlock = _PaperBlock.sectionHeader(
+        sectionHeading: sectionHeading,
         instructionText: instructionText,
         pointsHeader: pointsSummary,
         estimatedHeight: _estimateSectionHeaderHeight(
+          sectionHeading,
           instructionText,
           pointsSummary,
         ),
@@ -335,10 +479,7 @@ class QuestionPaperPdfService {
       for (var qIdx = 0; qIdx < sectionQuestions.length; qIdx++) {
         globalQuestionNumber++;
         final q = sectionQuestions[qIdx];
-        final displayNumber = activeSections.length == 1
-            ? (int.tryParse(q['question_number']?.toString() ?? '') ??
-                  (qIdx + 1))
-            : globalQuestionNumber;
+        final displayNumber = globalQuestionNumber;
 
         final qText = (q['question_text']?.toString() ?? '').trim();
         final rawChoices = q['choices'];
@@ -369,11 +510,6 @@ class QuestionPaperPdfService {
       }
     }
 
-    // Available height per column on each 8.5 x 13.0 page:
-    // Page height = 936 pt
-    // Margins = 46.8 + 36.0 = 82.8 pt -> usable height = 853.2 pt
-    // Header table + divider + Student Info row = ~98 pt
-    // Remaining column height = ~742 pt
     const maxColumnHeight = 735.0;
 
     final pages = <_QuestionPaperPage>[];
@@ -404,14 +540,13 @@ class QuestionPaperPdfService {
       final block = blocks[i];
       var neededHeight = block.estimatedHeight;
 
-      // Keep a section header together with the first question after it
-      // whenever possible so the header is never orphaned at column bottom.
       if (block.kind == _BlockKind.sectionHeader && i + 1 < blocks.length) {
         neededHeight += blocks[i + 1].estimatedHeight;
       }
 
       final activeList = fillingLeft ? currentLeft : currentRight;
-      if (activeList.isNotEmpty && usedHeight + neededHeight > maxColumnHeight) {
+      if (activeList.isNotEmpty &&
+          usedHeight + neededHeight > maxColumnHeight) {
         advanceColumn();
       }
 
@@ -423,10 +558,7 @@ class QuestionPaperPdfService {
 
     if (currentLeft.isNotEmpty || currentRight.isNotEmpty) {
       pages.add(
-        _QuestionPaperPage(
-          leftColumn: currentLeft,
-          rightColumn: currentRight,
-        ),
+        _QuestionPaperPage(leftColumn: currentLeft, rightColumn: currentRight),
       );
     }
 
@@ -457,13 +589,15 @@ class QuestionPaperPdfService {
 
     final lines = trimmed.split(RegExp(r'\r?\n'));
     final hasNoticeHeader = lines.any(
-      (l) => l.trim().toLowerCase() == 'notice:' ||
+      (l) =>
+          l.trim().toLowerCase() == 'notice:' ||
           l.trim().toLowerCase().startsWith('notice:'),
     );
     final hasBulletLine = lines.any(
-      (l) => RegExp(r'^[\u2022\u2023\u25E6\u2043\u2219\-\*]\s*').hasMatch(
-        l.trim(),
-      ),
+      (l) =>
+          RegExp(r'^[\u2022\u2023\u25E6\u2043\u2219\-\*]\s*').hasMatch(
+            l.trim(),
+          ),
     );
 
     if (hasNoticeHeader || hasBulletLine) {
@@ -507,7 +641,6 @@ class QuestionPaperPdfService {
       );
     }
 
-    // Teacher replaced the entire Instructions box with custom non-bullet text.
     final filteredExtra = lines
         .map((l) => l.trim())
         .where((l) => l.isNotEmpty)
@@ -585,12 +718,10 @@ class QuestionPaperPdfService {
     var semester = clean(exam['semester']);
     if (semester.isEmpty) semester = clean(cls['semester']);
 
-    // Format term & school year line (e.g. "1st Term, SY 2026-2027")
     final formattedTerm = AssessmentValidator.formatSchoolTerm(semester);
     final formattedSy = AssessmentValidator.formatSchoolYear(schoolYear);
     final termAndSyLine = '$formattedTerm, $formattedSy';
 
-    // Examination title or Quiz title
     final String assessmentTitle;
     if (isMajorExam) {
       assessmentTitle = AssessmentValidator.formalExaminationTitle(
@@ -610,17 +741,16 @@ class QuestionPaperPdfService {
         final baseLabel = AssessmentValidator.formalExaminationTitle(
           normalizedType,
         );
-        assessmentTitle =
-            quizNumber.isNotEmpty ? '$baseLabel $quizNumber' : baseLabel;
+        assessmentTitle = quizNumber.isNotEmpty
+            ? '$baseLabel $quizNumber'
+            : baseLabel;
       }
     }
 
-    // Extract Exam day, Exam date, Start/End time, and Reference no.
     final headerDetails = ExamHeaderDetails.fromExam(exam);
     final scheduleDateLine = headerDetails.scheduleDateLine;
     final scheduleTimeLine = headerDetails.scheduleTimeLine;
 
-    // Right-hand header identifier (e.g. "1000014607 — IT2511" or CheckMate ID + Subject Code)
     final examId = clean(exam['id']);
     String rightCodeLine = '';
     if (isMajorExam) {
@@ -683,7 +813,8 @@ class QuestionPaperPdfService {
     final distinctPoints = <double>{};
     var totalSectionPoints = 0.0;
     for (final q in questions) {
-      final p = double.tryParse(q['points']?.toString() ?? '') ??
+      final p =
+          double.tryParse(q['points']?.toString() ?? '') ??
           double.tryParse(section['default_points']?.toString() ?? '') ??
           1.0;
       distinctPoints.add(p);
@@ -692,7 +823,8 @@ class QuestionPaperPdfService {
 
     if (distinctPoints.length <= 1) {
       final pts = distinctPoints.isEmpty
-          ? (double.tryParse(section['default_points']?.toString() ?? '') ?? 1.0)
+          ? (double.tryParse(section['default_points']?.toString() ?? '') ??
+                1.0)
           : distinctPoints.first;
       final ptsStr = _formatNumber(pts);
       final ptWord = pts == 1 ? 'point' : 'points';
@@ -729,7 +861,7 @@ class QuestionPaperPdfService {
     List<String> bullets,
     String customInstructions,
   ) {
-    var lines = showNoticeHeading ? 1 : 0; // "Notice:"
+    var lines = showNoticeHeading ? 1 : 0;
     for (final b in bullets) {
       lines += _estimateWrappedLines(b, 48);
     }
@@ -741,12 +873,21 @@ class QuestionPaperPdfService {
   }
 
   static double _estimateSectionHeaderHeight(
+    String sectionHeading,
     String instructionText,
     String pointsHeader,
   ) {
+    final secLines = sectionHeading.isEmpty
+        ? 0
+        : _estimateWrappedLines(sectionHeading, 44);
     final instLines = _estimateWrappedLines(instructionText, 48);
     final hdrLines = _estimateWrappedLines(pointsHeader, 44);
-    return (instLines * 12.2) + 7.0 + (hdrLines * 12.5) + 8.0;
+    return (secLines * 13.0) +
+        (secLines > 0 ? 4.0 : 0.0) +
+        (instLines * 12.2) +
+        5.0 +
+        (hdrLines * 12.5) +
+        8.0;
   }
 
   static double _estimateQuestionHeight({
@@ -861,8 +1002,6 @@ class QuestionPaperPdfService {
       );
     }
 
-    // Column proportions matching reference Word table:
-    // 2898 : 5940 : 2625 dxa
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.center,
       children: [
@@ -1015,12 +1154,19 @@ class QuestionPaperPdfService {
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
+              if (block.sectionHeading.isNotEmpty) ...[
+                pw.Text(
+                  _sanitizePdfText(block.sectionHeading),
+                  style: boldStyle,
+                ),
+                pw.SizedBox(height: 3),
+              ],
               if (block.instructionText.isNotEmpty) ...[
                 pw.Text(
                   _sanitizePdfText(block.instructionText),
                   style: regStyle,
                 ),
-                pw.SizedBox(height: 7),
+                pw.SizedBox(height: 4),
               ],
               pw.Text(
                 _sanitizePdfText(block.pointsHeader),
@@ -1082,7 +1228,7 @@ class QuestionPaperPdfService {
                 pw.Padding(
                   padding: const pw.EdgeInsets.only(left: 25.2, top: 2),
                   child: pw.Text(
-                    'Answer (True / False): ____________',
+                    'Answer (T or F): ______',
                     style: regStyle,
                   ),
                 ),
@@ -1154,10 +1300,6 @@ class QuestionPaperPdfService {
       sb.write(_buildDocxContentTableXml(page));
     }
 
-    // Page setup matching reference Word documents:
-    // width = 12240 dxa (8.50 in), height = 18720 dxa (13.00 in)
-    // margins: top = 936 dxa (0.65 in), bottom = 720 dxa (0.50 in),
-    // left = 389 dxa (0.27 in), right = 389 dxa (0.27 in)
     sb.write(
       '<w:sectPr>'
       '<w:pgSz w:w="12240" w:h="18720"/>'
@@ -1189,7 +1331,7 @@ class QuestionPaperPdfService {
       '<w:tr>',
     );
 
-    // Cell 0: STI College Logo (inline drawing extent cx="503895" cy="279400")
+    // Cell 0: STI College Logo
     sb.write(
       '<w:tc>'
       '<w:tcPr><w:tcW w:w="2898" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>'
@@ -1231,7 +1373,6 @@ class QuestionPaperPdfService {
       '<w:tcPr><w:tcW w:w="5940" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>',
     );
 
-    // Subject Name (Times New Roman 12pt Bold)
     sb.write(
       '<w:p>'
       '<w:pPr><w:jc w:val="center"/></w:pPr>'
@@ -1427,10 +1568,18 @@ class QuestionPaperPdfService {
         break;
 
       case _BlockKind.sectionHeader:
+        if (block.sectionHeading.isNotEmpty) {
+          sb.write(
+            '<w:p>'
+            '<w:pPr><w:spacing w:before="80" w:after="60"/></w:pPr>'
+            '<w:r><w:rPr><w:b/></w:rPr><w:t>${_xmlEscape(block.sectionHeading)}</w:t></w:r>'
+            '</w:p>',
+          );
+        }
         if (block.instructionText.isNotEmpty) {
           sb.write(
             '<w:p>'
-            '<w:pPr><w:spacing w:after="140"/></w:pPr>'
+            '<w:pPr><w:spacing w:after="100"/></w:pPr>'
             '<w:r><w:t>${_xmlEscape(block.instructionText)}</w:t></w:r>'
             '</w:p>',
           );
@@ -1468,7 +1617,7 @@ class QuestionPaperPdfService {
           sb.write(
             '<w:p>'
             '<w:pPr><w:ind w:left="504"/></w:pPr>'
-            '<w:r><w:t>Answer (True / False): ____________</w:t></w:r>'
+            '<w:r><w:t>Answer (T or F): ______</w:t></w:r>'
             '</w:p>',
           );
         } else if (block.questionType == 'identification') {
@@ -1536,6 +1685,18 @@ class QuestionPaperPdfService {
 // INTERNAL MODELS
 // =============================================================================
 
+class _SyntheticExamData {
+  const _SyntheticExamData({
+    required this.exam,
+    required this.sections,
+    required this.questions,
+  });
+
+  final Map<String, dynamic> exam;
+  final List<Map<String, dynamic>> sections;
+  final Map<int, List<Map<String, dynamic>>> questions;
+}
+
 class _ParsedNotice {
   const _ParsedNotice({
     required this.showNoticeHeading,
@@ -1557,6 +1718,7 @@ class _PaperBlock {
     this.showNoticeHeading = true,
     this.bullets = const <String>[],
     this.customInstructions = '',
+    this.sectionHeading = '',
     this.instructionText = '',
     this.pointsHeader = '',
     this.questionNumber = 0,
@@ -1571,26 +1733,26 @@ class _PaperBlock {
     required List<String> bullets,
     required String customInstructions,
     required double estimatedHeight,
-  }) =>
-      _PaperBlock(
-        kind: _BlockKind.notice,
-        showNoticeHeading: showNoticeHeading,
-        bullets: bullets,
-        customInstructions: customInstructions,
-        estimatedHeight: estimatedHeight,
-      );
+  }) => _PaperBlock(
+    kind: _BlockKind.notice,
+    showNoticeHeading: showNoticeHeading,
+    bullets: bullets,
+    customInstructions: customInstructions,
+    estimatedHeight: estimatedHeight,
+  );
 
   factory _PaperBlock.sectionHeader({
+    required String sectionHeading,
     required String instructionText,
     required String pointsHeader,
     required double estimatedHeight,
-  }) =>
-      _PaperBlock(
-        kind: _BlockKind.sectionHeader,
-        instructionText: instructionText,
-        pointsHeader: pointsHeader,
-        estimatedHeight: estimatedHeight,
-      );
+  }) => _PaperBlock(
+    kind: _BlockKind.sectionHeader,
+    sectionHeading: sectionHeading,
+    instructionText: instructionText,
+    pointsHeader: pointsHeader,
+    estimatedHeight: estimatedHeight,
+  );
 
   factory _PaperBlock.question({
     required int questionNumber,
@@ -1599,22 +1761,22 @@ class _PaperBlock {
     required List<String> choices,
     required bool isFirstInColumn,
     required double estimatedHeight,
-  }) =>
-      _PaperBlock(
-        kind: _BlockKind.question,
-        questionNumber: questionNumber,
-        questionText: questionText,
-        questionType: questionType,
-        choices: choices,
-        isFirstInColumn: isFirstInColumn,
-        estimatedHeight: estimatedHeight,
-      );
+  }) => _PaperBlock(
+    kind: _BlockKind.question,
+    questionNumber: questionNumber,
+    questionText: questionText,
+    questionType: questionType,
+    choices: choices,
+    isFirstInColumn: isFirstInColumn,
+    estimatedHeight: estimatedHeight,
+  );
 
   final _BlockKind kind;
   final double estimatedHeight;
   final bool showNoticeHeading;
   final List<String> bullets;
   final String customInstructions;
+  final String sectionHeading;
   final String instructionText;
   final String pointsHeader;
   final int questionNumber;
@@ -1624,19 +1786,20 @@ class _PaperBlock {
   final bool isFirstInColumn;
 
   _PaperBlock copyWith({bool? isFirstInColumn}) => _PaperBlock(
-        kind: kind,
-        estimatedHeight: estimatedHeight,
-        showNoticeHeading: showNoticeHeading,
-        bullets: bullets,
-        customInstructions: customInstructions,
-        instructionText: instructionText,
-        pointsHeader: pointsHeader,
-        questionNumber: questionNumber,
-        questionText: questionText,
-        questionType: questionType,
-        choices: choices,
-        isFirstInColumn: isFirstInColumn ?? this.isFirstInColumn,
-      );
+    kind: kind,
+    estimatedHeight: estimatedHeight,
+    showNoticeHeading: showNoticeHeading,
+    bullets: bullets,
+    customInstructions: customInstructions,
+    sectionHeading: sectionHeading,
+    instructionText: instructionText,
+    pointsHeader: pointsHeader,
+    questionNumber: questionNumber,
+    questionText: questionText,
+    questionType: questionType,
+    choices: choices,
+    isFirstInColumn: isFirstInColumn ?? this.isFirstInColumn,
+  );
 }
 
 class _QuestionPaperPage {
@@ -1680,10 +1843,7 @@ class _QuestionPaperMetadata {
 }
 
 class _QuestionPaperPlan {
-  const _QuestionPaperPlan({
-    required this.meta,
-    required this.pages,
-  });
+  const _QuestionPaperPlan({required this.meta, required this.pages});
 
   final _QuestionPaperMetadata meta;
   final List<_QuestionPaperPage> pages;

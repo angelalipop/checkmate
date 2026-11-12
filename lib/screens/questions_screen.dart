@@ -27,12 +27,14 @@ class QuestionsScreen extends StatefulWidget {
   final int sectionId;
   final String sectionName;
   final String questionType;
+  final int? aggregateTypeQuestionCount;
 
   const QuestionsScreen({
     super.key,
     required this.sectionId,
     required this.sectionName,
     required this.questionType,
+    this.aggregateTypeQuestionCount,
   });
 
   @override
@@ -790,7 +792,9 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
       );
     }
 
-    final isValidSection = _questions.length >= 5;
+    final effectiveTypeCount =
+        widget.aggregateTypeQuestionCount ?? _questions.length;
+    final isValidSection = effectiveTypeCount >= 5;
     final statusColor = isValidSection
         ? Colors.green.shade700
         : Colors.orange.shade800;
@@ -799,32 +803,34 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
       children: [
         Container(
           width: double.infinity,
-          margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-          padding: const EdgeInsets.all(12),
+          margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: statusColor.withValues(alpha: 0.10),
+            color: statusColor.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: statusColor.withValues(alpha: 0.40)),
+            border: Border.all(color: statusColor.withValues(alpha: 0.4)),
           ),
           child: Row(
             children: [
               Icon(
                 isValidSection
                     ? Icons.check_circle_outline
-                    : Icons.warning_amber_rounded,
+                    : Icons.info_outline,
                 color: statusColor,
+                size: 20,
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   isValidSection
-                      ? '${_formatQuestionType(widget.questionType)}: '
-                        '${_questions.length} / 5 minimum questions met.'
-                      : '${_formatQuestionType(widget.questionType)} requires '
-                        'at least 5 questions (currently ${_questions.length} of 5).',
+                      ? '${_formatQuestionType(widget.questionType)} minimum met '
+                            '(${_questions.length} in this section • $effectiveTypeCount/5 total for type).'
+                      : '${_formatQuestionType(widget.questionType)} requires at least 5 questions '
+                            'across sections of this type (currently $effectiveTypeCount/5; add ${5 - effectiveTypeCount} more).',
                   style: TextStyle(
-                    fontWeight: FontWeight.w600,
                     color: statusColor,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
                   ),
                 ),
               ),
@@ -832,181 +838,118 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
           ),
         ),
         Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: _questions.length,
-            itemBuilder: (
-              context,
-              index,
-            ) {
-              final question = _questions[index];
+          child: RefreshIndicator(
+            onRefresh: _loadQuestions,
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _questions.length,
+              itemBuilder: (context, index) {
+                final question = _questions[index];
 
-              final questionNumber =
-                  question['question_number']?.toString() ?? '${index + 1}';
+                final questionId = int.tryParse(
+                  question['id']?.toString() ?? '',
+                );
 
-              final questionText =
-                  question['question_text']?.toString() ?? 'No question text';
+                final number =
+                    question['question_number']?.toString() ?? '${index + 1}';
 
-              final points = question['points']?.toString() ?? '0';
+                final text = question['question_text']?.toString() ?? '';
 
-              final choices = question['choices'];
+                final points = question['points']?.toString() ?? '1';
 
-              final rawCorrect = question['correct_answer']?.toString();
-              final correctAnswer = widget.questionType == 'identification'
-                  ? rawCorrect?.toUpperCase()
-                  : rawCorrect;
+                final correctAnswer =
+                    question['correct_answer']?.toString() ?? '';
 
-              final questionId = int.tryParse(
-                question['id']?.toString() ?? '',
-              );
+                final choices = question['choices'];
 
-              final acceptableAnswers = questionId == null
-                  ? <Map<String, dynamic>>[]
-                  : _acceptableAnswers[questionId] ?? [];
+                final acceptable = questionId == null
+                    ? <Map<String, dynamic>>[]
+                    : (_acceptableAnswers[questionId] ?? []);
 
-              return Card(
-                key: ValueKey('q-screen-${questionId ?? index}'),
-                margin: const EdgeInsets.only(
-                  bottom: 16,
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          CircleAvatar(
-                            child: Text(
-                              questionNumber,
-                            ),
-                          ),
-                          const SizedBox(
-                            width: 12,
-                          ),
-                          Expanded(
-                            child: Text(
-                              questionText,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Question $number ($points pts)',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
                               ),
                             ),
-                          ),
-                          IconButton(
-                            tooltip: 'Delete question',
-                            icon: const Icon(Icons.delete_outline),
-                            onPressed: questionId == null
-                                ? null
-                                : () => _deleteQuestion(
-                                    questionId,
-                                    questionNumber,
-                                  ),
-                          ),
+                            if (questionId != null)
+                              IconButton(
+                                tooltip: 'Delete question',
+                                icon: const Icon(Icons.delete_outline),
+                                onPressed: () =>
+                                    _deleteQuestion(questionId, number),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(text),
+                        if (choices is List) ...[
+                          const SizedBox(height: 12),
+                          ...choices.asMap().entries.map((entry) {
+                            final letter = String.fromCharCode(
+                              65 + entry.key,
+                            );
+
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: Text('$letter. ${entry.value}'),
+                            );
+                          }),
                         ],
-                      ),
-
-                      const SizedBox(height: 12),
-
-                      Text(
-                        '${_formatQuestionType(widget.questionType)}'
-                        ' • $points pts',
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.primary,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-
-                      if (choices is List && choices.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-
-                        const Text(
-                          'Choices',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-
-                        const SizedBox(height: 6),
-
-                        ...choices.map(
-                          (choice) => Padding(
-                            padding: const EdgeInsets.only(
-                              bottom: 4,
-                            ),
-                            child: Text(
-                              choice.toString(),
-                            ),
-                          ),
-                        ),
-                      ],
-
-                      if (correctAnswer != null &&
-                          correctAnswer.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-
+                        const SizedBox(height: 10),
                         Text(
                           'Correct Answer: $correctAnswer',
                           style: const TextStyle(
                             fontWeight: FontWeight.w600,
+                            color: Colors.green,
                           ),
                         ),
-                      ],
-
-                      if (widget.questionType == 'identification' &&
-                          questionId != null) ...[
-                        const SizedBox(height: 16),
-                        const Divider(),
-                        const SizedBox(height: 8),
-
-                        const Text(
-                          'Acceptable Answers',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                          ),
-                        ),
-
-                        const SizedBox(height: 8),
-
-                        if (acceptableAnswers.isEmpty)
+                        if (widget.questionType == 'identification' &&
+                            questionId != null) ...[
+                          const SizedBox(height: 12),
                           const Text(
-                            'No additional acceptable answers.',
-                          )
-                        else
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: acceptableAnswers.map(
-                              (answer) {
-                                return Chip(
-                                  label: Text(
-                                    (answer['answer']?.toString() ?? '')
-                                        .toUpperCase(),
-                                  ),
-                                );
-                              },
-                            ).toList(),
+                            'Acceptable Answers:',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-
-                        const SizedBox(height: 12),
-
-                        OutlinedButton.icon(
-                          onPressed: () => _addAcceptableAnswer(
-                            questionId,
+                          const SizedBox(height: 6),
+                          if (acceptable.isEmpty)
+                            const Text('No additional acceptable answers.'),
+                          ...acceptable.map(
+                            (ans) => Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: Text('• ${ans['answer']}'),
+                            ),
                           ),
-                          icon: const Icon(Icons.add),
-                          label: const Text(
-                            'Add Acceptable Answer',
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton.icon(
+                              onPressed: () => _addAcceptableAnswer(questionId),
+                              icon: const Icon(Icons.add),
+                              label: const Text('Add Acceptable Answer'),
+                            ),
                           ),
-                        ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
         ),
       ],

@@ -7,9 +7,9 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:qr/qr.dart';
 
 import 'answer_sheet_layout.dart';
+import 'question_paper_import_service.dart';
 
 class AnswerSheetPdfService {
-  
   // --------------------------------------------------------------------------
   // A5-STYLE SHEET DIMENSIONS
   // --------------------------------------------------------------------------
@@ -75,24 +75,75 @@ class AnswerSheetPdfService {
     final pdf = pw.Document();
 
     /*
-      Only keep sections that actually contain questions.
+      Sort sections by section_order and id so the answer sheet always matches
+      the questionnaire section order.
     */
-    final activeSections = <Map<String, dynamic>>[];
+    final sortedSections = List<Map<String, dynamic>>.from(sections)
+      ..sort((a, b) {
+        final oa = int.tryParse(a['section_order']?.toString() ?? '') ?? 0;
+        final ob = int.tryParse(b['section_order']?.toString() ?? '') ?? 0;
+        if (oa != ob) return oa.compareTo(ob);
+        final ida = int.tryParse(a['id']?.toString() ?? '') ?? 0;
+        final idb = int.tryParse(b['id']?.toString() ?? '') ?? 0;
+        return ida.compareTo(idb);
+      });
 
-    for (final section in sections) {
+    /*
+      Only keep sections that actually contain questions, and normalize section
+      headings and continuous question numbers across sections so the Answer
+      Sheet and Questionnaire always match.
+    */
+    final rawActiveSections = <Map<String, dynamic>>[];
+    for (final section in sortedSections) {
       final sectionId = int.tryParse(section['id']?.toString() ?? '');
-
-      if (sectionId == null) {
-        continue;
-      }
-
+      if (sectionId == null) continue;
       final sectionQuestions = questions[sectionId] ?? [];
+      if (sectionQuestions.isEmpty) continue;
+      rawActiveSections.add(section);
+    }
 
-      if (sectionQuestions.isEmpty) {
-        continue;
+    final canonicalHeadings =
+        QuestionPaperImportService.computeSectionHeadingsForMaps(
+          rawActiveSections,
+        );
+
+    final activeSections = <Map<String, dynamic>>[];
+    final normalizedQuestions = <int, List<Map<String, dynamic>>>{};
+    var globalQuestionNumber = 0;
+
+    for (var sIdx = 0; sIdx < rawActiveSections.length; sIdx++) {
+      final section = Map<String, dynamic>.from(rawActiveSections[sIdx]);
+      final sectionId = int.parse(section['id'].toString());
+      final rawName = (section['name']?.toString() ?? '').trim();
+      if (sIdx < canonicalHeadings.length &&
+          (rawName.isEmpty ||
+              RegExp(
+                r'^Part\s+[IVX\d]+[\.\:\-\s]',
+                caseSensitive: false,
+              ).hasMatch(rawName))) {
+        section['name'] = canonicalHeadings[sIdx];
       }
-
       activeSections.add(section);
+
+      final rawQList = questions[sectionId] ?? const <Map<String, dynamic>>[];
+      final sortedQs = List<Map<String, dynamic>>.from(rawQList)
+        ..sort((a, b) {
+          final na = int.tryParse(a['question_number']?.toString() ?? '') ?? 0;
+          final nb = int.tryParse(b['question_number']?.toString() ?? '') ?? 0;
+          if (na != nb) return na.compareTo(nb);
+          final ida = int.tryParse(a['id']?.toString() ?? '') ?? 0;
+          final idb = int.tryParse(b['id']?.toString() ?? '') ?? 0;
+          return ida.compareTo(idb);
+        });
+
+      final numberedQs = <Map<String, dynamic>>[];
+      for (final q in sortedQs) {
+        globalQuestionNumber++;
+        final copy = Map<String, dynamic>.from(q);
+        copy['question_number'] = globalQuestionNumber;
+        numberedQs.add(copy);
+      }
+      normalizedQuestions[sectionId] = numberedQs;
     }
 
     /*
@@ -100,7 +151,7 @@ class AnswerSheetPdfService {
     */
     final sheetLayouts = _buildSheetLayouts(
       sections: activeSections,
-      questions: questions,
+      questions: normalizedQuestions,
     );
 
     /*
@@ -117,15 +168,6 @@ class AnswerSheetPdfService {
     final resolvedStudents = _resolveStudents(exam: exam, students: students);
     final defaultSection = _resolveDefaultSection(exam);
 
-    /*
-      Build the ordered list of individual A5 portrait sheets to print.
-      - When students are assigned: each student receives their own A5 sheet(s)
-        populated with their Student Name, Student Number, and Section, and a
-        unique sequential sheetNumber / QR code.
-      - Page 1: Student 1 on the left, Student 2 on the right.
-      - Page 2: Student 3 on the left, Student 4 on the right.
-      - Odd final student: positioned on the left, right side left blank.
-    */
     final pages = <List<_StudentSheetItem?>>[];
     var nextSheetNumber = 1;
 
@@ -212,12 +254,6 @@ class AnswerSheetPdfService {
     final halfPageWidth = a4Landscape.width / 2.0;
     final fullPageHeight = a4Landscape.height;
 
-    /*
-      Two A5 portrait sheets side by side horizontally on one A4 landscape page.
-      Each A5 half of the A4 landscape sheet is 148.5 mm x 210 mm
-      (420.945 pt x 595.28 pt), and centers the exact 397.0 x 559.0 pt
-      answer sheet template without scaling.
-    */
     for (final pageItems in pages) {
       final leftItem = pageItems[0];
       final rightItem = pageItems[1];
@@ -239,7 +275,7 @@ class AnswerSheetPdfService {
                         child: _buildAnswerSheet(
                           exam: exam,
                           sections: activeSections,
-                          questions: questions,
+                          questions: normalizedQuestions,
                           item: leftItem!,
                         ),
                       ),
@@ -253,17 +289,13 @@ class AnswerSheetPdfService {
                               child: _buildAnswerSheet(
                                 exam: exam,
                                 sections: activeSections,
-                                questions: questions,
+                                questions: normalizedQuestions,
                                 item: rightItem,
                               ),
                             ),
                     ),
                   ],
                 ),
-                // Vertical center cutting guide along the exact A4 center line
-                // (x = 420.945 pt), ~12 pt outside both 397x559 A5 sheet borders
-                // so it never touches borders, registration marks, QR codes,
-                // or OMR bubbles.
                 pw.Positioned(
                   left: halfPageWidth - 0.25,
                   top: 0,
@@ -288,7 +320,8 @@ class AnswerSheetPdfService {
     required Map<String, dynamic> exam,
     List<Map<String, dynamic>>? students,
   }) {
-    final source = students ??
+    final source =
+        students ??
         (exam['students'] is List
             ? (exam['students'] as List)
                   .whereType<Map>()
@@ -533,14 +566,6 @@ class AnswerSheetPdfService {
   }) {
     final examId = exam['id']?.toString() ?? '';
 
-    /*
-      Main answer-sheet content.
-
-      Registration markers are NOT part of this Column.
-      They are positioned independently using Stack.
-      Header + student information + gaps consume exactly 95 logical units
-      after sheetPadding (10), so the first section always begins at Y = 105.0.
-    */
     final content = pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
@@ -560,10 +585,6 @@ class AnswerSheetPdfService {
 
         pw.SizedBox(height: 4),
 
-        /*
-          Render only the sections assigned
-          to this particular sheet.
-        */
         ...sections
             .where((section) {
               final sectionId = int.tryParse(section['id']?.toString() ?? '');
@@ -606,36 +627,24 @@ class AnswerSheetPdfService {
             child: content,
           ),
 
-          /*
-            TOP-LEFT
-          */
           pw.Positioned(
             left: _registrationMarkerInset,
             top: _registrationMarkerInset,
             child: _buildRegistrationMarker(),
           ),
 
-          /*
-            TOP-RIGHT
-          */
           pw.Positioned(
             right: _registrationMarkerInset,
             top: _registrationMarkerInset,
             child: _buildRegistrationMarker(),
           ),
 
-          /*
-            BOTTOM-LEFT
-          */
           pw.Positioned(
             left: _registrationMarkerInset,
             bottom: _registrationMarkerInset,
             child: _buildRegistrationMarker(),
           ),
 
-          /*
-            BOTTOM-RIGHT
-          */
           pw.Positioned(
             right: _registrationMarkerInset,
             bottom: _registrationMarkerInset,
@@ -727,12 +736,10 @@ class AnswerSheetPdfService {
   }) {
     return pw.Column(
       children: [
-        // Row 1: Full-width Student Name (accommodates long names)
         _buildLineField('STUDENT NAME', value: studentName),
 
         pw.SizedBox(height: 3),
 
-        // Row 2: Student Number beside Section
         pw.Row(
           children: [
             pw.Expanded(
@@ -809,7 +816,7 @@ class AnswerSheetPdfService {
           padding: const pw.EdgeInsets.symmetric(horizontal: 5),
           decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.8)),
           child: pw.Text(
-            section['name']?.toString().toUpperCase() ?? 'SECTION',
+            section['name']?.toString() ?? 'Section',
             style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold),
           ),
         ),
@@ -889,7 +896,6 @@ class AnswerSheetPdfService {
               child: pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  // One header row per OMR column.
                   pw.SizedBox(
                     height: _omrHeaderHeight,
                     child: pw.Row(
@@ -913,7 +919,6 @@ class AnswerSheetPdfService {
                     ),
                   ),
 
-                  // Actual question rows.
                   ...columnQuestions.map(
                     (question) =>
                         _buildOmrRow(question: question, labels: labels),
@@ -960,19 +965,6 @@ class AnswerSheetPdfService {
   // --------------------------------------------------------------------------
 
   static pw.Widget _buildOmrBubble(String label) {
-    /*
-      IMPORTANT FOR OMR SCANNING
-
-      Every answer option owns a fixed 23-unit-wide cell.
-
-      The 11 x 11 bubble is EXPLICITLY centered horizontally inside that cell.
-      This makes the PDF generator and OMRProcessor use the same deterministic
-      bubble-center formula:
-
-        option cell start + (_answerOptionWidth / 2)
-
-      Do not remove this alignment unless the scanner geometry is changed too.
-    */
     return pw.SizedBox(
       width: _answerOptionWidth,
       child: pw.Align(
