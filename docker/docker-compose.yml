@@ -21,6 +21,8 @@ services:
     build:
       context: ../server
       dockerfile: Dockerfile
+    env_file:
+      - ../server/.env
     container_name: checkmate-api
     restart: unless-stopped
     environment: 

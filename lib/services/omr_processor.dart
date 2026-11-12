@@ -184,7 +184,7 @@ class OMRProcessor {
   // PDF GEOMETRY
   // ==========================================================================
 
-  static const double sheetPadding = 10.0;
+  static const double sheetPadding = 24.0;
 
   static const double bubbleSize = 11.0;
 
@@ -196,13 +196,14 @@ class OMRProcessor {
   static const int sectionRegistrationStep = 2;
   static const int sectionRegistrationRefineRadius = 4;
 
-  static const double omrRowHeight = 17.0;
+  static const double omrRowHeight = 19.0;
+  static const double omrHeaderHeight = 10.0;
 
   static const double sectionTitleHeight = 18.0;
 
   static const double sectionTitleBottomSpacing = 3.0;
 
-  static const double sectionSpacing = 5.0;
+  static const double sectionSpacing = 0.0;
 
   static const double identificationBoxHeight = 18.0;
 
@@ -611,7 +612,10 @@ class OMRProcessor {
        * spacing      = 3
        */
       final double gridStartY =
-          currentY + sectionTitleHeight + sectionTitleBottomSpacing;
+        currentY +
+        sectionTitleHeight +
+        sectionTitleBottomSpacing +
+        omrHeaderHeight;
 
       final int columns = _calculateOmrColumns(questionCount);
 
@@ -731,6 +735,8 @@ class OMRProcessor {
       currentY += sectionTitleHeight;
 
       currentY += sectionTitleBottomSpacing;
+
+      currentY += omrHeaderHeight;
 
       currentY += rows * omrRowHeight;
 

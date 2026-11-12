@@ -980,8 +980,8 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
 
     // Locate exact sub-pixel QR alignment in the top-right box (logical 345, 13, 39x39)
     // across candidate QR versions (Version 2 = 25x25, Version 3 = 29x29).
-    const double baseQrLeft = 345.0;
-    const double baseQrTop = 13.0;
+    const double baseQrLeft = 331.0;
+    const double baseQrTop = 27.0;
     const double baseQrSize = 39.0;
 
     final candidateRefs = <QrImage>[
