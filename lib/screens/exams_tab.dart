@@ -4440,18 +4440,42 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
       final acc = <int, List<_Json>>{};
       var anyMissingKey = false;
 
-      for (final s in sections) {
-        final sid = _id(s['id']);
+      // Fetch questions for all sections concurrently.
+      final questionResults = await Future.wait(
+        sections.map((section) async {
+          final sid = _id(section['id']);
+          if (sid == null) return null;
+
+          final rawList = await ApiService.getQuestions(token, sid);
+
+          return MapEntry(sid, _sortQuestions(rawList));
+        }),
+      );
+
+      // Process the questions.
+      final identificationQuestionIds = <int>[];
+
+      for (var sectionIndex = 0;
+          sectionIndex < sections.length;
+          sectionIndex++) {
+        final section = sections[sectionIndex];
+        final sid = _id(section['id']);
+
         if (sid == null) continue;
-        final rawList = await ApiService.getQuestions(token, sid);
-        final list = _sortQuestions(rawList);
-        final qType = (s['question_type']?.toString() ?? '').trim();
+
+        final result = questionResults[sectionIndex];
+        if (result == null) continue;
+
+        final list = result.value;
+        final qType = (section['question_type']?.toString() ?? '').trim();
 
         for (var idx = 0; idx < list.length; idx++) {
           final q = list[idx];
-          // Ensure question_number is always present and sequential
+
           q['question_number'] ??= idx + 1;
+
           final rawAns = (q['correct_answer']?.toString() ?? '').trim();
+
           if (rawAns.isEmpty || rawAns.toLowerCase() == 'null') {
             anyMissingKey = true;
           } else if (qType == 'identification') {
@@ -4459,15 +4483,18 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
           }
 
           final qid = _id(q['id']);
+
           if (qid != null && qType == 'identification') {
-            final effectiveAns =
-                _pendingAnswerKeys[qid] ??
+            identificationQuestionIds.add(qid);
+
+            final effectiveAns = _pendingAnswerKeys[qid] ??
                 ((rawAns.toLowerCase() == 'null') ? '' : rawAns.toUpperCase());
+
             final existingCtrl = _identificationAnswerControllers[qid];
+
             if (existingCtrl == null) {
-              _identificationAnswerControllers[qid] = TextEditingController(
-                text: effectiveAns,
-              );
+              _identificationAnswerControllers[qid] =
+                  TextEditingController(text: effectiveAns);
             } else if (!_pendingAnswerKeys.containsKey(qid) &&
                 existingCtrl.text != effectiveAns) {
               existingCtrl.text = effectiveAns;
@@ -4476,26 +4503,73 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         }
 
         qs[sid] = list;
-        if (qType == 'identification') {
-          for (final q in list) {
-            final qid = _id(q['id']);
-            if (qid == null) continue;
-            final rawAcc = await ApiService.getAcceptableAnswers(token, qid);
-            for (final a in rawAcc) {
-              if (a['answer'] != null) {
-                a['answer'] = a['answer'].toString().toUpperCase();
-              }
+      }
+
+      // Fetch acceptable answers concurrently.
+      final acceptableResults = await Future.wait(
+        identificationQuestionIds.map((qid) async {
+          final rawAcc = await ApiService.getAcceptableAnswers(token, qid);
+
+          for (final answer in rawAcc) {
+            if (answer['answer'] != null) {
+              answer['answer'] = answer['answer'].toString().toUpperCase();
             }
-            acc[qid] = rawAcc;
           }
-        }
+
+          return MapEntry(qid, rawAcc);
+        }),
+      );
+
+      for (final result in acceptableResults) {
+        acc[result.key] = result.value;
       }
 
       final students = await ApiService.getExamStudents(token, match.first);
+      // Fetch classes and subjects for the answer sheet PDF header.
+        final allClasses = await ApiService.getClasses(token);
 
+        final examWithHeaders = Map<String, dynamic>.from(match.first);
+
+        // Get the class IDs assigned to this exam.
+        final classIds = <int>{};
+
+        final rawClassIds = examWithHeaders['class_ids'];
+
+        if (rawClassIds is List) {
+          for (final id in rawClassIds) {
+            final parsedId = _id(id);
+            if (parsedId != null) classIds.add(parsedId);
+          }
+        }
+
+        // Support exams assigned to a single class.
+        final singleClassId = _id(examWithHeaders['class_id']);
+        if (singleClassId != null) {
+          classIds.add(singleClassId);
+        }
+
+        // Match the assigned classes.
+        final matchingClasses = allClasses.where((classItem) {
+          final classId = _id(classItem['id']);
+          return classId != null && classIds.contains(classId);
+        }).toList();
+
+        // Get the subject IDs from the matching classes.
+        final matchingSubjects = matchingClasses
+          .map((classItem) => classItem['subject'])
+          .whereType<Map>()
+          .map((subject) => Map<String, dynamic>.from(subject))
+          .toList();
+
+        // Attach the data to the exam for PDF generation.
+        examWithHeaders['header_classes'] = matchingClasses;
+        examWithHeaders['header_subjects'] = matchingSubjects;
+
+        print('PDF HEADER CLASSES: ${examWithHeaders['header_classes']}');
+        print('PDF HEADER SUBJECTS: ${examWithHeaders['header_subjects']}');
       if (!mounted) return;
       setState(() {
-        _exam = match.first;
+        _exam = examWithHeaders;
         _sections = sections;
         if (_expandedId == null && sections.isNotEmpty) {
           _expandedId = _id(sections.first['id']);
@@ -4656,22 +4730,30 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
   // ---------- PDFs & Word (.docx) ----------
 
   Future<Uint8List> _generate({required bool answerSheet}) async {
-    final exam = _exam;
-    if (exam == null) throw Exception('Exam not loaded.');
-    if (answerSheet) {
-      return await AnswerSheetPdfService.generate(
-        exam: exam,
-        sections: _sections,
-        questions: _questions,
-        students: _students,
-      );
-    }
-    return await QuestionPaperPdfService.generate(
+  final exam = _exam;
+
+  if (exam == null) {
+    throw Exception('Exam not loaded.');
+  }
+
+  print('GENERATING PDF SUBJECTS: ${exam['header_subjects']}');
+  print('GENERATING PDF CLASSES: ${exam['header_classes']}');
+
+  if (answerSheet) {
+    return await AnswerSheetPdfService.generate(
       exam: exam,
       sections: _sections,
       questions: _questions,
+      students: _students,
     );
   }
+
+  return await QuestionPaperPdfService.generate(
+    exam: exam,
+    sections: _sections,
+    questions: _questions,
+  );
+}
 
   String _docFileName(String prefix, String ext) {
     final title = (_exam?['title']?.toString() ?? 'exam')

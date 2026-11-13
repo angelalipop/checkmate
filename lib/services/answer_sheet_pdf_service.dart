@@ -1,7 +1,5 @@
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show debugPrint;
-
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:qr/qr.dart';
@@ -478,19 +476,6 @@ class AnswerSheetPdfService {
         questionCount: sectionQuestions.length,
       );
 
-      debugPrint('--- ANSWER SHEET PAGINATION DEBUG ---');
-      debugPrint('Section: ${section['name']}');
-      debugPrint('Type: $type');
-      debugPrint('Questions: ${sectionQuestions.length}');
-      debugPrint('Section height: $sectionHeight');
-      debugPrint('Used height before section: $usedHeight');
-      debugPrint('Available height: ${_usableSheetHeight()}');
-      debugPrint('Total if added: ${usedHeight + sectionHeight}');
-      debugPrint(
-        'Will move to next sheet: '
-        '${currentSheet.isNotEmpty && usedHeight + sectionHeight > _usableSheetHeight()}',
-      );
-
       if (currentSheet.isNotEmpty &&
           usedHeight + sectionHeight > _usableSheetHeight()) {
         layouts.add(currentSheet);
@@ -569,11 +554,7 @@ class AnswerSheetPdfService {
     final content = pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        _buildHeader(
-          exam: exam,
-          examId: examId,
-          sheetNumber: item.sheetNumber,
-        ),
+        _buildHeader(exam: exam, examId: examId, sheetNumber: item.sheetNumber),
 
         pw.SizedBox(height: 3),
 
@@ -660,14 +641,44 @@ class AnswerSheetPdfService {
   // --------------------------------------------------------------------------
 
   static pw.Widget _buildHeader({
+    
     required Map<String, dynamic> exam,
     required String examId,
     required int sheetNumber,
   }) {
     final sheetId = 'CHECKMATE-EXAM-$examId-SHEET-$sheetNumber';
 
+    final classes = exam['header_classes'] is List
+        ? (exam['header_classes'] as List).whereType<Map>().toList()
+        : <Map>[];
+
+    final subjects = exam['header_subjects'] is List
+        ? (exam['header_subjects'] as List).whereType<Map>().toList()
+        : <Map>[];
+
+    final subjectNames = subjects
+        .map((subject) => subject['name']?.toString().trim() ?? '')
+        .where((name) => name.isNotEmpty)
+        .toSet()
+        .join(', ');
+    final sections = classes
+        .map((classItem) => classItem['section']?.toString().trim() ?? '')
+        .where((section) => section.isNotEmpty)
+        .toSet()
+        .join(', ');
+
+    final schoolYears = classes
+        .map((classItem) => classItem['school_year']?.toString().trim() ?? '')
+        .where((year) => year.isNotEmpty)
+        .toSet()
+        .join(', ');
+    final semesters = classes
+        .map((classItem) => classItem['semester']?.toString().trim() ?? '')
+        .where((semester) => semester.isNotEmpty)
+        .toSet()
+        .join(', ');
     return pw.SizedBox(
-      height: 45,
+      height: 55,
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -683,9 +694,7 @@ class AnswerSheetPdfService {
                     fontWeight: pw.FontWeight.bold,
                   ),
                 ),
-
                 pw.SizedBox(height: 2),
-
                 pw.Text(
                   exam['title']?.toString() ?? 'Exam',
                   style: pw.TextStyle(
@@ -694,31 +703,32 @@ class AnswerSheetPdfService {
                   ),
                   maxLines: 1,
                 ),
-
-                pw.SizedBox(height: 2),
-
+                if (subjectNames.isNotEmpty)
+                  pw.Text(
+                    'Subject: $subjectNames',
+                    style: const pw.TextStyle(fontSize: 6),
+                    maxLines: 1,
+                  ),
+                if (schoolYears.isNotEmpty)
+                  pw.Text(
+                    'School Year: $schoolYears',
+                    style: const pw.TextStyle(fontSize: 6),
+                    maxLines: 1,
+                  ),
+                if (semesters.isNotEmpty)
+                  pw.Text(
+                    'Semester: $semesters',
+                    style: const pw.TextStyle(fontSize: 6),
+                    maxLines: 1,
+                  ),
                 pw.Text(
-                  'Exam ID: $examId',
+                  'Exam ID: $examId  |  Sheet $sheetNumber',
                   style: const pw.TextStyle(fontSize: 6),
                 ),
-
-                pw.SizedBox(height: 2),
-
-                pw.Text(
-                  'Sheet $sheetNumber',
-                  style: pw.TextStyle(
-                    fontSize: 6,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-
-                pw.SizedBox(height: 2),
-
-                pw.Text(sheetId, style: const pw.TextStyle(fontSize: 4.5)),
+                //pw.Text(sheetId, style: const pw.TextStyle(fontSize: 4.5)),
               ],
             ),
           ),
-
           _buildQrCode(sheetId),
         ],
       ),
@@ -748,9 +758,7 @@ class AnswerSheetPdfService {
 
             pw.SizedBox(width: 6),
 
-            pw.Expanded(
-              child: _buildLineField('SECTION', value: sectionName),
-            ),
+            pw.Expanded(child: _buildLineField('SECTION', value: sectionName)),
           ],
         ),
       ],
@@ -1036,7 +1044,7 @@ class AnswerSheetPdfService {
     return pw.Container(
       width: 45,
       height: 45,
-      padding: const pw.EdgeInsets.all(3),
+      padding: const pw.EdgeInsets.all(2.2),
       decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.8)),
       child: pw.CustomPaint(
         size: const PdfPoint(39, 39),
