@@ -705,19 +705,19 @@ class AnswerSheetPdfService {
                 ),
                 if (subjectNames.isNotEmpty)
                   pw.Text(
-                    'Subject: $subjectNames',
+                    '$subjectNames',
                     style: const pw.TextStyle(fontSize: 6),
                     maxLines: 1,
                   ),
                 if (schoolYears.isNotEmpty)
                   pw.Text(
-                    'School Year: $schoolYears',
+                    'SY$schoolYears',
                     style: const pw.TextStyle(fontSize: 6),
                     maxLines: 1,
                   ),
                 if (semesters.isNotEmpty)
                   pw.Text(
-                    'Semester: $semesters',
+                    '$semesters',
                     style: const pw.TextStyle(fontSize: 6),
                     maxLines: 1,
                   ),

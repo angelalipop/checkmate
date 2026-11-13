@@ -61,6 +61,15 @@ class AnswerSheetProcessor {
    */
   static const double _darkThreshold = 125.0;
 
+  static List<RegistrationPoint>? detectLiveMarkers(img.Image image) {
+  try {
+    return _detectRegistrationMarkers(image, verbose: false);
+  } catch (_) {
+    // A partially visible sheet is normal while the user is positioning it.
+    return null;
+  }
+}
+
   // ---------------------------------------------------------------------------
   // PUBLIC PROCESSOR
   // ---------------------------------------------------------------------------
@@ -118,7 +127,10 @@ class AnswerSheetProcessor {
   // MARKER DETECTION
   // ---------------------------------------------------------------------------
 
-  static List<RegistrationPoint> _detectRegistrationMarkers(img.Image image) {
+  static List<RegistrationPoint> _detectRegistrationMarkers(
+      img.Image image, {
+      bool verbose = true,
+    }) {
     final int width = image.width;
     final int height = image.height;
 
@@ -171,7 +183,7 @@ class AnswerSheetProcessor {
         <List<_MarkerCandidate>>[];
 
     for (final _CornerRegion region in regions) {
-      final List<_MarkerCandidate> candidates = _findCandidates(image, region);
+      final List<_MarkerCandidate> candidates = _findCandidates(image, region, verbose: verbose);
 
       if (candidates.isEmpty) {
         throw Exception(
@@ -188,7 +200,11 @@ class AnswerSheetProcessor {
      * Select the four markers as a SET so their sizes and page geometry can
      * also be compared.
      */
-    final _MarkerSet? bestSet = _selectBestMarkerSet(image, candidatesByCorner);
+    final _MarkerSet? bestSet = _selectBestMarkerSet(
+      image,
+      candidatesByCorner,
+      verbose: verbose,
+    );
 
     if (bestSet == null) {
       throw Exception(
@@ -215,9 +231,10 @@ class AnswerSheetProcessor {
   }
 
   static List<_MarkerCandidate> _findCandidates(
-    img.Image image,
-    _CornerRegion region,
-  ) {
+  img.Image image,
+  _CornerRegion region, {
+  bool verbose = true,
+}) {
     final int minX = math.max(0, region.minX.floor());
 
     final int maxX = math.min(image.width - 1, region.maxX.ceil());
@@ -370,18 +387,19 @@ class AnswerSheetProcessor {
 
   static _MarkerSet? _selectBestMarkerSet(
     img.Image image,
-    List<List<_MarkerCandidate>> candidates,
-  ) {
-    if (candidates.length != 4) {
+    List<List<_MarkerCandidate>> candidatesByCorner, {
+    bool verbose = true,
+  }) {
+    if (candidatesByCorner.length != 4) {
       return null;
     }
 
     _MarkerSet? best;
 
-    for (final _MarkerCandidate tl in candidates[0]) {
-      for (final _MarkerCandidate tr in candidates[1]) {
-        for (final _MarkerCandidate br in candidates[2]) {
-          for (final _MarkerCandidate bl in candidates[3]) {
+    for (final _MarkerCandidate tl in candidatesByCorner[0]) {
+      for (final _MarkerCandidate tr in candidatesByCorner[1]) {
+        for (final _MarkerCandidate br in candidatesByCorner[2]) {
+          for (final _MarkerCandidate bl in candidatesByCorner[3]) {
             final _MarkerSet set = _MarkerSet(
               topLeft: tl,
               topRight: tr,

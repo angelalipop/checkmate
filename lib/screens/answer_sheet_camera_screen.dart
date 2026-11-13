@@ -1,14 +1,19 @@
 
 import 'dart:typed_data';
 import 'dart:math' as math;
-
+import 'package:flutter/foundation.dart';
 import 'package:camera/camera.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 
+import 'package:flutter/foundation.dart';
+import 'package:image/image.dart' as img;
+import 'package:checkmate/services/answer_sheet_processor.dart';
+
 import 'package:checkmate/screens/answer_sheet_upload_screen.dart';
+import 'package:checkmate/services/answer_sheet_processor.dart';
 
 const Color _kNavy = Color(0xFF1E293B);
 const Color _kNavyDark = Color(0xFF162137);
@@ -48,6 +53,17 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
   bool _isProcessing = false;
   bool _hasError = false;
 
+  bool _isAnalyzingFrame = false;
+  bool _autoCaptureTriggered = false;
+
+  int _stableFrameCount = 0;
+
+  DateTime _lastFrameCheck = DateTime.fromMillisecondsSinceEpoch(0);
+
+  List<Offset>? _previousNormalizedMarkers;
+
+  String _markerStatus = 'Position the answer sheet';
+
   String? _errorMessage;
 
   Uint8List? _capturedImageBytes;
@@ -62,74 +78,281 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
     _initializeCamera();
   }
 
-  Future<void> _initializeCamera() async {
+  Future<void> _startLiveMarkerDetection(
+  CameraController controller,
+  ) async {
+    if (defaultTargetPlatform != TargetPlatform.iOS ||
+        !controller.value.isInitialized ||
+        controller.value.isStreamingImages) {
+      return;
+    }
+
+    _stableFrameCount = 0;
+    _previousNormalizedMarkers = null;
+    _autoCaptureTriggered = false;
+    _markerStatus = 'Position the answer sheet';
+
     try {
-      final cameras = await availableCameras();
+      debugPrint('CHECKMATE: Attempting to start iPhone image stream');
+      await controller.startImageStream((CameraImage image) {
+        debugPrint(
+          'CHECKMATE: Camera frame received '
+          '${image.width}x${image.height}, '
+          'format: ${image.format.group}',
+        );
 
-      if (cameras.isEmpty) {
-        throw Exception('No camera was found on this device.');
+        _analyzeCameraFrame(image);
+      });
+
+debugPrint('CHECKMATE: Live camera stream started');
+    } catch (e) {
+      debugPrint('CHECKMATE LIVE DETECTION ERROR: $e');
+
+      if (mounted) {
+        setState(() {
+          _markerStatus = 'Automatic capture unavailable. Use the shutter.';
+        });
       }
+    }
+  }
 
-      CameraDescription selectedCamera = cameras.first;
 
-      for (final camera in cameras) {
-        if (camera.lensDirection == CameraLensDirection.back) {
-          selectedCamera = camera;
+img.Image? _convertBgraFrame(CameraImage cameraImage) {
+  if (cameraImage.format.group != ImageFormatGroup.bgra8888 ||
+      cameraImage.planes.isEmpty) {
+    return null;
+  }
+
+  final plane = cameraImage.planes.first;
+  final bytesPerPixel = plane.bytesPerPixel ?? 4;
+
+  if (bytesPerPixel < 4) return null;
+
+  const maxDimension = 360;
+
+  final scale = math.max(
+    cameraImage.width / maxDimension,
+    cameraImage.height / maxDimension,
+  );
+
+  final targetWidth =
+      (cameraImage.width / scale).round().clamp(1, maxDimension);
+
+  final targetHeight =
+      (cameraImage.height / scale).round().clamp(1, maxDimension);
+
+  final result = img.Image(
+    width: targetWidth,
+    height: targetHeight,
+    numChannels: 3,
+  );
+
+  for (int y = 0; y < targetHeight; y++) {
+    final sourceY = (y * cameraImage.height / targetHeight).floor();
+
+    for (int x = 0; x < targetWidth; x++) {
+      final sourceX = (x * cameraImage.width / targetWidth).floor();
+
+      final offset =
+          sourceY * plane.bytesPerRow + sourceX * bytesPerPixel;
+
+      if (offset + 2 >= plane.bytes.length) return null;
+
+      final blue = plane.bytes[offset];
+      final green = plane.bytes[offset + 1];
+      final red = plane.bytes[offset + 2];
+
+      result.setPixelRgb(x, y, red, green, blue);
+    }
+  }
+
+  if (result.width > result.height) {
+    return img.copyRotate(result, angle: 90);
+  }
+
+  return result;
+}
+
+Future<void> _analyzeCameraFrame(CameraImage cameraImage) async {
+  if (!mounted ||
+      _autoCaptureTriggered ||
+      _isTakingPicture ||
+      _isProcessing ||
+      _isAnalyzingFrame) {
+    return;
+  }
+
+  final now = DateTime.now();
+
+  if (now.difference(_lastFrameCheck).inMilliseconds < 200) {
+    return;
+  }
+
+  _lastFrameCheck = now;
+  _isAnalyzingFrame = true;
+
+  try {
+    final frame = _convertBgraFrame(cameraImage);
+    debugPrint(
+      'CHECKMATE: Frame conversion ${frame == null ? "FAILED" : "SUCCESS"}',
+    );
+    if (frame == null) {
+      _stableFrameCount = 0;
+      _previousNormalizedMarkers = null;
+      if (mounted) {
+        setState(() {
+          _markerStatus = 'Automatic detection unavailable. Use the shutter.';
+        });
+      }
+      return;
+    }
+
+    final markers = AnswerSheetProcessor.detectLiveMarkers(frame);
+    debugPrint(
+      'CHECKMATE: Markers detected: ${markers?.length ?? 0}',
+    );
+    if (markers == null || markers.length != 4) {
+      _stableFrameCount = 0;
+      _previousNormalizedMarkers = null;
+
+      if (mounted) {
+        setState(() {
+          _markerStatus = 'Align all four corner markers';
+        });
+      }
+      return;
+    }
+
+    final currentMarkers = markers.map((marker) {
+      return Offset(
+        marker.x / frame.width,
+        marker.y / frame.height,
+      );
+    }).toList();
+
+    bool stable = false;
+
+    if (_previousNormalizedMarkers != null &&
+        _previousNormalizedMarkers!.length == 4) {
+      stable = true;
+
+      for (int i = 0; i < 4; i++) {
+        final dx = (currentMarkers[i].dx -
+                _previousNormalizedMarkers![i].dx)
+            .abs();
+
+        final dy = (currentMarkers[i].dy -
+                _previousNormalizedMarkers![i].dy)
+            .abs();
+
+        if (dx > 0.015 || dy > 0.015) {
+          stable = false;
           break;
         }
       }
+    }
 
-      Future<void> _pickFromGallery() async {
-        try {
-          final ImagePicker picker = ImagePicker();
+    _stableFrameCount = stable ? _stableFrameCount + 1 : 1;
+      _previousNormalizedMarkers = currentMarkers;
 
-          final XFile? image = await picker.pickImage(
-            source: ImageSource.gallery,
-            imageQuality: 100,
-          );
-
-          if (image == null) return;
-
-          final Uint8List imageBytes = await image.readAsBytes();
-
-          debugPrint('[CheckMate] Gallery image selected: ${image.name}');
-
-          // We will connect this to your existing scanner processing function.
-        } catch (e) {
-          debugPrint('[CheckMate] Gallery error: $e');
-        }
-      }
-
-      final controller = CameraController(
-        selectedCamera,
-        ResolutionPreset.high,
-        enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.jpeg,
+      debugPrint(
+        'CHECKMATE: Stable frames: $_stableFrameCount/5',
       );
 
-      await controller.initialize();
-      await controller.setFlashMode(_flashMode);
+    if (_stableFrameCount >= 5) {
+      debugPrint('CHECKMATE: AUTO-CAPTURE TRIGGERED');
 
-      if (!mounted) {
-        await controller.dispose();
-        return;
+      _autoCaptureTriggered = true;
+
+      if (mounted) {
+        setState(() {
+          _markerStatus = 'Capturing automatically...';
+        });
       }
 
-      setState(() {
-        _cameraController = controller;
-        _isInitializing = false;
-        _hasError = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
+      await _takePicture(automatic: true);
+      return;
+    }
 
+    if (mounted) {
       setState(() {
-        _isInitializing = false;
-        _hasError = true;
-        _errorMessage = e.toString();
+        _markerStatus = stable
+            ? 'Hold still... ($_stableFrameCount/5)'
+            : 'Four markers detected. Hold still...';
       });
     }
+  } catch (e) {
+    debugPrint('CHECKMATE FRAME ANALYSIS ERROR: $e');
+  } finally {
+    _isAnalyzingFrame = false;
   }
+}
+
+
+  Future<void> _initializeCamera() async {
+  CameraController? controller;
+
+  try {
+    final cameras = await availableCameras();
+
+    if (cameras.isEmpty) {
+      throw Exception('No camera was found on this device.');
+    }
+
+    CameraDescription selectedCamera = cameras.first;
+
+    for (final camera in cameras) {
+      if (camera.lensDirection == CameraLensDirection.back) {
+        selectedCamera = camera;
+        break;
+      }
+    }
+
+    controller = CameraController(
+      selectedCamera,
+      ResolutionPreset.high,
+      enableAudio: false,
+      imageFormatGroup: defaultTargetPlatform == TargetPlatform.iOS
+          ? ImageFormatGroup.bgra8888
+          : ImageFormatGroup.jpeg,
+    );
+
+    await controller.initialize();
+    await controller.setFlashMode(_flashMode);
+
+    if (!mounted) {
+      await controller.dispose();
+      return;
+    }
+
+    // Assign the controller BEFORE starting the image stream.
+    setState(() {
+      _cameraController = controller;
+      _isInitializing = false;
+      _hasError = false;
+    });
+
+    debugPrint('CHECKMATE: Camera initialized successfully');
+
+    // Start automatic detection only after initialization.
+    await _startLiveMarkerDetection(controller);
+  } catch (e) {
+    debugPrint('CHECKMATE CAMERA INITIALIZATION ERROR: $e');
+
+    if (controller != null) {
+      await controller.dispose();
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      _cameraController = null;
+      _isInitializing = false;
+      _hasError = true;
+      _errorMessage = e.toString();
+    });
+  }
+}
 
   Future<void> _toggleFlash() async {
     final controller = _cameraController;
@@ -307,7 +530,7 @@ Future<void> _chooseFromGallery() async {
   // TAKE PICTURE
   // ============================================================
 
-  Future<void> _takePicture() async {
+  Future<void> _takePicture({bool automatic = false}) async {
     final controller = _cameraController;
 
     if (controller == null ||
@@ -318,6 +541,9 @@ Future<void> _chooseFromGallery() async {
 
     try {
       setState(() => _isTakingPicture = true);
+      if (controller.value.isStreamingImages) {
+        await controller.stopImageStream();
+      }
 
       final XFile image = await controller.takePicture();
       final Uint8List imageBytes = await image.readAsBytes();
@@ -421,14 +647,36 @@ Future<void> _chooseFromGallery() async {
     }
   }
 
-  void _retakePicture() {
-    _resetZoom();
+  Future<void> _retakePicture() async {
+  final controller = _cameraController;
 
-    setState(() {
-      _capturedImageBytes = null;
-      _isProcessing = false;
-    });
+  if (!mounted || controller == null || !controller.value.isInitialized) {
+    return;
   }
+
+  setState(() {
+    _capturedImageBytes = null;
+    _isProcessing = false;
+    _isTakingPicture = false;
+    _markerStatus = 'Position the answer sheet';
+  });
+
+  _stableFrameCount = 0;
+  _previousNormalizedMarkers = null;
+  _autoCaptureTriggered = false;
+  _isAnalyzingFrame = false;
+
+  _resetZoom();
+
+  // Restart automatic detection after returning to the camera preview.
+  await Future.delayed(const Duration(milliseconds: 300));
+
+  if (!mounted) return;
+
+  if (!controller.value.isStreamingImages) {
+    await _startLiveMarkerDetection(controller);
+  }
+}
 
   @override
   void dispose() {
