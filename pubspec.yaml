@@ -31,8 +31,10 @@ dependencies:
   archive: ^4.3.0
   xml: ^7.1.0
   syncfusion_flutter_pdf: ^35.1.40
-  google_mlkit_text_recognition: ^0.17.1
   path_provider: ^2.1.6
+  image_picker: ^1.2.4
+  mobile_scanner: ^7.5.0
+  zxing2: ^0.2.4
 dev_dependencies:
   flutter_test:
     sdk: flutter

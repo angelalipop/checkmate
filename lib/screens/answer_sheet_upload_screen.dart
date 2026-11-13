@@ -3,17 +3,21 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:image_picker/image_picker.dart' as image_picker;
 import 'package:flutter/foundation.dart' show kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:qr/qr.dart';
+import 'package:zxing2/qrcode.dart';
+import 'package:zxing2/zxing2.dart';
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
 
 import 'package:checkmate/services/answer_sheet_processor.dart';
 import '../services/answer_sheet_layout.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
-import '../services/mlkit_ocr_service.dart';
 import '../services/my_subjects_api_service.dart';
 import '../services/omr_processor.dart';
 import '../services/opencv_omr_service.dart';
@@ -193,37 +197,100 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   // ------------------------------------------------------------
 
   Future<void> _pickImage() async {
-    const XTypeGroup imageTypeGroup = XTypeGroup(
-      label: 'Images',
-      extensions: ['jpg', 'jpeg', 'png'],
-    );
+    try {
+      Uint8List? bytes;
+      String? pickedFileName;
 
-    final XFile? file = await openFile(
-      acceptedTypeGroups: [imageTypeGroup],
-    );
+      final bool isMobile =
+          !kIsWeb &&
+          (defaultTargetPlatform == TargetPlatform.android ||
+              defaultTargetPlatform == TargetPlatform.iOS);
 
-    if (file == null) return;
+      if (isMobile) {
+        // Ask for confirmation before opening the photo picker.
+        final bool? confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Choose an Answer Sheet'),
+            content: const Text(
+              'CheckMate will open your photo gallery. '
+              'Only the image you select will be accessed.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () =>
+                    Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () =>
+                    Navigator.pop(dialogContext, true),
+                child: const Text('Continue'),
+              ),
+            ],
+          ),
+        );
 
-    final Uint8List bytes = await file.readAsBytes();
-    if (!mounted) return;
+        if (confirmed != true || !mounted) return;
 
-    _decodeSourceDimensions(bytes);
+        final picker = image_picker.ImagePicker();
 
-    setState(() {
-      _imageBytes = bytes;
-      _processedImageBytes = null;
-      _omrDebugImageBytes = null;
-      _detectedMarkers = null;
-      _omrResult = null;
-      _identificationOcrNotice = null;
-      _scoringResult = null;
-      _answersVerified = false;
-      _fileName = file.name;
-      _isProcessing = false;
-    });
+        final selectedImage = await picker.pickImage(
+          source: image_picker.ImageSource.gallery,
+        );
 
-    await _processImage();
+        if (selectedImage == null) return;
+
+        bytes = await selectedImage.readAsBytes();
+        pickedFileName = selectedImage.name;
+      } else {
+        // Web and desktop fallback.
+        const XTypeGroup imageTypeGroup = XTypeGroup(
+          label: 'Images',
+          extensions: ['jpg', 'jpeg', 'png'],
+          uniformTypeIdentifiers: [
+            'public.jpeg',
+            'public.png',
+          ],
+        );
+
+        final XFile? file = await openFile(
+          acceptedTypeGroups: [imageTypeGroup],
+        );
+
+        if (file == null) return;
+
+        bytes = await file.readAsBytes();
+        pickedFileName = file.name;
+      }
+
+      if (!mounted || bytes == null) return;
+
+      _decodeSourceDimensions(bytes);
+
+      setState(() {
+        _imageBytes = bytes;
+        _fileName = pickedFileName;
+        _processedImageBytes = null;
+        _omrDebugImageBytes = null;
+        _detectedMarkers = null;
+        _omrResult = null;
+        _identificationOcrNotice = null;
+        _scoringResult = null;
+        _answersVerified = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unable to select image: $e'),
+        ),
+      );
+    }
   }
+
+
 
   Future<void> _openCameraCapture() async {
     final int? eid = int.tryParse('${widget.examId ?? _exam?['id'] ?? ''}');
@@ -340,23 +407,12 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         sections: widget.sections,
       );
 
-      String? extractedSheetText;
-      if (!kIsWeb) {
-        try {
-          extractedSheetText =
-              await MlKitOcrService.extractTextFromBytes(alignedImageBytes);
-        } catch (_) {
-          extractedSheetText = null;
-        }
-      }
 
       if (!mounted || !identical(_processedImageBytes, alignedImageBytes)) {
         return;
       }
-      _verifyAnswerSheetMatchesAssessment(
-        alignedImageBytes,
-        ocrText: extractedSheetText,
-      );
+      _verifyAnswerSheetMatchesAssessment(alignedImageBytes);
+
       final detected = _convertOpenCVResult(openCVResult);
       final (result, ocrNotice) = await _readIdentificationAnswers(
         alignedImageBytes,
@@ -375,10 +431,8 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         _isProcessing = false;
       });
 
-      await _verifyDetectedAnswers(
-        result,
-        ocrText: extractedSheetText,
-      );
+      await _verifyDetectedAnswers(result);
+
     } catch (e) {
       if (!mounted) return;
 
@@ -476,12 +530,15 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       var nextBox = 0;
       var failed = 0;
 
+      
       Future<void> readBoxes() async {
         while (nextBox < boxes.length &&
             mounted &&
             identical(_processedImageBytes, alignedImageBytes)) {
           if (stopwatch.elapsed >= timeBudget) return;
+
           final (sectionIndex, number, top, bottom) = boxes[nextBox++];
+
           try {
             final crop = img.copyCrop(
               image,
@@ -490,25 +547,68 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
               width: right - left,
               height: bottom - top,
             );
-            final cropBytes = img.encodePng(crop);
-            final remaining = timeBudget - stopwatch.elapsed;
+
+            // First attempt: original crop.
+            final originalBytes = img.encodePng(crop);
+
+            var remaining = timeBudget - stopwatch.elapsed;
+
             if (remaining <= Duration.zero) {
               failed++;
               return;
             }
-            final text = await ApiService.recognizeIdentification(
+
+            var text = await ApiService.recognizeIdentification(
               token: token,
-              imageBytes: cropBytes,
+              imageBytes: originalBytes,
               timeout: remaining,
             );
-            if (text.isNotEmpty) {
-              recognized[(sectionIndex, number)] = text.toUpperCase();
+
+            // Second attempt: enhanced crop, only if the first
+            // attempt returned no recognizable text.
+            if (text.trim().isEmpty) {
+              if (stopwatch.elapsed >= timeBudget) {
+                failed++;
+                continue;
+              }
+
+              final enlargedCrop = img.copyResize(
+                crop,
+                width: crop.width * 2,
+                height: crop.height * 2,
+                interpolation: img.Interpolation.cubic,
+              );
+
+              final enhancedCrop = img.grayscale(enlargedCrop);
+
+              final enhancedBytes = img.encodePng(enhancedCrop);
+
+              remaining = timeBudget - stopwatch.elapsed;
+
+              if (remaining <= Duration.zero) {
+                failed++;
+                continue;
+              }
+
+              text = await ApiService.recognizeIdentification(
+                token: token,
+                imageBytes: enhancedBytes,
+                timeout: remaining,
+              );
+            }
+
+            if (text.trim().isNotEmpty) {
+              recognized[(sectionIndex, number)] =
+                  text.trim().toUpperCase();
+            } else {
+              failed++;
             }
           } catch (_) {
             failed++;
           }
         }
       }
+
 
       // Limit parallel requests and keep a slow OCR service from blocking
       // manual verification indefinitely.
@@ -889,309 +989,238 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   /// 2. Explicit assessment title mismatch in uploaded answer sheet file name.
   /// 3. Top-right QR code (`CHECKMATE-EXAM-<id>-SHEET-<n>` at logical 345..384, 13..52)
   ///    against the selected assessment and all other assessments in [_allExams].
-  void _verifyAnswerSheetMatchesAssessment(
-    Uint8List alignedImageBytes, {
-    String? ocrText,
-  }) {
-    final int? expectedExamId =
-        int.tryParse('${widget.examId ?? _exam?['id'] ?? ''}');
-    if (expectedExamId == null) return;
+  
+void _verifyAnswerSheetMatchesAssessment(
+  Uint8List alignedImageBytes, {
+  String? ocrText,
+}) {
+  final int? expectedExamId =
+      int.tryParse('${widget.examId ?? _exam?['id'] ?? ''}');
+  if (expectedExamId == null) return;
 
-    final expectedTitle = _examTitle();
-    _detectedQrSheetNumber = null;
+  final expectedTitle = _examTitle();
+  _detectedQrSheetNumber = null;
 
-    // 1. Check OCR text & file name for explicit CHECKMATE-EXAM-<id> or Exam ID: <id>
-    final combinedText = <String>[
-      if (_fileName != null) _fileName!,
-      if (ocrText != null) ocrText,
-    ].join(' ');
+  // 1. Check OCR text and file name for explicit exam IDs.
+  final combinedText = <String>[
+    if (_fileName != null) _fileName!,
+    if (ocrText != null) ocrText,
+  ].join(' ');
 
-    final checkmateIdMatches = RegExp(
-      r'CHECKMATE[-_\s]*EXAM[-_\s]*(\d+)',
-      caseSensitive: false,
-    ).allMatches(combinedText);
-    for (final m in checkmateIdMatches) {
-      final foundId = int.tryParse(m.group(1) ?? '');
-      if (foundId != null && foundId != expectedExamId) {
-        final otherLabel = _lookupExamLabel(foundId);
-        throw Exception(
-          'Invalid Answer Sheet: This answer sheet belongs to "$otherLabel" '
-          '(Exam ID: $foundId), not "$expectedTitle" (Exam ID: $expectedExamId). '
-          'Only the 1-to-1 answer sheet for "$expectedTitle" is accepted.',
-        );
-      }
-    }
+  final checkmateIdMatches = RegExp(
+    r'CHECKMATE[-_\s]*EXAM[-_\s]*(\d+)',
+    caseSensitive: false,
+  ).allMatches(combinedText);
 
-    final examIdMatches = RegExp(
-      r'Exam\s*ID\s*[:#-]?\s*(\d+)',
-      caseSensitive: false,
-    ).allMatches(combinedText);
-    for (final m in examIdMatches) {
-      final foundId = int.tryParse(m.group(1) ?? '');
-      if (foundId != null && foundId != expectedExamId) {
-        final otherLabel = _lookupExamLabel(foundId);
-        throw Exception(
-          'Invalid Answer Sheet: This answer sheet belongs to "$otherLabel" '
-          '(Exam ID: $foundId), not "$expectedTitle" (Exam ID: $expectedExamId). '
-          'Only the 1-to-1 answer sheet for "$expectedTitle" is accepted.',
-        );
-      }
-    }
-
-    // Check if the uploaded file name explicitly names a different assessment title.
-    final rawFileName = (_fileName ?? '').trim();
-    if (rawFileName.isNotEmpty &&
-        rawFileName.toLowerCase() != 'camera capture.jpg' &&
-        rawFileName.toLowerCase() != 'gallery.jpg') {
-      final normFile = rawFileName
-          .toLowerCase()
-          .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-          .trim();
-      final normExpected = expectedTitle
-          .toLowerCase()
-          .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-          .trim();
-      if (normExpected.length >= 4 && !normFile.contains(normExpected)) {
-        for (final other in _allExams) {
-          final oid = int.tryParse('${other['id']}');
-          if (oid == null || oid == expectedExamId) continue;
-          final otherTitle = (other['title']?.toString() ?? '').trim();
-          final normOther = otherTitle
-              .toLowerCase()
-              .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-              .trim();
-          if (normOther.length >= 5 && normFile.contains(normOther)) {
-            throw Exception(
-              'Invalid Answer Sheet: The file "$rawFileName" is for "$otherTitle", '
-              'not "$expectedTitle". Only the 1-to-1 answer sheet for "$expectedTitle" '
-              'is accepted.',
-            );
-          }
-        }
-      }
-    }
-
-    // 2. Top-Right QR Code Matrix Verification on the aligned 1500x2129 sheet.
-    final decoded = img.decodeImage(alignedImageBytes);
-    if (decoded == null) return;
-
-    final double scaleX = decoded.width / AnswerSheetLayout.sheetWidth;
-    final double scaleY = decoded.height / AnswerSheetLayout.sheetHeight;
-
-    // Locate exact sub-pixel QR alignment in the top-right box (logical 345, 13, 39x39)
-    // across candidate QR versions (Version 2 = 25x25, Version 3 = 29x29).
-    const double baseQrLeft = 331.0;
-    const double baseQrTop = 27.0;
-    const double baseQrSize = 39.0;
-
-    final candidateRefs = <QrImage>[
-      QrImage(
-        QrCode.fromData(
-          data: 'CHECKMATE-EXAM-$expectedExamId-SHEET-1',
-          errorCorrectLevel: QrErrorCorrectLevel.M,
-        ),
-      ),
-      QrImage(
-        QrCode.fromData(
-          data: 'CHECKMATE-EXAM-100-SHEET-10',
-          errorCorrectLevel: QrErrorCorrectLevel.M,
-        ),
-      ),
-    ];
-
-    QrImage refQr = candidateRefs.first;
-    double bestContrastScore = -1e9;
-    double bestDx = 0.0;
-    double bestDy = 0.0;
-    double bestSize = baseQrSize;
-    double bestDarkMean = 0.0;
-    double bestLightMean = 255.0;
-
-    final seenModuleCounts = <int>{};
-    for (final candRef in candidateRefs) {
-      final mCount = candRef.moduleCount;
-      if (!seenModuleCounts.add(mCount)) continue;
-      for (double sizeL = 38.0; sizeL <= 40.01; sizeL += 0.5) {
-        final double cellL = sizeL / mCount;
-        final double sampleR = math.max(0.8, cellL * scaleX * 0.16);
-        for (double dy = -3.2; dy <= 3.21; dy += 0.4) {
-          for (double dx = -3.2; dx <= 3.21; dx += 0.4) {
-            double darkSum = 0;
-            int darkCount = 0;
-            double lightSum = 0;
-            int lightCount = 0;
-
-            for (int r = 0; r < mCount; r++) {
-              for (int c = 0; c < mCount; c++) {
-                if (!_isQrCoreFunctionModule(r, c, mCount)) continue;
-                final double lx = baseQrLeft + dx + (c + 0.5) * cellL;
-                final double ly = baseQrTop + dy + (r + 0.5) * cellL;
-                final double lum = _sampleGrayscaleBlock(
-                  decoded,
-                  lx * scaleX,
-                  ly * scaleY,
-                  sampleR,
-                );
-                if (candRef.isDark(r, c)) {
-                  darkSum += lum;
-                  darkCount++;
-                } else {
-                  lightSum += lum;
-                  lightCount++;
-                }
-              }
-            }
-
-            if (darkCount == 0 || lightCount == 0) continue;
-            final double darkMean = darkSum / darkCount;
-            final double lightMean = lightSum / lightCount;
-            final double contrast = lightMean - darkMean;
-            if (contrast > bestContrastScore) {
-              bestContrastScore = contrast;
-              refQr = candRef;
-              bestDx = dx;
-              bestDy = dy;
-              bestSize = sizeL;
-              bestDarkMean = darkMean;
-              bestLightMean = lightMean;
-            }
-          }
-        }
-      }
-    }
-
-    if (bestContrastScore < 20.0) {
-      throw Exception(
-        'Invalid Answer Sheet: Official CheckMate QR code was not detected in '
-        'the top-right header. Please scan a valid answer sheet generated for '
-        '"$expectedTitle".',
-      );
-    }
-
-    final int moduleCount = refQr.moduleCount;
-    final double cellL = bestSize / moduleCount;
-    final double sampleR = math.max(0.9, cellL * scaleX * 0.18);
-    final double midLum = (bestDarkMean + bestLightMean) / 2.0;
-
-    final Map<int, List<List<bool>>> observedByCount = <int, List<List<bool>>>{};
-    List<List<bool>> getObservedGrid(int mCount) {
-      return observedByCount.putIfAbsent(mCount, () {
-        final double cL = bestSize / mCount;
-        final double sR = math.max(0.9, cL * scaleX * 0.18);
-        return List<List<bool>>.generate(
-          mCount,
-          (r) => List<bool>.generate(mCount, (c) {
-            final double lx = baseQrLeft + bestDx + (c + 0.5) * cL;
-            final double ly = baseQrTop + bestDy + (r + 0.5) * cL;
-            final double lum = _sampleGrayscaleBlock(
-              decoded,
-              lx * scaleX,
-              ly * scaleY,
-              sR,
-            );
-            return lum < midLum;
-          }),
-        );
-      });
-    }
-
-    final List<List<bool>> observedDark = getObservedGrid(moduleCount);
-
-    int funcMatches = 0;
-    int funcTotal = 0;
-    for (int r = 0; r < moduleCount; r++) {
-      for (int c = 0; c < moduleCount; c++) {
-        if (_isQrCoreFunctionModule(r, c, moduleCount)) {
-          funcTotal++;
-          if (observedDark[r][c] == refQr.isDark(r, c)) {
-            funcMatches++;
-          }
-        }
-      }
-    }
-    final double finderAgreement =
-        funcTotal > 0 ? (funcMatches / funcTotal) : 0.0;
-
-    if (finderAgreement < 0.72) {
-      throw Exception(
-        'Invalid Answer Sheet: The top-right QR code could not be verified as a '
-        'valid CheckMate answer sheet for "$expectedTitle".',
-      );
-    }
-
-    double scoreQrCandidate(int candidateExamId, int sheetNum) {
-      final qri = QrImage(
-        QrCode.fromData(
-          data: 'CHECKMATE-EXAM-$candidateExamId-SHEET-$sheetNum',
-          errorCorrectLevel: QrErrorCorrectLevel.M,
-        ),
-      );
-      final int mCount = qri.moduleCount;
-      final grid = getObservedGrid(mCount);
-      int matches = 0;
-      int total = 0;
-      for (int r = 0; r < mCount; r++) {
-        for (int c = 0; c < mCount; c++) {
-          if (_isQrCoreFunctionModule(r, c, mCount)) continue;
-          total++;
-          if (grid[r][c] == qri.isDark(r, c)) {
-            matches++;
-          }
-        }
-      }
-      return total > 0 ? (matches / total) : 0.0;
-    }
-
-    final int maxExpectedSheets = math.max(_students.length * 2 + 10, 60);
-    double expectedBestRatio = 0.0;
-    int expectedBestSheet = 1;
-    for (int s = 1; s <= maxExpectedSheets; s++) {
-      final ratio = scoreQrCandidate(expectedExamId, s);
-      if (ratio > expectedBestRatio) {
-        expectedBestRatio = ratio;
-        expectedBestSheet = s;
-      }
-    }
-
-    // Cross-check against all other assessments in _allExams.
-    double otherBestRatio = 0.0;
-    Map<String, dynamic>? otherBestExam;
-    for (final other in _allExams) {
-      final oid = int.tryParse('${other['id']}');
-      if (oid == null || oid == expectedExamId) continue;
-      for (int s = 1; s <= 50; s++) {
-        final ratio = scoreQrCandidate(oid, s);
-        if (ratio > otherBestRatio) {
-          otherBestRatio = ratio;
-          otherBestExam = other;
-        }
-      }
-    }
-
-    if (otherBestExam != null &&
-        otherBestRatio >= 0.70 &&
-        otherBestRatio >= expectedBestRatio + 0.05) {
-      final otherId = otherBestExam['id'];
-      final otherLabel = _lookupExamLabel(int.tryParse('$otherId') ?? 0);
+  for (final m in checkmateIdMatches) {
+    final foundId = int.tryParse(m.group(1) ?? '');
+    if (foundId != null && foundId != expectedExamId) {
+      final otherLabel = _lookupExamLabel(foundId);
       throw Exception(
         'Invalid Answer Sheet: This answer sheet belongs to "$otherLabel" '
-        '(Exam ID: $otherId), not "$expectedTitle" (Exam ID: $expectedExamId). '
-        'Only the 1-to-1 answer sheet for "$expectedTitle" can be used.',
+        '(Exam ID: $foundId), not "$expectedTitle" '
+        '(Exam ID: $expectedExamId). '
+        'Only the 1-to-1 answer sheet for "$expectedTitle" is accepted.',
       );
-    }
-
-    if (finderAgreement >= 0.76 && expectedBestRatio < 0.66) {
-      throw Exception(
-        'Invalid Answer Sheet: The QR code on this answer sheet does not match '
-        '"$expectedTitle" (Exam ID: $expectedExamId). Only the 1-to-1 answer '
-        'sheet generated specifically for "$expectedTitle" can be used.',
-      );
-    }
-
-    if (expectedBestRatio >= 0.66) {
-      _detectedQrSheetNumber = expectedBestSheet;
     }
   }
+
+  final examIdMatches = RegExp(
+    r'Exam\s*ID\s*[:#-]?\s*(\d+)',
+    caseSensitive: false,
+  ).allMatches(combinedText);
+
+  for (final m in examIdMatches) {
+    final foundId = int.tryParse(m.group(1) ?? '');
+    if (foundId != null && foundId != expectedExamId) {
+      final otherLabel = _lookupExamLabel(foundId);
+      throw Exception(
+        'Invalid Answer Sheet: This answer sheet belongs to "$otherLabel" '
+        '(Exam ID: $foundId), not "$expectedTitle" '
+        '(Exam ID: $expectedExamId). '
+        'Only the 1-to-1 answer sheet for "$expectedTitle" is accepted.',
+      );
+    }
+  }
+
+  // 2. Check whether the uploaded filename names another assessment.
+  final rawFileName = (_fileName ?? '').trim();
+
+  if (rawFileName.isNotEmpty &&
+      rawFileName.toLowerCase() != 'camera capture.jpg' &&
+      rawFileName.toLowerCase() != 'gallery.jpg') {
+    final normFile = rawFileName
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .trim();
+
+    final normExpected = expectedTitle
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .trim();
+
+    if (normExpected.length >= 4 && !normFile.contains(normExpected)) {
+      for (final other in _allExams) {
+        final oid = int.tryParse('${other['id']}');
+        if (oid == null || oid == expectedExamId) continue;
+
+        final otherTitle = (other['title']?.toString() ?? '').trim();
+        final normOther = otherTitle
+            .toLowerCase()
+            .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+            .trim();
+
+        if (normOther.length >= 5 && normFile.contains(normOther)) {
+          throw Exception(
+            'Invalid Answer Sheet: The file "$rawFileName" is for '
+            '"$otherTitle", not "$expectedTitle". '
+            'Only the 1-to-1 answer sheet for "$expectedTitle" is accepted.',
+          );
+        }
+      }
+    }
+  }
+
+  // 3. Decode the actual QR code from the aligned answer sheet.
+  final decodedImage = img.decodeImage(alignedImageBytes);
+  if (decodedImage != null) {
+  debugPrint(
+    '[CheckMate] Corrected image size: '
+    '${decodedImage.width} x ${decodedImage.height}',
+  );
+
+  final qrX = (decodedImage.width * 0.80).round();
+  final qrY = (decodedImage.height * 0.015).round();
+  final qrW = (decodedImage.width * 0.18).round();
+  final qrH = (decodedImage.height * 0.12).round();
+
+  debugPrint(
+    '[CheckMate] Approximate QR crop: '
+    'x=$qrX, y=$qrY, width=$qrW, height=$qrH',
+  );
+}
+  if (decodedImage == null) {
+    throw Exception(
+      'Invalid Answer Sheet: The uploaded image could not be decoded. '
+      'Please upload or capture the answer sheet again.',
+    );
+  }
+
+ 
+final hints = DecodeHints()
+  ..put(DecodeHintType.tryHarder);
+
+
+String? qrPayload;
+
+try {
+  final rgbaImage = decodedImage.convert(numChannels: 4);
+
+  final pixelBytes = rgbaImage.getBytes(
+    order: img.ChannelOrder.abgr,
+  );
+
+  final source = RGBLuminanceSource(
+    rgbaImage.width,
+    rgbaImage.height,
+    pixelBytes.buffer.asInt32List(),
+  );
+
+  final hints = DecodeHints()
+    ..put(DecodeHintType.tryHarder);
+
+  // Attempt 1: Hybrid binarization
+  try {
+    final bitmap = BinaryBitmap(
+      HybridBinarizer(source),
+    );
+
+    final result = QRCodeReader().decode(
+      bitmap,
+      hints: hints,
+    );
+
+    qrPayload = result.text.trim();
+  } catch (e) {
+    debugPrint('[CheckMate] Hybrid decode failed: $e');
+  }
+
+  // Attempt 2: Global histogram binarization
+  if (qrPayload == null || qrPayload!.isEmpty) {
+    try {
+      final bitmap = BinaryBitmap(
+        GlobalHistogramBinarizer(source),
+      );
+
+      final result = QRCodeReader().decode(
+        bitmap,
+        hints: hints,
+      );
+
+      qrPayload = result.text.trim();
+    } catch (e) {
+      debugPrint('[CheckMate] Global decode failed: $e');
+    }
+  }
+
+  debugPrint('[CheckMate] Final QR result: $qrPayload');
+
+} catch (e) {
+  debugPrint('[CheckMate] QR processing error: $e');
+}
+
+
+
+
+  // 4. Require a valid CheckMate QR payload.
+  if (qrPayload == null || qrPayload.isEmpty) {
+    throw Exception(
+      'Invalid Answer Sheet: The CheckMate QR code could not be read. '
+      'Please make sure the top-right QR code is visible, clear, and '
+      'not cropped.',
+    );
+  }
+
+  final qrMatch = RegExp(
+    r'^CHECKMATE-EXAM-(\d+)-SHEET-(\d+)$',
+    caseSensitive: false,
+  ).firstMatch(qrPayload);
+
+  if (qrMatch == null) {
+    throw Exception(
+      'Invalid Answer Sheet: The QR code is not a recognized CheckMate '
+      'answer sheet.',
+    );
+  }
+
+  final scannedExamId = int.tryParse(qrMatch.group(1) ?? '');
+  final scannedSheetNumber = int.tryParse(qrMatch.group(2) ?? '');
+
+  if (scannedExamId == null ||
+      scannedSheetNumber == null ||
+      scannedSheetNumber < 1) {
+    throw Exception(
+      'Invalid Answer Sheet: The QR code contains invalid exam or sheet '
+      'information.',
+    );
+  }
+
+  // 5. Enforce the exact assessment match.
+  if (scannedExamId != expectedExamId) {
+    final otherLabel = _lookupExamLabel(scannedExamId);
+
+    throw Exception(
+      'Invalid Answer Sheet: This answer sheet belongs to "$otherLabel" '
+      '(Exam ID: $scannedExamId), not "$expectedTitle" '
+      '(Exam ID: $expectedExamId). '
+      'Only the 1-to-1 answer sheet for "$expectedTitle" can be used.',
+    );
+  }
+
+  // 6. Save the decoded sheet number for student auto-matching.
+  _detectedQrSheetNumber = scannedSheetNumber;
+}
+
 
   Map<String, dynamic>? _autoDetectStudent({String? ocrText}) {
     if (_students.isEmpty) return null;
@@ -1432,10 +1461,48 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       void Function(void Function()) refresh,
     ) {
       final ocrNotice = _identificationOcrNotice;
-      final unresolvedCount = edits.entries.where((e) {
-        final v = e.value.trim();
-        return v == 'Ambiguous' || v == 'Multiple';
-      }).length;
+      final unresolvedCount = rawResult.sections
+          .asMap()
+          .entries
+          .fold<int>(0, (total, sectionEntry) {
+        final sectionIndex = sectionEntry.key;
+        final section = sectionEntry.value;
+
+        final sectionUnresolved = section.answers.where((answer) {
+          final key = '$sectionIndex:${answer.questionNumber}';
+          final value = (edits[key] ?? answer.answer).trim();
+
+          // Manually reviewed answers are no longer unresolved.
+          if (overriddenKeys.contains(key)) return false;
+
+          // Ambiguous or multiple detected answers.
+          if (value == 'Ambiguous' || value == 'Multiple') {
+            return true;
+          }
+
+          // OCR failed or is still pending.
+          if (answer.answer == 'OCR Pending') {
+            return true;
+          }
+
+          // Low-confidence bubble detection.
+          if (answer.confidence > 0 && answer.confidence < 0.80) {
+            return true;
+          }
+
+          // OCR produced text but it still needs teacher review.
+          if (section.sectionType == 'identification' &&
+              answer.confidence == 0 &&
+              value.isNotEmpty &&
+              value != 'Unanswered') {
+            return true;
+          }
+
+          return false;
+        }).length;
+
+        return total + sectionUnresolved;
+      });
 
       final matchedStudent = _matchEnrolledStudent(
         selectedId: selectedStudentId,

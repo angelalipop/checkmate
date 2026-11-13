@@ -6,6 +6,7 @@ import 'package:camera/camera.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
+import 'package:image_picker/image_picker.dart';
 
 import 'package:checkmate/screens/answer_sheet_upload_screen.dart';
 
@@ -78,6 +79,27 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
         }
       }
 
+      Future<void> _pickFromGallery() async {
+        try {
+          final ImagePicker picker = ImagePicker();
+
+          final XFile? image = await picker.pickImage(
+            source: ImageSource.gallery,
+            imageQuality: 100,
+          );
+
+          if (image == null) return;
+
+          final Uint8List imageBytes = await image.readAsBytes();
+
+          debugPrint('[CheckMate] Gallery image selected: ${image.name}');
+
+          // We will connect this to your existing scanner processing function.
+        } catch (e) {
+          debugPrint('[CheckMate] Gallery error: $e');
+        }
+      }
+
       final controller = CameraController(
         selectedCamera,
         ResolutionPreset.high,
@@ -136,48 +158,46 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
     }
   }
 
-  Future<void> _chooseFromGallery() async {
-    try {
-      const XTypeGroup imageTypeGroup = XTypeGroup(
-        label: 'Images',
-        extensions: <String>['jpg', 'jpeg', 'png'],
-        uniformTypeIdentifiers: <String>[
-          'public.jpeg',
-          'public.png',
-          'public.image',
-        ],
-      );
+  
+Future<void> _chooseFromGallery() async {
+  try {
+    final ImagePicker picker = ImagePicker();
 
-      final XFile? image = await openFile(
-        acceptedTypeGroups: <XTypeGroup>[imageTypeGroup],
-      );
+    final image = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 100,
+    );
 
-      if (image == null) return;
+    if (image == null) return;
 
-      final Uint8List imageBytes = await image.readAsBytes();
+    final Uint8List imageBytes = await image.readAsBytes();
 
-      if (!mounted) return;
+    if (!mounted) return;
 
-      _resetZoom();
+    _resetZoom();
 
-      setState(() {
-        // Gallery images remain uncropped.
-        _capturedImageBytes = imageBytes;
-        _capturedFileName =
-            image.name.isNotEmpty ? image.name : 'Gallery.jpg';
-        _isProcessing = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
+    setState(() {
+      // Gallery images remain uncropped.
+      _capturedImageBytes = imageBytes;
+      _capturedFileName =
+          image.name.isNotEmpty ? image.name : 'Gallery.jpg';
+      _isProcessing = false;
+    });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 5),
-          content: Text('Unable to choose image:\n$e'),
-        ),
-      );
-    }
+    debugPrint(
+      '[CheckMate] Gallery image selected: ${image.name}',
+    );
+  } catch (e) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        duration: const Duration(seconds: 5),
+        content: Text('Unable to choose image:\n$e'),
+      ),
+    );
   }
+}
 
   // ============================================================
   // CROP IMAGE TO SCANNER FRAME
