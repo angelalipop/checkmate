@@ -30,8 +30,7 @@ class AnswerSheetLayout {
 
   // 24 points of padding + 95 points of header/student information
   // (45 header + 3 gap + 43 student info + 4 gap = 95).
-  static const double firstSectionY = 119.0;
-
+  static const double firstSectionY = 129.0; // 24 padding + 55 header + 3 gap + 43 student info + 4 gap
   static int calculateOmrColumns(int questionCount) {
     return questionCount >= 10 ? 2 : 1;
   }

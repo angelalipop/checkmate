@@ -225,8 +225,11 @@ class ServerOpenCVOMRProcessor {
             _sheetPadding + ((contentWidth - totalBlockWidth) / 2.0);
 
         // _buildSection: title 18 + explicit 3-unit gap before the OMR grid.
-        final gridTop =
-            currentY + _sectionTitleHeight + AnswerSheetLayout.sectionTitleGap;
+         final gridTop =
+          currentY +
+          _sectionTitleHeight +
+          AnswerSheetLayout.sectionTitleGap +
+          AnswerSheetLayout.omrHeaderHeight;
         // Both MC and True/False start immediately below the section title
         // and its explicit 3-unit gap. Do not add an extra MC row here.
         final measurementGridTop = gridTop;
@@ -349,7 +352,22 @@ class ServerOpenCVOMRProcessor {
             ),
           );
         }
+        print('========== OMR DIAGNOSTICS ==========');
+        print('Section: $sectionName');
+        print('Questions: ${questions.length}');
+        print('Expected bubbles: $expectedSectionBubbles');
+        print('Matched bubbles: $matchedSectionBubbles');
+        final matchPercent = expectedSectionBubbles == 0
+            ? 0.0
+            : matchedSectionBubbles / expectedSectionBubbles * 100;
 
+        print('Match percentage: ${matchPercent.toStringAsFixed(2)}%');
+        print('Total detected candidates: ${bubbleCandidates.length}');
+        print('Image dimensions: ${source.cols} x ${source.rows}');
+        print('Scale X: $scaleX');
+        print('Scale Y: $scaleY');
+        print('Grid top: $measurementGridTop');
+        print('====================================');
         if (expectedSectionBubbles >= 4 &&
             (matchedSectionBubbles / expectedSectionBubbles) < 0.55) {
           throw Exception(
