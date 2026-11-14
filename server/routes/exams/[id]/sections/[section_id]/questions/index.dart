@@ -78,7 +78,7 @@ Future<Response> onRequest(
               body['question_number']?.toString() ?? '',
             );
 
-      final questionText = body['question_text']?.toString();
+      final questionText = body['question_text']?.toString() ?? '';
 
       final points = body['points'] is num
           ? body['points'] as num
@@ -92,8 +92,6 @@ Future<Response> onRequest(
       // Validate required question information.
       if (questionNumber == null ||
           questionNumber < 1 ||
-          questionText == null ||
-          questionText.trim().isEmpty ||
           points == null ||
           points < 0) {
         return Response.json(
@@ -101,7 +99,7 @@ Future<Response> onRequest(
           body: {
             'status': 'error',
             'message':
-                'question_number, question_text, and valid points are required',
+                'question_number and valid points are required',
           },
         );
       }
@@ -109,6 +107,7 @@ Future<Response> onRequest(
       final question = await QuestionService.create(
         sectionId: parsedSectionId,
         questionNumber: questionNumber,
+        examId: examId,
         questionText: questionText,
         points: points,
         choices: choices,
@@ -121,6 +120,11 @@ Future<Response> onRequest(
           'status': 'ok',
           'question': question,
         },
+      );
+    } on ArgumentError catch (e) {
+      return Response.json(
+        statusCode: 400,
+        body: {'status': 'error', 'message': e.message},
       );
     } catch (e) {
       return Response.json(

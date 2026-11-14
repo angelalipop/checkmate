@@ -146,6 +146,7 @@ Future<Response> onRequest(RequestContext context) async {
               instructions?.isEmpty ?? false ? null : instructions,
           status: status?.isEmpty ?? false ? null : status,
           gradingPeriod: body['grading_period']?.toString(),
+          creationMode: body['creation_mode']?.toString() ?? 'builder',
           assessmentType:
               assessmentType?.isEmpty ?? false ? null : assessmentType,
         );

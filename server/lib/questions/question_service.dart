@@ -5,6 +5,34 @@ import 'package:postgres/postgres.dart';
 import 'package:server/database.dart';
 
 class QuestionService {
+  static void _requireQuestionText(String questionText) {
+    if (questionText.trim().isEmpty) {
+      throw ArgumentError('Question text is required.');
+    }
+  }
+
+  static String _validateAnswerKey(String questionType, String? answer) {
+    final value = answer?.trim().toUpperCase() ?? '';
+    if (value.isEmpty || value == 'NULL') {
+      throw ArgumentError('Correct answer is required.');
+    }
+    switch (questionType) {
+      case 'multiple_choice':
+        if (!const {'A', 'B', 'C', 'D'}.contains(value)) {
+          throw ArgumentError('Choose A, B, C, or D.');
+        }
+        return value;
+      case 'true_false':
+        if (value == 'TRUE') return 'True';
+        if (value == 'FALSE') return 'False';
+        throw ArgumentError('Choose True or False.');
+      case 'identification':
+        return value;
+      default:
+        throw ArgumentError('Invalid answer key type.');
+    }
+  }
+
   static Future<List<Map<String, dynamic>>> getBySection(
     int sectionId,
   ) async {
@@ -64,12 +92,6 @@ class QuestionService {
       );
     }
 
-    if (questionText.trim().isEmpty) {
-      throw Exception(
-        'Question text is required.',
-      );
-    }
-
     if (points < 0) {
       throw Exception(
         'Question points cannot be negative.',
@@ -79,9 +101,11 @@ class QuestionService {
     return Database.pool.runTx<Map<String, dynamic>>((tx) async {
       final secRows = await tx.execute(
         Sql.named('''
-          SELECT question_type
-          FROM exam_sections
-          WHERE id = @section_id
+          SELECT s.question_type, e.creation_mode, e.status
+          FROM exam_sections s
+          JOIN exams e ON e.id = s.exam_id
+          WHERE s.id = @section_id
+          FOR UPDATE OF s
         '''),
         parameters: {'section_id': sectionId},
       );
@@ -92,8 +116,18 @@ class QuestionService {
       String? normalizedAnswer = (correctAnswer?.trim().isEmpty ?? true)
           ? null
           : correctAnswer!.trim();
-      if (normalizedAnswer != null && qType == 'identification') {
-        normalizedAnswer = normalizedAnswer.toUpperCase();
+      final answerKeyOnly = secRows.isNotEmpty &&
+          secRows.first[1] == 'answer_key';
+      if (answerKeyOnly) {
+        if (secRows.first[2] != 'draft') {
+          throw ArgumentError('Answer keys can only be added to draft exams.');
+        }
+        normalizedAnswer = _validateAnswerKey(qType, normalizedAnswer);
+      } else {
+        _requireQuestionText(questionText);
+        if (normalizedAnswer != null && qType == 'identification') {
+          normalizedAnswer = normalizedAnswer.toUpperCase();
+        }
       }
 
       // Ensure question_number does not collide if an out-of-sync number is sent
@@ -151,9 +185,9 @@ class QuestionService {
         parameters: {
           'section_id': sectionId,
           'question_number': effectiveNumber,
-          'question_text': questionText.trim(),
+          'question_text': answerKeyOnly ? '' : questionText.trim(),
           'points': points,
-          'choices': choices == null ? null : jsonEncode(choices),
+          'choices': answerKeyOnly || choices == null ? null : jsonEncode(choices),
           'correct_answer': normalizedAnswer,
         },
       );
@@ -185,6 +219,7 @@ class QuestionService {
           USING exam_sections AS s, exams AS e, classes AS c
           WHERE q.id = @id AND s.id = q.section_id AND e.id = s.exam_id AND c.id = e.class_id
             AND (@role = 'admin' OR (@role = 'teacher' AND c.teacher_id = @user_id))
+            AND (e.creation_mode <> 'answer_key' OR e.status = 'draft')
             AND NOT EXISTS (SELECT 1 FROM exam_attempts a WHERE a.exam_id = e.id)
           RETURNING q.id, q.section_id, q.question_number
         '''),
@@ -226,10 +261,6 @@ class QuestionService {
     String? correctAnswer,
     int? targetSectionId,
   }) async {
-    if (questionText.trim().isEmpty) {
-      throw Exception('Question text is required.');
-    }
-
     if (points < 0) {
       throw Exception('Question points cannot be negative.');
     }
@@ -237,13 +268,15 @@ class QuestionService {
     return Database.pool.runTx<Map<String, dynamic>?>((tx) async {
       final currentRows = await tx.execute(
         Sql.named('''
-          SELECT q.section_id, q.question_number, s.exam_id, s.question_type
+          SELECT q.section_id, q.question_number, s.exam_id, s.question_type,
+                 e.creation_mode
           FROM questions q
           JOIN exam_sections s ON s.id = q.section_id
           JOIN exams e ON e.id = s.exam_id
           JOIN classes c ON c.id = e.class_id
           WHERE q.id = @id
             AND (@role = 'admin' OR (@role = 'teacher' AND c.teacher_id = @user_id))
+            AND (e.creation_mode <> 'answer_key' OR e.status = 'draft')
             AND NOT EXISTS (SELECT 1 FROM exam_attempts a WHERE a.exam_id = e.id)
           FOR UPDATE OF q
         '''),
@@ -290,8 +323,14 @@ class QuestionService {
       String? normalizedAnswer = (correctAnswer?.trim().isEmpty ?? true)
           ? null
           : correctAnswer!.trim();
-      if (normalizedAnswer != null && effectiveType == 'identification') {
-        normalizedAnswer = normalizedAnswer.toUpperCase();
+      final answerKeyOnly = currentRows.first[4] == 'answer_key';
+      if (answerKeyOnly) {
+        normalizedAnswer = _validateAnswerKey(effectiveType, normalizedAnswer);
+      } else {
+        _requireQuestionText(questionText);
+        if (normalizedAnswer != null && effectiveType == 'identification') {
+          normalizedAnswer = normalizedAnswer.toUpperCase();
+        }
       }
 
       final result = await tx.execute(
@@ -319,9 +358,9 @@ class QuestionService {
           'id': id,
           'section_id': newSectionId,
           'question_number': newQuestionNumber,
-          'question_text': questionText.trim(),
+          'question_text': answerKeyOnly ? '' : questionText.trim(),
           'points': points,
-          'choices': choices == null ? null : jsonEncode(choices),
+          'choices': answerKeyOnly || choices == null ? null : jsonEncode(choices),
           'correct_answer': normalizedAnswer,
         },
       );

@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -8,7 +7,6 @@ import 'package:flutter/foundation.dart' show kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
-import 'package:qr/qr.dart';
 import 'package:zxing2/qrcode.dart';
 import 'package:zxing2/zxing2.dart';
 import 'package:flutter/foundation.dart'

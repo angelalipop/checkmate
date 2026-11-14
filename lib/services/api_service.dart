@@ -589,6 +589,7 @@ class ApiService {
     String? status,
     String? assessmentType,
     String? gradingPeriod,
+    String? creationMode,
   }) async {
     final response = await http.post(
       Uri.parse('$baseUrl/exams'),
@@ -605,6 +606,7 @@ class ApiService {
         'status': status,
         'assessment_type': ?assessmentType,
         'grading_period': ?gradingPeriod,
+        'creation_mode': ?creationMode,
       }),
     );
 
@@ -618,6 +620,14 @@ class ApiService {
 
     if (exam is! Map) {
       throw Exception('Invalid exam data received.');
+    }
+
+    if (creationMode == 'answer_key' && exam['creation_mode'] != creationMode) {
+      throw Exception(
+        'The CheckMate API saved this as a regular draft. Rebuild and recreate '
+        'the API container with the updated server code, then create a new '
+        'exam from Add Answer Key and Create Answer Sheets.',
+      );
     }
 
     return Map<String, dynamic>.from(exam);

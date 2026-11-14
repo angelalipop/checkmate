@@ -11,6 +11,7 @@ import 'answer_sheet_preview_screen.dart';
 import 'exam_preview_screen.dart';
 import 'exams_tab.dart'
     show
+        buildAnswerKeyExam,
         importParsedSectionsIntoExam,
         resequenceExamSectionHeadings,
         showUploadQuestionnaireModal;
@@ -32,6 +33,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
   String? _errorMessage;
 
   Map<String, dynamic>? _exam;
+  List<Map<String, dynamic>> _answerKeyClasses = [];
   List<Map<String, dynamic>> _sections = [];
   final Map<int, List<Map<String, dynamic>>> _questions = {};
   List<Map<String, dynamic>> _students = [];
@@ -66,6 +68,16 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
       }
 
       final exam = matchingExams.first;
+      if (exam['creation_mode'] == 'answer_key') {
+        final classes = await ApiService.getClasses(token);
+        if (!mounted) return;
+        setState(() {
+          _exam = exam;
+          _answerKeyClasses = classes;
+          _isLoading = false;
+        });
+        return;
+      }
 
       final sections = await ApiService.getExamSections(token, widget.examId);
       sections.sort((a, b) {
@@ -747,6 +759,17 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_isLoading && _errorMessage == null && _exam?['creation_mode'] == 'answer_key') {
+      return Scaffold(
+        body: SafeArea(
+          child: buildAnswerKeyExam(
+            examId: widget.examId,
+            classes: _answerKeyClasses,
+            onBack: () => Navigator.maybePop(context),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Exam Builder')),
       body: _buildBody(),

@@ -59,6 +59,9 @@ class _ExamPreviewScreenState extends State<ExamPreviewScreen> {
       }
 
       final exam = matchingExams.first;
+      if (exam['creation_mode'] == 'answer_key') {
+        throw Exception('This exam has no questionnaire.');
+      }
 
       final sections = await ApiService.getExamSections(
         token,
