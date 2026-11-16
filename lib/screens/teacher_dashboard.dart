@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
@@ -12,66 +13,25 @@ import 'login_screen.dart' show CmColors, LoginScreen;
 import 'my_subjects_screen.dart';
 import 'students_screen.dart';
 
-// =============================================================
-// CheckMate — Teacher app shell + Dashboard home
-//
-// TeacherShell wraps every teacher screen (same pattern as AdminShell):
-//   Desktop  (>= 900):  navy sidebar (256px) that collapses to an
-//                       80px icon rail. The collapse state is shared, so
-//                       it persists across every tab / module screen.
-//   Tablet / phone:     navy top bar (hamburger + logo) and a
-//                       full-height overlay drawer. Closes via the close
-//                       button, backdrop tap, Escape, or after navigating.
-//                       Phones also keep the bottom navigation bar.
-//
-// Module screens (Exams, Scans) are NOT modified. They are simply
-// wrapped by TeacherShell when pushed.
-//
-// Classes and exams come from ApiService. Review queue and analytics
-// are still sample data (no backend endpoints yet).
-// =============================================================
+typedef JsonMap = Map<String, dynamic>;
 
 const double _kDesktop = 900;
 const double _kTablet = 600;
 const double _kSidebarWide = 256;
 const double _kSidebarRail = 80;
 
-// =============================================================
-// SIDEBAR PALETTE
-// =============================================================
-
 class _Pal {
   _Pal._();
-
-  /// Sidebar + mobile top bar background (expanded and collapsed).
   static const Color sidebar = Color(0xFF162137);
-
-  /// Active / hovered sidebar item.
   static const Color sidebarActive = Color(0xFF2D384D);
-
-  /// Sidebar text and icons.
   static const Color sidebarFg = Color(0xFFCFD8E5);
-
-  /// Notification dot (amber).
   static const Color notifDot = Color(0xFFF7A224);
-
-  /// Divider above Profile / Log out (white at 12% opacity).
   static final Color divider = Colors.white.withValues(alpha: 0.12);
 }
 
-/// Persists the sidebar collapse state across screens for the session.
 final ValueNotifier<bool> _sidebarCollapsed = ValueNotifier<bool>(false);
-
-/// The dashboard's route, so sidebar items in module screens can return to
-/// it without popping past it (which would land on the login screen).
 Route<dynamic>? _teacherDashboardRoute;
-
-/// Lets a module screen's shell ask the dashboard to switch tab.
 void Function(TeacherPage page)? _dashboardNavigate;
-
-// =============================================================
-// DESTINATIONS
-// =============================================================
 
 enum TeacherPage {
   dashboard('Dashboard', Icons.space_dashboard_outlined),
@@ -85,24 +45,12 @@ enum TeacherPage {
   final IconData icon;
 }
 
-/// Pages shown in the phone bottom navigation bar (a 5th "More" opens the
-/// drawer).
 const List<TeacherPage> _bottomPages = [
   TeacherPage.dashboard,
   TeacherPage.subjects,
   TeacherPage.exams,
   TeacherPage.scans,
 ];
-
-// ---------- Placeholder data ----------
-
-const _scoreBuckets = <String, int>{
-  '0-59': 3,
-  '60-69': 5,
-  '70-79': 11,
-  '80-89': 10,
-  '90-100': 6,
-};
 
 String _prettyStatus(String? raw) {
   final s = (raw ?? '').replaceAll('_', ' ').trim();
@@ -116,7 +64,7 @@ String _prettyStatus(String? raw) {
 bool _isDone(String status) =>
     status == 'Completed' || status == 'Finalized';
 
-String _classCode(Map<String, dynamic> c) {
+String _classCode(JsonMap c) {
   final subject = c['subject'];
   final code = subject is Map ? subject['code']?.toString() ?? '' : '';
   final section = c['section']?.toString() ?? '';
@@ -138,19 +86,197 @@ class _ExamInfo {
   final int students;
 }
 
-// =============================================================
-// SIGNED-IN USER (shown at the bottom of the navigation panel)
-// =============================================================
+class _ExamAnalytics {
+  const _ExamAnalytics({
+    required this.examId,
+    required this.examTitle,
+    required this.attemptPercentages,
+    required this.lowAccuracyItemCount,
+    required this.missedQuestionNumbers,
+    required this.hasIdentificationSection,
+    required this.lowestSectionName,
+    required this.lowestSectionAvg,
+    required this.idReviewCount,
+    required this.omrReviewCount,
+    required this.pendingScanCount,
+  });
+
+  final int examId;
+  final String examTitle;
+  final List<double> attemptPercentages;
+  final int lowAccuracyItemCount;
+  final List<int> missedQuestionNumbers;
+  final bool hasIdentificationSection;
+  final String? lowestSectionName;
+  final double? lowestSectionAvg;
+  final int idReviewCount;
+  final int omrReviewCount;
+  final int pendingScanCount;
+}
+
+class _DashboardMetrics {
+  const _DashboardMetrics({
+    required this.totalForReview,
+    required this.idReviewPapers,
+    required this.omrReviewPapers,
+    required this.unscannedPapers,
+    required this.firstReviewExamId,
+    required this.totalAttempts,
+    required this.averagePercent,
+    required this.highestPercent,
+    required this.lowestPercent,
+    required this.buckets,
+    required this.lowAccuracyItems,
+    required this.insightBannerText,
+  });
+
+  final int totalForReview;
+  final int idReviewPapers;
+  final int omrReviewPapers;
+  final int unscannedPapers;
+  final int? firstReviewExamId;
+  final int totalAttempts;
+  final double averagePercent;
+  final double highestPercent;
+  final double lowestPercent;
+  final Map<String, int> buckets;
+  final int lowAccuracyItems;
+  final String insightBannerText;
+
+  static const emptyBuckets = <String, int>{
+    '0-59': 0,
+    '60-69': 0,
+    '70-79': 0,
+    '80-89': 0,
+    '90-100': 0,
+  };
+
+  factory _DashboardMetrics.fromExams(
+    List<_ExamInfo> exams,
+    Map<int, _ExamAnalytics> byExam, {
+    int? selectedExamId,
+  }) {
+    final targetAnalytics =
+        selectedExamId != null && byExam.containsKey(selectedExamId)
+            ? [byExam[selectedExamId]!]
+            : byExam.values.toList();
+
+    int idRev = 0;
+    int omrRev = 0;
+    int pendingScans = 0;
+    int? reviewExamId;
+
+    for (final e in exams) {
+      final id = e.id;
+      if (id == null) continue;
+      final a = byExam[id];
+      if (a != null) {
+        idRev += a.idReviewCount;
+        omrRev += a.omrReviewCount;
+        pendingScans += a.pendingScanCount;
+        if (reviewExamId == null &&
+            (a.idReviewCount + a.omrReviewCount + a.pendingScanCount) > 0) {
+          reviewExamId = id;
+        }
+      }
+    }
+
+    final allPercentages = <double>[];
+    int lowItems = 0;
+    final missedQuestions = <int>[];
+    String? weakestSection;
+    double? weakestSectionVal;
+
+    for (final a in targetAnalytics) {
+      allPercentages.addAll(a.attemptPercentages);
+      lowItems += a.lowAccuracyItemCount;
+      missedQuestions.addAll(a.missedQuestionNumbers);
+      if (a.lowestSectionName != null && a.lowestSectionAvg != null) {
+        if (weakestSectionVal == null ||
+            a.lowestSectionAvg! < weakestSectionVal) {
+          weakestSectionVal = a.lowestSectionAvg;
+          weakestSection = a.lowestSectionName;
+        }
+      }
+    }
+
+    final buckets = Map<String, int>.from(emptyBuckets);
+    double sum = 0;
+    double high = 0;
+    double low = 100;
+
+    for (final p in allPercentages) {
+      final clamped = p.clamp(0.0, 100.0);
+      sum += clamped;
+      if (clamped > high) high = clamped;
+      if (clamped < low) low = clamped;
+
+      if (clamped < 60) {
+        buckets['0-59'] = (buckets['0-59'] ?? 0) + 1;
+      } else if (clamped < 70) {
+        buckets['60-69'] = (buckets['60-69'] ?? 0) + 1;
+      } else if (clamped < 80) {
+        buckets['70-79'] = (buckets['70-79'] ?? 0) + 1;
+      } else if (clamped < 90) {
+        buckets['80-89'] = (buckets['80-89'] ?? 0) + 1;
+      } else {
+        buckets['90-100'] = (buckets['90-100'] ?? 0) + 1;
+      }
+    }
+
+    final count = allPercentages.length;
+    final avg = count > 0 ? (sum / count) : 0.0;
+    if (count == 0) low = 0.0;
+
+    String banner;
+    if (count == 0) {
+      banner =
+          'No recorded exam attempts yet. Scan answer sheets to generate item difficulty analysis and smart recommendations.';
+    } else if (lowItems > 0) {
+      final sampleNums = missedQuestions.take(4).map((q) => '#$q').join(', ');
+      final itemWord = lowItems == 1 ? 'item' : 'items';
+      banner = sampleNums.isNotEmpty
+          ? '$lowItems $itemWord ($sampleNums) answered correctly by fewer than 40% — review recommended.'
+          : '$lowItems $itemWord answered correctly by fewer than 40% — review these concepts with the class.';
+    } else if (weakestSection != null &&
+        weakestSectionVal != null &&
+        weakestSectionVal < 60) {
+      banner =
+          'Lowest accuracy in $weakestSection (${weakestSectionVal.toStringAsFixed(0)}%) — consider a targeted topic review.';
+    } else if (avg < 75.0) {
+      banner =
+          'Class average (${avg.toStringAsFixed(1)}%) is below 75% — a remedial review session is recommended.';
+    } else {
+      banner =
+          'Strong class mastery! All items achieved at least 40% accuracy (Class average: ${avg.toStringAsFixed(1)}%).';
+    }
+
+    final totalReview = idRev + omrRev + pendingScans;
+
+    return _DashboardMetrics(
+      totalForReview: totalReview,
+      idReviewPapers: idRev,
+      omrReviewPapers: omrRev,
+      unscannedPapers: pendingScans,
+      firstReviewExamId:
+          reviewExamId ?? (exams.isNotEmpty ? exams.first.id : null),
+      totalAttempts: count,
+      averagePercent: avg,
+      highestPercent: high,
+      lowestPercent: low,
+      buckets: buckets,
+      lowAccuracyItems: lowItems,
+      insightBannerText: banner,
+    );
+  }
+}
 
 class _TeacherIdentity {
   static String? name;
   static String? email;
-
-  /// Used when the stored token has no name.
   static String fallbackName = 'Teacher';
   static bool _loaded = false;
 
-  /// Reads name/email from the stored JWT payload (no network call).
   static Future<void> load() async {
     if (_loaded) return;
     try {
@@ -178,9 +304,7 @@ class _TeacherIdentity {
         if (e != null && e.isNotEmpty) email = e;
       }
       _loaded = true;
-    } catch (_) {
-      // Fall back to defaults.
-    }
+    } catch (_) {}
   }
 
   static void reset() {
@@ -207,16 +331,6 @@ class _TeacherIdentity {
   }
 }
 
-// =============================================================
-// NAVIGATION HELPERS
-// =============================================================
-
-/// Teacher-facing module screens:
-///  - Exams: ExamsTab (exam list -> in-place collapsible builder with inline
-///    questions, paper preview popup, PDF print/download).
-///  - Scans: AnswerSheetInputScreen -> camera/upload -> OMR -> scoring.
-///  - Students: StudentsScreen (moved here from the admin dashboard; the
-///    server only returns students of the teacher's own classes).
 Widget? _moduleScreenFor(TeacherPage page) {
   switch (page) {
     case TeacherPage.subjects:
@@ -228,12 +342,10 @@ Widget? _moduleScreenFor(TeacherPage page) {
     case TeacherPage.scans:
       return const AnswerSheetInputScreen();
     default:
-      return null; // shown inside the dashboard body
+      return null;
   }
 }
 
-/// No transition: the shell (sidebar + header) stays visually in place, so
-/// switching to Exams / Scans feels exactly like switching a dashboard tab.
 Route<void> _shellRoute(TeacherPage page, Widget screen) {
   return PageRouteBuilder<void>(
     transitionDuration: Duration.zero,
@@ -242,8 +354,6 @@ Route<void> _shellRoute(TeacherPage page, Widget screen) {
   );
 }
 
-/// Switches to the Scans tab inside the teacher shell with [examId] pre-loaded
-/// (Subject, Section, and Assessment automatically selected).
 void openTeacherScansForExam(BuildContext context, int examId) {
   Navigator.of(context).pushReplacement(
     _shellRoute(
@@ -273,7 +383,6 @@ void _soon(BuildContext context, String what) {
   );
 }
 
-/// Wraps an existing, unmodified module screen with the shared shell.
 class _ModuleShell extends StatelessWidget {
   const _ModuleShell({required this.page, required this.child});
 
@@ -283,15 +392,12 @@ class _ModuleShell extends StatelessWidget {
   void _select(BuildContext context, TeacherPage target) {
     if (target == page && target != TeacherPage.exams) return;
 
-    // Another module screen: swap it in, keeping the same shell.
     final screen = _moduleScreenFor(target);
     if (screen != null) {
       Navigator.of(context).pushReplacement(_shellRoute(target, screen));
       return;
     }
 
-    // A tab that lives inside the dashboard: return to the dashboard route
-    // itself (never pop past it) and switch its tab.
     final dashboard = _teacherDashboardRoute;
     if (dashboard != null) {
       Navigator.of(context).popUntil((route) => route == dashboard);
@@ -303,8 +409,6 @@ class _ModuleShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // The Exams tab uses the same top bar (sidebar toggle, search, bell) as
-    // the dashboard. Scans keeps its own screen header.
     final isSubjects = page == TeacherPage.subjects;
     final hasHeader = page == TeacherPage.exams || isSubjects;
     return TeacherShell(
@@ -324,10 +428,6 @@ class _ModuleShell extends StatelessWidget {
   }
 }
 
-// =============================================================
-// APP SHELL
-// =============================================================
-
 class TeacherShell extends StatefulWidget {
   const TeacherShell({
     super.key,
@@ -343,11 +443,7 @@ class TeacherShell extends StatefulWidget {
   final ValueChanged<TeacherPage> onSelect;
   final VoidCallback onLogout;
   final Widget child;
-
-  /// Optional bar shown above the content on desktop (dashboard only).
   final Widget? desktopHeader;
-
-  /// Optional actions on the right of the mobile top bar.
   final List<Widget> mobileActions;
 
   @override
@@ -372,7 +468,7 @@ class _TeacherShellState extends State<TeacherShell> {
   }
 
   void _select(TeacherPage page) {
-    _closeDrawer(); // always close after navigating
+    _closeDrawer();
     widget.onSelect(page);
   }
 
@@ -382,7 +478,6 @@ class _TeacherShellState extends State<TeacherShell> {
       builder: (context, constraints) {
         final w = constraints.maxWidth;
 
-        // ---------- Desktop ----------
         if (w >= _kDesktop) {
           return Scaffold(
             backgroundColor: CmColors.bg,
@@ -401,7 +496,6 @@ class _TeacherShellState extends State<TeacherShell> {
                         onLogout: widget.onLogout,
                         userName: _TeacherIdentity.displayName,
                         userEmail: _TeacherIdentity.email,
-                        // When the page has its own header, the toggle lives there.
                         collapsible: widget.desktopHeader == null,
                         collapsed: collapsed,
                         onToggle: () => _sidebarCollapsed.value = !collapsed,
@@ -422,12 +516,9 @@ class _TeacherShellState extends State<TeacherShell> {
           );
         }
 
-        // ---------- Tablet / phone ----------
         final isMobile = w < _kTablet;
         final bottomIndex = _bottomPages.indexOf(widget.current);
 
-        // The drawer sits above the whole Scaffold so it also covers the
-        // bottom navigation bar.
         return Stack(
           children: [
             Positioned.fill(
@@ -498,7 +589,6 @@ class _TeacherShellState extends State<TeacherShell> {
           builder: (context, t, child) {
             return Stack(
               children: [
-                // Dimmed backdrop — tap to close.
                 Positioned.fill(
                   child: Semantics(
                     button: true,
@@ -550,10 +640,6 @@ class _TeacherShellState extends State<TeacherShell> {
     );
   }
 }
-
-// =============================================================
-// MOBILE TOP BAR
-// =============================================================
 
 class _MobileTopBar extends StatelessWidget {
   const _MobileTopBar({required this.onMenu, required this.actions});
@@ -608,10 +694,6 @@ class _MobileTopBar extends StatelessWidget {
   }
 }
 
-// =============================================================
-// SIDEBAR
-// =============================================================
-
 class _Sidebar extends StatelessWidget {
   const _Sidebar({
     required this.current,
@@ -633,7 +715,7 @@ class _Sidebar extends StatelessWidget {
   final bool collapsible;
   final bool collapsed;
   final VoidCallback? onToggle;
-  final VoidCallback? onClose; // non-null => drawer mode
+  final VoidCallback? onClose;
 
   @override
   Widget build(BuildContext context) {
@@ -641,7 +723,6 @@ class _Sidebar extends StatelessWidget {
       color: _Pal.sidebar,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          // Hide labels while the width animation is still narrow.
           final showLabels = constraints.maxWidth > 180;
 
           return Padding(
@@ -778,7 +859,6 @@ class _Sidebar extends StatelessWidget {
         : null;
 
     if (!showLabels) {
-      // Icon-only rail: circular logo (+ toggle when this page has none).
       return Column(
         children: [
           Image.asset(
@@ -925,10 +1005,6 @@ class _SidebarItem extends StatelessWidget {
   }
 }
 
-// =============================================================
-// SCREEN (dashboard home + in-dashboard tabs)
-// =============================================================
-
 class TeacherDashboard extends StatefulWidget {
   const TeacherDashboard({super.key, this.teacherName = 'Teacher'});
 
@@ -945,6 +1021,8 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
   bool _loading = true;
   String? _error;
   List<_ExamInfo> _exams = [];
+  Map<int, _ExamAnalytics> _analyticsByExam = {};
+  int? _selectedAnalyticsExamId;
 
   @override
   void initState() {
@@ -968,17 +1046,278 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     super.dispose();
   }
 
-  /// Called by a module screen's shell to land on a dashboard tab.
   void _goTo(TeacherPage page) {
     if (!mounted) return;
     setState(() => _page = page);
   }
 
-  // The backend must return only this teacher's classes/exams.
-  // Nothing here filters by teacher on the client.
+  Future<dynamic> _fetchBackendJson(String token, String path) async {
+    try {
+      final uri = Uri.parse('${ApiService.baseUrl}$path');
+      final res = await http.get(
+        uri,
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      );
+      if (res.statusCode >= 200 && res.statusCode < 300 && res.body.isNotEmpty) {
+        return jsonDecode(res.body);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<_ExamAnalytics> _computeExamAnalytics(
+    String token,
+    _ExamInfo examInfo,
+    JsonMap rawExam,
+  ) async {
+    final examId = examInfo.id!;
+
+    JsonMap examMap = rawExam;
+    try {
+      examMap = await ApiService.getExamById(token, examId);
+    } catch (_) {}
+
+    List<JsonMap> sectionsList = [];
+    try {
+      sectionsList = await ApiService.getExamSections(token, examId);
+    } catch (_) {}
+
+    final attemptsData = await _fetchBackendJson(
+      token,
+      '/attempts?exam_id=$examId',
+    );
+
+    double maxPossiblePoints = 0;
+    bool hasIdentification = false;
+    final questionTypeById = <int, String>{};
+    final questionNumberById = <int, int>{};
+    final sectionNameByQuestionId = <int, String>{};
+
+    final rawEmbeddedSections = examMap['sections'] ?? examMap['exam_sections'];
+    final List<JsonMap> effectiveSections = [];
+    if (sectionsList.isNotEmpty) {
+      effectiveSections.addAll(sectionsList);
+    } else if (rawEmbeddedSections is List) {
+      for (final item in rawEmbeddedSections) {
+        if (item is Map) {
+          effectiveSections.add(JsonMap.from(item));
+        }
+      }
+    }
+
+    for (final s in effectiveSections) {
+      final secId = int.tryParse(s['id']?.toString() ?? '');
+      final secType = (s['question_type'] ?? s['exam_type'] ?? s['type'] ?? '')
+          .toString()
+          .toLowerCase();
+      final secName =
+          (s['name'] ?? s['section_name'] ?? s['title'] ?? secType).toString();
+      final defaultPts = double.tryParse(
+            (s['default_points'] ?? s['item_weight'] ?? 1).toString(),
+          ) ??
+          1.0;
+
+      if (secType.contains('ident')) hasIdentification = true;
+
+      final List<JsonMap> qList = [];
+      if (s['questions'] is List) {
+        for (final item in s['questions'] as List) {
+          if (item is Map) {
+            qList.add(JsonMap.from(item));
+          }
+        }
+      } else if (secId != null) {
+        try {
+          final fetched = await ApiService.getQuestions(token, secId);
+          qList.addAll(fetched);
+        } catch (_) {}
+      }
+
+      for (final q in qList) {
+        final qId = int.tryParse(q['id']?.toString() ?? '');
+        final qNo = int.tryParse(
+              (q['question_number'] ?? q['question_no'] ?? q['number'] ?? '')
+                  .toString(),
+            ) ??
+            0;
+        final pts =
+            double.tryParse((q['points'] ?? defaultPts).toString()) ?? defaultPts;
+        final qType = (q['question_type'] ?? q['exam_type'] ?? secType)
+            .toString()
+            .toLowerCase();
+
+        if (qType.contains('ident')) hasIdentification = true;
+        maxPossiblePoints += pts;
+
+        if (qId != null) {
+          questionTypeById[qId] = qType;
+          questionNumberById[qId] = qNo;
+          sectionNameByQuestionId[qId] = secName;
+        }
+      }
+    }
+
+    if (maxPossiblePoints <= 0) {
+      maxPossiblePoints = double.tryParse(
+            (examMap['total_points'] ??
+                    rawExam['total_points'] ??
+                    rawExam['total_items'] ??
+                    100)
+                .toString(),
+          ) ??
+          100.0;
+    }
+
+    List<dynamic> attemptsList = [];
+    if (attemptsData is List) {
+      attemptsList = attemptsData;
+    } else if (attemptsData is Map) {
+      final inner = attemptsData['attempts'] ??
+          attemptsData['data'] ??
+          attemptsData['results'];
+      if (inner is List) attemptsList = inner;
+    }
+    if (attemptsList.isEmpty && examMap['attempts'] is List) {
+      attemptsList = examMap['attempts'] as List;
+    }
+
+    final percentages = <double>[];
+    final itemCorrect = <int, int>{};
+    final itemTotal = <int, int>{};
+    final sectionCorrect = <String, int>{};
+    final sectionTotal = <String, int>{};
+    int idFlagged = 0;
+    int omrFlagged = 0;
+
+    for (final att in attemptsList) {
+      if (att is! Map) continue;
+
+      final score = double.tryParse(
+            (att['total_score'] ?? att['score'] ?? 0).toString(),
+          ) ??
+          0.0;
+      final attMax = double.tryParse(
+            (att['max_score'] ?? att['total_points'] ?? maxPossiblePoints)
+                .toString(),
+          ) ??
+          maxPossiblePoints;
+      final pct = attMax > 0 ? (score / attMax) * 100.0 : 0.0;
+      percentages.add(pct);
+
+      final answers = att['answers'] ?? att['student_answers'];
+      if (answers is List) {
+        bool paperHasIdReview = false;
+        bool paperHasOmrReview = false;
+
+        for (final ans in answers) {
+          if (ans is! Map) continue;
+          final qId =
+              int.tryParse((ans['question_id'] ?? ans['id'] ?? '').toString());
+          final qNo = int.tryParse(
+                (ans['question_number'] ?? ans['question_no'] ?? '').toString(),
+              ) ??
+              (qId != null ? (questionNumberById[qId] ?? 0) : 0);
+          final key = qNo > 0 ? qNo : (qId ?? 0);
+
+          final isCorrect = ans['is_correct'] == true ||
+              ans['is_correct']?.toString() == 'true' ||
+              ans['is_correct'] == 1;
+
+          if (key > 0) {
+            itemTotal[key] = (itemTotal[key] ?? 0) + 1;
+            if (isCorrect) {
+              itemCorrect[key] = (itemCorrect[key] ?? 0) + 1;
+            }
+          }
+
+          final secName = qId != null ? sectionNameByQuestionId[qId] : null;
+          if (secName != null && secName.isNotEmpty) {
+            sectionTotal[secName] = (sectionTotal[secName] ?? 0) + 1;
+            if (isCorrect) {
+              sectionCorrect[secName] = (sectionCorrect[secName] ?? 0) + 1;
+            }
+          }
+
+          final status = (ans['status'] ?? ans['verification_status'] ?? '')
+              .toString()
+              .toLowerCase();
+          final recognized =
+              (ans['recognized_text'] ?? ans['answer'] ?? '').toString().trim();
+          final qType = (ans['question_type'] ??
+                  ans['exam_type'] ??
+                  (qId != null ? questionTypeById[qId] : '') ??
+                  '')
+              .toString()
+              .toLowerCase();
+
+          if (status.contains('review') ||
+              status.contains('ambiguous') ||
+              status.contains('multiple') ||
+              recognized.isEmpty) {
+            if (qType.contains('ident')) {
+              paperHasIdReview = true;
+            } else {
+              paperHasOmrReview = true;
+            }
+          }
+        }
+
+        if (paperHasIdReview) idFlagged++;
+        if (paperHasOmrReview) omrFlagged++;
+      }
+    }
+
+    int lowAccuracyCount = 0;
+    final missedQNums = <int>[];
+    itemTotal.forEach((qNum, total) {
+      if (total > 0) {
+        final corr = itemCorrect[qNum] ?? 0;
+        final pValue = corr / total;
+        if (pValue < 0.40) {
+          lowAccuracyCount++;
+          missedQNums.add(qNum);
+        }
+      }
+    });
+    missedQNums.sort();
+
+    String? lowestSec;
+    double? lowestSecPct;
+    sectionTotal.forEach((sec, total) {
+      if (total > 0) {
+        final pct = ((sectionCorrect[sec] ?? 0) / total) * 100.0;
+        if (lowestSecPct == null || pct < lowestSecPct!) {
+          lowestSecPct = pct;
+          lowestSec = sec;
+        }
+      }
+    });
+
+    final bool activeExam = !_isDone(examInfo.status);
+    final int unscanned = activeExam
+        ? math.max(0, examInfo.students - attemptsList.length)
+        : 0;
+
+    return _ExamAnalytics(
+      examId: examId,
+      examTitle: examInfo.title,
+      attemptPercentages: percentages,
+      lowAccuracyItemCount: lowAccuracyCount,
+      missedQuestionNumbers: missedQNums,
+      hasIdentificationSection: hasIdentification,
+      lowestSectionName: lowestSec,
+      lowestSectionAvg: lowestSecPct,
+      idReviewCount: idFlagged,
+      omrReviewCount: omrFlagged,
+      pendingScanCount: unscanned,
+    );
+  }
+
   Future<void> _loadData({bool silent = false}) async {
     if (!mounted) return;
-    // A silent refresh keeps the current content on screen (no spinner flash).
     if (!silent) {
       setState(() {
         _loading = true;
@@ -999,7 +1338,6 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
       final rawClasses = results[0];
       final rawExams = results[1];
 
-      // Student count per class.
       final counts = <String, int>{};
       await Future.wait(rawClasses.map((c) async {
         final id = int.tryParse(c['id']?.toString() ?? '');
@@ -1008,32 +1346,67 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
         counts[id.toString()] = students.length;
       }));
 
-      String codeForExam(Map<String, dynamic> e) {
+      String codeForExam(JsonMap e) {
         final cd = e['class'];
-        return cd is Map ? _classCode(Map<String, dynamic>.from(cd)) : '';
+        return cd is Map ? _classCode(JsonMap.from(cd)) : '';
       }
 
-      final exams = rawExams.map((e) {
+      int studentCountForExam(JsonMap e) {
+        final rawIds = e['class_ids'];
+        if (rawIds is List && rawIds.isNotEmpty) {
+          int sum = 0;
+          for (final cid in rawIds) {
+            sum += counts[cid.toString()] ?? 0;
+          }
+          if (sum > 0) return sum;
+        }
         final cd = e['class'];
         final classId = cd is Map ? cd['id']?.toString() : null;
-        return _ExamInfo(
-          id: int.tryParse(e['id']?.toString() ?? ''),
+        return counts[e['class_id']?.toString() ?? classId ?? ''] ?? 0;
+      }
+
+      final exams = <_ExamInfo>[];
+      final rawExamById = <int, JsonMap>{};
+
+      for (final e in rawExams) {
+        final id = int.tryParse(e['id']?.toString() ?? '');
+        final info = _ExamInfo(
+          id: id,
           title: e['title']?.toString() ?? 'Untitled exam',
           code: codeForExam(e),
           date: (e['created_at']?.toString() ?? '').split('T').first,
-          students: counts[e['class_id']?.toString() ?? classId ?? ''] ?? 0,
+          students: studentCountForExam(e),
           status: _prettyStatus(e['status']?.toString()),
         );
-      }).toList();
+        exams.add(info);
+        if (id != null) rawExamById[id] = e;
+      }
+
+      final analyticsMap = <int, _ExamAnalytics>{};
+      await Future.wait(
+        exams.where((e) => e.id != null).map((e) async {
+          final a = await _computeExamAnalytics(
+            token,
+            e,
+            rawExamById[e.id!] ?? const {},
+          );
+          analyticsMap[e.id!] = a;
+        }),
+      );
 
       if (!mounted) return;
       setState(() {
         _exams = exams;
+        _analyticsByExam = analyticsMap;
+        if (_selectedAnalyticsExamId != null &&
+            !_analyticsByExam.containsKey(_selectedAnalyticsExamId)) {
+          _selectedAnalyticsExamId = null;
+        }
         _loading = false;
       });
     } catch (e) {
       if (!mounted) return;
-      if (silent) return; // keep showing the last good data
+      if (silent) return;
       setState(() {
         _error = e.toString().replaceFirst('Exception: ', '');
         _loading = false;
@@ -1041,17 +1414,12 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     }
   }
 
-
   Future<void> _logout() => _performLogout(context);
 
   Future<void> _select(TeacherPage page) async {
-    // Exams / Scans have their own full-screen Scaffold/AppBar, so they are
-    // opened as routes — wrapped in the same shell so the sidebar (and its
-    // collapse state) stays consistent.
     final screen = _moduleScreenFor(page);
     if (screen != null) {
       await Navigator.push(context, _shellRoute(page, screen));
-      // Refresh exams/statuses after creating, building or scanning.
       if (mounted) _loadData(silent: true);
       return;
     }
@@ -1070,6 +1438,11 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
 
   Widget _body() {
     if (_page == TeacherPage.dashboard) {
+      final metrics = _DashboardMetrics.fromExams(
+        _exams,
+        _analyticsByExam,
+        selectedExamId: _selectedAnalyticsExamId,
+      );
       return _DashboardContent(
         teacherName: widget.teacherName,
         onNavigate: _select,
@@ -1078,6 +1451,9 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
         error: _error,
         onRetry: _loadData,
         exams: _exams,
+        metrics: metrics,
+        selectedExamId: _selectedAnalyticsExamId,
+        onSelectExamId: (id) => setState(() => _selectedAnalyticsExamId = id),
       );
     }
     return _PlaceholderPage(page: _page);
@@ -1096,20 +1472,13 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
   }
 }
 
-// =============================================================
-// TOP BAR (desktop) + shared bits
-// =============================================================
-
 class _DesktopTopBar extends StatelessWidget {
   const _DesktopTopBar({
     this.hint = 'Search classes, exams, students',
     this.onSearchChanged,
   });
 
-  /// Placeholder text of the search field.
   final String hint;
-
-  /// Called as the teacher types (used by My Subjects to filter as you type).
   final ValueChanged<String>? onSearchChanged;
 
   @override
@@ -1247,10 +1616,6 @@ class _PlaceholderPage extends StatelessWidget {
   }
 }
 
-// =============================================================
-// DASHBOARD CONTENT
-// =============================================================
-
 class _DashboardContent extends StatelessWidget {
   const _DashboardContent({
     required this.teacherName,
@@ -1260,6 +1625,9 @@ class _DashboardContent extends StatelessWidget {
     required this.error,
     required this.onRetry,
     required this.exams,
+    required this.metrics,
+    required this.selectedExamId,
+    required this.onSelectExamId,
   });
 
   final String teacherName;
@@ -1269,6 +1637,9 @@ class _DashboardContent extends StatelessWidget {
   final String? error;
   final VoidCallback onRetry;
   final List<_ExamInfo> exams;
+  final _DashboardMetrics metrics;
+  final int? selectedExamId;
+  final ValueChanged<int?> onSelectExamId;
 
   static const _months = [
     'January', 'February', 'March', 'April', 'May', 'June', 'July',
@@ -1319,20 +1690,20 @@ class _DashboardContent extends StatelessWidget {
                   else if (error != null)
                     _ErrorPanel(message: error!, onRetry: onRetry)
                   else ...[
-                  _stats(w),
-                  const SizedBox(height: 24),
-                  _reviewAndAnalytics(context, w),
-                  const SizedBox(height: 32),
-                  _sectionHeader('Recent Examinations', 'View all',
-                      () => onNavigate(TeacherPage.exams)),
-                  const SizedBox(height: 12),
-                  if (exams.isEmpty)
-                    const _EmptyPanel('No examinations yet.')
-                  else if (w >= 720)
-                    _ExamTable(exams: exams, onOpenExam: onOpenExam)
-                  else
-                    _ExamCards(exams: exams, onOpenExam: onOpenExam),
-                  const SizedBox(height: 16),
+                    _stats(w),
+                    const SizedBox(height: 24),
+                    _reviewAndAnalytics(context, w),
+                    const SizedBox(height: 32),
+                    _sectionHeader('Recent Examinations', 'View all',
+                        () => onNavigate(TeacherPage.exams)),
+                    const SizedBox(height: 12),
+                    if (exams.isEmpty)
+                      const _EmptyPanel('No examinations yet.')
+                    else if (w >= 720)
+                      _ExamTable(exams: exams, onOpenExam: onOpenExam)
+                    else
+                      _ExamCards(exams: exams, onOpenExam: onOpenExam),
+                    const SizedBox(height: 16),
                   ],
                 ],
               );
@@ -1342,8 +1713,6 @@ class _DashboardContent extends StatelessWidget {
       );
     });
   }
-
-  // ---------- Stats ----------
 
   Widget _stats(double w) {
     final cols = w >= _kTablet ? 3 : 2;
@@ -1356,11 +1725,13 @@ class _DashboardContent extends StatelessWidget {
         label: 'Active Exams',
         note: 'Not yet finalized',
       ),
-      const _StatCard(
+      _StatCard(
         icon: Icons.rate_review_outlined,
-        value: '12',
+        value: '${metrics.totalForReview}',
         label: 'For Review',
-        note: 'Sample data',
+        note: metrics.totalForReview == 0
+            ? 'All sheets verified'
+            : 'Pending scan or verification',
         color: CmColors.amber,
       ),
       _StatCard(
@@ -1373,13 +1744,24 @@ class _DashboardContent extends StatelessWidget {
     ]);
   }
 
-  // ---------- Review + Analytics ----------
-
   Widget _reviewAndAnalytics(BuildContext context, double w) {
     final review = _ReviewQueueCard(
-      onReview: () => _soon(context, 'Verification screen'),
+      metrics: metrics,
+      onReview: () {
+        final targetExamId = metrics.firstReviewExamId;
+        if (targetExamId != null) {
+          openTeacherScansForExam(context, targetExamId);
+        } else {
+          onNavigate(TeacherPage.scans);
+        }
+      },
     );
-    const analytics = _AnalyticsCard();
+    final analytics = _AnalyticsCard(
+      exams: exams,
+      metrics: metrics,
+      selectedExamId: selectedExamId,
+      onSelectExamId: onSelectExamId,
+    );
 
     if (w >= _kDesktop) {
       return Row(
@@ -1387,7 +1769,7 @@ class _DashboardContent extends StatelessWidget {
         children: [
           Expanded(flex: 5, child: review),
           const SizedBox(width: 16),
-          const Expanded(flex: 6, child: analytics),
+          Expanded(flex: 6, child: analytics),
         ],
       );
     }
@@ -1395,9 +1777,6 @@ class _DashboardContent extends StatelessWidget {
       children: [review, const SizedBox(height: 16), analytics],
     );
   }
-
-
-  // ---------- Layout helpers ----------
 
   Widget _sectionHeader(String title, String? action, VoidCallback? onTap) {
     return Row(
@@ -1432,10 +1811,6 @@ class _DashboardContent extends StatelessWidget {
     );
   }
 }
-
-// =============================================================
-// CARDS
-// =============================================================
 
 class _Panel extends StatelessWidget {
   const _Panel({required this.child, this.padding = 20, this.borderColor});
@@ -1514,22 +1889,31 @@ class _StatCard extends StatelessWidget {
 }
 
 class _ReviewQueueCard extends StatelessWidget {
-  const _ReviewQueueCard({required this.onReview});
+  const _ReviewQueueCard({
+    required this.metrics,
+    required this.onReview,
+  });
+
+  final _DashboardMetrics metrics;
   final VoidCallback onReview;
 
   @override
   Widget build(BuildContext context) {
+    final total = metrics.totalForReview;
+    final headline = total == 1
+        ? '1 answer sheet needs verification or scanning'
+        : '$total answer sheets need verification or scanning';
+
     return _Panel(
       borderColor: CmColors.amber.withValues(alpha: 0.6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          const Row(
             children: [
-              const Icon(Icons.rate_review_outlined,
-                  color: CmColors.amber),
-              const SizedBox(width: 8),
-              const Text('Review Queue',
+              Icon(Icons.rate_review_outlined, color: CmColors.amber),
+              SizedBox(width: 8),
+              Text('Review Queue',
                   style: TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.w700,
@@ -1537,30 +1921,33 @@ class _ReviewQueueCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 4),
-          const Text('Sample data until scanning is connected',
+          const Text('Live verification & scanning queue across active exams',
               style: TextStyle(fontSize: 12, color: CmColors.slate)),
           const SizedBox(height: 12),
-          const Text('12 answer sheets need verification',
-              style: TextStyle(
+          Text(headline,
+              style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
                   color: CmColors.navy)),
           const SizedBox(height: 16),
-          const _ReviewRow(
-              icon: Icons.edit_note,
-              title: 'Identification recognition',
-              engine: 'Google ML Kit',
-              count: 8),
-          const _ReviewRow(
-              icon: Icons.radio_button_checked,
-              title: 'Low-confidence bubbles',
-              engine: 'OpenCV OMR',
-              count: 3),
-          const _ReviewRow(
-              icon: Icons.image_not_supported_outlined,
-              title: 'Unreadable scan',
-              engine: 'Rescan needed',
-              count: 1),
+          _ReviewRow(
+            icon: Icons.edit_note,
+            title: 'Identification recognition',
+            engine: 'Microsoft Azure AI Vision',
+            count: metrics.idReviewPapers,
+          ),
+          _ReviewRow(
+            icon: Icons.radio_button_checked,
+            title: 'Low-confidence / multiple bubbles',
+            engine: 'OpenCV OMR',
+            count: metrics.omrReviewPapers,
+          ),
+          _ReviewRow(
+            icon: Icons.document_scanner_outlined,
+            title: 'Unscanned roster sheets',
+            engine: 'Awaiting camera scan or upload',
+            count: metrics.unscannedPapers,
+          ),
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
@@ -1626,32 +2013,105 @@ class _ReviewRow extends StatelessWidget {
 }
 
 class _AnalyticsCard extends StatelessWidget {
-  const _AnalyticsCard();
+  const _AnalyticsCard({
+    required this.exams,
+    required this.metrics,
+    required this.selectedExamId,
+    required this.onSelectExamId,
+  });
+
+  final List<_ExamInfo> exams;
+  final _DashboardMetrics metrics;
+  final int? selectedExamId;
+  final ValueChanged<int?> onSelectExamId;
 
   @override
   Widget build(BuildContext context) {
-    final maxCount = _scoreBuckets.values.reduce((a, b) => a > b ? a : b);
+    final buckets = metrics.buckets;
+    final rawMax = buckets.values.isEmpty
+        ? 0
+        : buckets.values.reduce((a, b) => a > b ? a : b);
+    final maxCount = rawMax > 0 ? rawMax : 1;
+
+    final hasAttempts = metrics.totalAttempts > 0;
+    final avgText =
+        hasAttempts ? '${metrics.averagePercent.toStringAsFixed(1)}%' : '—';
+    final highText =
+        hasAttempts ? '${metrics.highestPercent.toStringAsFixed(0)}%' : '—';
+    final lowText =
+        hasAttempts ? '${metrics.lowestPercent.toStringAsFixed(0)}%' : '—';
 
     return _Panel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Score Distribution',
-              style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
-                  color: CmColors.navy)),
-          const SizedBox(height: 2),
-          const Text('Sample data until results are connected',
-              style: TextStyle(fontSize: 12, color: CmColors.slate)),
+          Row(
+            children: [
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Score Distribution',
+                        style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                            color: CmColors.navy)),
+                    SizedBox(height: 2),
+                    Text('Live class performance & item difficulty insights',
+                        style: TextStyle(fontSize: 12, color: CmColors.slate)),
+                  ],
+                ),
+              ),
+              if (exams.isNotEmpty)
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 210),
+                  child: DropdownButtonHideUnderline(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: CmColors.bg,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: CmColors.line),
+                      ),
+                      child: DropdownButton<int?>(
+                        value: selectedExamId,
+                        isDense: true,
+                        isExpanded: true,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: CmColors.navy,
+                        ),
+                        items: [
+                          const DropdownMenuItem<int?>(
+                            value: null,
+                            child: Text('All Examinations',
+                                overflow: TextOverflow.ellipsis),
+                          ),
+                          for (final e in exams.where((x) => x.id != null))
+                            DropdownMenuItem<int?>(
+                              value: e.id,
+                              child: Text(e.title,
+                                  overflow: TextOverflow.ellipsis),
+                            ),
+                        ],
+                        onChanged: onSelectExamId,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
           const SizedBox(height: 16),
           Wrap(
             spacing: 24,
             runSpacing: 8,
-            children: const [
-              _MiniStat('Class average', '78.4'),
-              _MiniStat('Highest', '98'),
-              _MiniStat('Lowest', '46'),
+            children: [
+              _MiniStat('Class average', avgText),
+              _MiniStat('Highest', highText),
+              _MiniStat('Lowest', lowText),
+              _MiniStat('Checked', '${metrics.totalAttempts}'),
             ],
           ),
           const SizedBox(height: 20),
@@ -1660,7 +2120,7 @@ class _AnalyticsCard extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                for (final e in _scoreBuckets.entries)
+                for (final e in buckets.entries)
                   Expanded(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -1674,9 +2134,12 @@ class _AnalyticsCard extends StatelessWidget {
                                   color: CmColors.navy)),
                           const SizedBox(height: 4),
                           Container(
-                            height: 90 * e.value / maxCount,
+                            height:
+                                e.value == 0 ? 4 : (90 * e.value / maxCount),
                             decoration: BoxDecoration(
-                              color: CmColors.navy,
+                              color: e.value == 0
+                                  ? CmColors.line
+                                  : CmColors.navy,
                               borderRadius: BorderRadius.circular(6),
                             ),
                           ),
@@ -1699,14 +2162,20 @@ class _AnalyticsCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
-              children: const [
-                Icon(Icons.warning_amber_rounded,
-                    size: 20, color: CmColors.amber),
-                SizedBox(width: 10),
+              children: [
+                Icon(
+                  metrics.lowAccuracyItems > 0
+                      ? Icons.warning_amber_rounded
+                      : Icons.lightbulb_outline_rounded,
+                  size: 20,
+                  color: CmColors.amber,
+                ),
+                const SizedBox(width: 10),
                 Expanded(
-                  child: Text('3 items answered correctly by fewer than 40%',
-                      style: TextStyle(
-                          fontSize: 13, color: CmColors.navy)),
+                  child: Text(
+                    metrics.insightBannerText,
+                    style: const TextStyle(fontSize: 13, color: CmColors.navy),
+                  ),
                 ),
               ],
             ),
@@ -1738,10 +2207,6 @@ class _MiniStat extends StatelessWidget {
   }
 }
 
-// =============================================================
-// EXAMS: table (wide) and cards (narrow)
-// =============================================================
-
 class _StatusChip extends StatelessWidget {
   const _StatusChip(this.status);
   final String status;
@@ -1754,7 +2219,7 @@ class _StatusChip extends StatelessWidget {
       case 'Needs Review':
       case 'Processing':
         return CmColors.amber;
-      default: // Draft, Ready, Scanning
+      default:
         return CmColors.slate;
     }
   }
@@ -1782,7 +2247,6 @@ class _StatusChip extends StatelessWidget {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w700,
-              // Darker text tone keeps contrast AA on the tinted background.
               color: c == CmColors.slate
                   ? CmColors.navy
                   : HSLColor.fromColor(c).withLightness(0.28).toColor(),
@@ -1972,3 +2436,4 @@ class _EmptyPanel extends StatelessWidget {
     );
   }
 }
+// END OF FILE

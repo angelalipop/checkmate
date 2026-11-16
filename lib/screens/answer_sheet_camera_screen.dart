@@ -1,4 +1,3 @@
-
 import 'dart:typed_data';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
@@ -7,8 +6,6 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
-
-import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 import 'package:checkmate/services/answer_sheet_processor.dart';
 

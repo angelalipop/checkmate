@@ -110,13 +110,6 @@ Future<Response> _patch(
       decoded['section_id']?.toString() ?? '',
     );
 
-    if (text.isEmpty) {
-      return Response.json(
-        statusCode: 400,
-        body: {'message': 'Question text is required'},
-      );
-    }
-
     if (points == null || points < 0) {
       return Response.json(
         statusCode: 400,

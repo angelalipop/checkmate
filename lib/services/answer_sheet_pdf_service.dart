@@ -69,6 +69,7 @@ class AnswerSheetPdfService {
     required List<Map<String, dynamic>> sections,
     required Map<int, List<Map<String, dynamic>>> questions,
     List<Map<String, dynamic>>? students,
+    Set<int>? studentIds,
   }) async {
     final pdf = pw.Document();
 
@@ -169,7 +170,15 @@ class AnswerSheetPdfService {
     final pages = <List<_StudentSheetItem?>>[];
     var nextSheetNumber = 1;
 
+    // Number sheets in the full exam roster order even when exporting one class.
+    bool includesStudent(Map<String, dynamic> student) =>
+        studentIds == null ||
+        studentIds.contains(int.tryParse(student['id']?.toString() ?? ''));
+
     if (resolvedStudents.isEmpty) {
+      if (studentIds != null) {
+        throw StateError('The selected section has no students.');
+      }
       final templates = <_StudentSheetItem>[];
 
       for (final layout in sheetLayouts) {
@@ -199,10 +208,12 @@ class AnswerSheetPdfService {
           fallbackSection: defaultSection,
         );
 
+        final sheetNumber = nextSheetNumber++;
+        if (!includesStudent(student)) continue;
         studentsSheets.add(
           _StudentSheetItem(
             layout: sheetLayouts.first,
-            sheetNumber: nextSheetNumber++,
+            sheetNumber: sheetNumber,
             studentName: info.fullName,
             studentNumber: info.studentNumber,
             sectionName: info.section,
@@ -224,6 +235,10 @@ class AnswerSheetPdfService {
           fallbackSection: defaultSection,
         );
 
+        if (!includesStudent(student)) {
+          nextSheetNumber += sheetLayouts.length;
+          continue;
+        }
         final studentSheets = <_StudentSheetItem>[];
 
         for (final layout in sheetLayouts) {
@@ -246,6 +261,10 @@ class AnswerSheetPdfService {
           ]);
         }
       }
+    }
+
+    if (studentIds != null && pages.isEmpty) {
+      throw StateError('No sheets could be created for the selected section.');
     }
 
     final a4Landscape = PdfPageFormat.a4.landscape;

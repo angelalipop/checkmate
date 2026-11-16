@@ -260,7 +260,11 @@ class ExamService {
     String? status,
     String? assessmentType,
     String? gradingPeriod,
+    String creationMode = 'builder',
   }) async {
+    if (creationMode != 'builder' && creationMode != 'answer_key') {
+      throw ExamValidationException('Invalid exam creation mode.');
+    }
     await _ensureAssessmentTypeConstraint();
 
     final normalizedStatus = status?.trim().toLowerCase();
@@ -311,55 +315,56 @@ class ExamService {
     }.toList()
       ..sort();
 
-    final result = await Database.pool.execute(
-      Sql.named('''
-        INSERT INTO exams (
-          class_id,
-          title,
-          description,
-          instructions,
-          status,
-          assessment_type, grading_period
-        )
-        VALUES (
-          @class_id,
-          @title,
-          @description,
-          @instructions,
-          COALESCE(@status, 'draft'),
-          @assessment_type, @grading_period
-        )
-        RETURNING
-          id,
-          class_id,
-          title,
-          description,
-          instructions,
-          status,
-          created_at,
-          updated_at,
-          assessment_type,
-          version
-      '''),
-      parameters: {
-        'class_id': classId,
-        'title': title.trim(),
-        'description':
-            description?.trim().isEmpty ?? false ? null : description?.trim(),
-        'instructions':
-            instructions?.trim().isEmpty ?? false ? null : instructions?.trim(),
-        'status': normalizedStatus,
-        'assessment_type': cleanType,
-        'grading_period': period,
-      },
-    );
+    return Database.pool.runTx<Map<String, dynamic>>((tx) async {
+      final result = await tx.execute(
+        Sql.named('''
+          INSERT INTO exams (
+            class_id,
+            title,
+            description,
+            instructions,
+            status,
+            assessment_type, grading_period, creation_mode
+          )
+          VALUES (
+            @class_id,
+            @title,
+            @description,
+            @instructions,
+            COALESCE(@status, 'draft'),
+            @assessment_type, @grading_period, @creation_mode
+          )
+          RETURNING
+            id,
+            class_id,
+            title,
+            description,
+            instructions,
+            status,
+            created_at,
+            updated_at,
+            assessment_type,
+            version
+        '''),
+        parameters: {
+          'class_id': classId,
+          'title': title.trim(),
+          'description':
+              description?.trim().isEmpty ?? false ? null : description?.trim(),
+          'instructions':
+              instructions?.trim().isEmpty ?? false ? null : instructions?.trim(),
+          'status': normalizedStatus,
+          'assessment_type': cleanType,
+          'grading_period': period,
+          'creation_mode': creationMode,
+        },
+      );
 
-    final row = result.first;
-    final examId = row[0]! as int;
+      final row = result.first;
+      final examId = row[0]! as int;
 
-    try {
       for (final cid in targetClassIds) {
-        await Database.pool.execute(
+        await tx.execute(
           Sql.named('''
             INSERT INTO exam_class_assignments (exam_id, class_id, exam_version)
             VALUES (@exam_id, @class_id, @version)
@@ -372,25 +377,23 @@ class ExamService {
           },
         );
       }
-    } catch (_) {
-      // Ignore if exam_class_assignments is not present.
-    }
 
-    return {
-      'id': row[0],
-      'class_id': row[1],
-      'title': row[2],
-      'description': row[3],
-      'instructions': row[4],
-      'status': row[5],
-      'created_at': row[6].toString(),
-      'updated_at': row[7].toString(),
-      'assessment_type': row[8],
-      'version': row[9],
-      'class_ids': targetClassIds,
-      'grading_period': period,
-      'creation_mode': 'builder',
-    };
+      return {
+        'id': row[0],
+        'class_id': row[1],
+        'title': row[2],
+        'description': row[3],
+        'instructions': row[4],
+        'status': row[5],
+        'created_at': row[6].toString(),
+        'updated_at': row[7].toString(),
+        'assessment_type': row[8],
+        'version': row[9],
+        'class_ids': targetClassIds,
+        'grading_period': period,
+        'creation_mode': creationMode,
+      };
+    });
   }
 
   /// Updates title / description / instructions / assessment type / status and,
@@ -639,7 +642,7 @@ class ExamService {
         'class_ids': (finalIds.toList()..sort()),
         'validation': validation.toJson(),
         'grading_period': period,
-        'creation_mode': 'builder',
+        'creation_mode': cur[7],
       };
     });
   }

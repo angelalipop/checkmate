@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:postgres/postgres.dart';
 
 import 'package:server/database.dart';
+import 'package:server/questions/question_service.dart' as questions;
 
 class QuestionService {
   static Future<List<Map<String, dynamic>>> getAll({
@@ -53,6 +54,7 @@ class QuestionService {
   static Future<Map<String, dynamic>> create({
     required int sectionId,
     required int questionNumber,
+    int? examId,
     required String questionText,
     required num points,
     dynamic choices,
@@ -62,15 +64,30 @@ class QuestionService {
 
     final secRows = await Database.pool.execute(
       Sql.named('''
-        SELECT question_type
-        FROM exam_sections
-        WHERE id = @section_id
+        SELECT s.question_type, e.creation_mode
+        FROM exam_sections s
+        JOIN exams e ON e.id = s.exam_id
+        WHERE s.id = @section_id AND (@exam_id::bigint IS NULL OR e.id = @exam_id)
       '''),
-      parameters: {'section_id': sectionId},
+      parameters: {'section_id': sectionId, 'exam_id': examId},
     );
-    final qType = secRows.isNotEmpty
-        ? (secRows.first[0]?.toString().trim().toLowerCase() ?? '')
-        : '';
+    if (secRows.isEmpty) {
+      throw ArgumentError('Section does not belong to this exam.');
+    }
+    if (secRows.first[1] == 'answer_key') {
+      return questions.QuestionService.create(
+        sectionId: sectionId,
+        questionNumber: questionNumber,
+        questionText: questionText,
+        points: points,
+        choices: choices,
+        correctAnswer: correctAnswer,
+      );
+    }
+    if (questionText.trim().isEmpty) {
+      throw ArgumentError('Question text is required.');
+    }
+    final qType = secRows.first[0]?.toString().trim().toLowerCase() ?? '';
 
     var normalizedAnswer = correctAnswer?.trim();
     if (normalizedAnswer != null &&

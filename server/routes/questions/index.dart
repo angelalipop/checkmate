@@ -82,7 +82,6 @@ Future<Response> _createQuestion(RequestContext context) async {
         sectionId < 1 ||
         questionNumber == null ||
         questionNumber < 1 ||
-        questionText.trim().isEmpty ||
         points == null ||
         points < 0) {
       return Response.json(
@@ -111,6 +110,11 @@ Future<Response> _createQuestion(RequestContext context) async {
     return Response.json(
       statusCode: 400,
       body: {'message': 'Invalid JSON request body'},
+    );
+  } on ArgumentError catch (e) {
+    return Response.json(
+      statusCode: 400,
+      body: {'message': e.message},
     );
   } catch (e) {
     print('CREATE QUESTION ERROR: $e');

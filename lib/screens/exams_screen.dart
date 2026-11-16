@@ -126,6 +126,11 @@ class _ExamsScreenState extends State<ExamsScreen> {
                 onTap: () => Navigator.pop(sheetContext, 'builder'),
               ),
               ListTile(
+                leading: const Icon(Icons.key_outlined),
+                title: const Text('Add Answer Key and Create Answer Sheets'),
+                onTap: () => Navigator.pop(sheetContext, 'answer_key'),
+              ),
+              ListTile(
                 leading: const Icon(Icons.picture_as_pdf_outlined),
                 title: const Text('Upload Questionnaire'),
                 subtitle: const Text(
@@ -139,8 +144,8 @@ class _ExamsScreenState extends State<ExamsScreen> {
       ),
     );
     if (!mounted) return;
-    if (choice == 'builder') {
-      await _showAddExamDialog();
+    if (choice == 'builder' || choice == 'answer_key') {
+      await _showAddExamDialog(answerKeyOnly: choice == 'answer_key');
     } else if (choice == 'pdf') {
       final parsedPaper = await showUploadQuestionnaireModal(context);
       if (parsedPaper == null || !mounted) return;
@@ -175,7 +180,7 @@ class _ExamsScreenState extends State<ExamsScreen> {
     }
   }
 
-  Future<void> _showAddExamDialog() async {
+  Future<void> _showAddExamDialog({bool answerKeyOnly = false}) async {
     int? selectedClassId;
     if (_selectedSection != null) {
       for (final item in _classes) {
@@ -190,11 +195,22 @@ class _ExamsScreenState extends State<ExamsScreen> {
       context,
       classes: _classes,
       initialClassId: selectedClassId,
+      answerKeyOnly: answerKeyOnly,
     );
 
     if (createdId != null) {
       await _loadData();
       if (!mounted) return;
+      if (answerKeyOnly && createdId > 0) {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ExamBuilderScreen(examId: createdId),
+          ),
+        );
+        if (mounted) await _loadData();
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Exam added successfully.')),
       );
