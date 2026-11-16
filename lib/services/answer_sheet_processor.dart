@@ -276,7 +276,18 @@ class AnswerSheetProcessor {
         if (component.area < 20) {
           continue;
         }
+        
+        final double componentWidth =
+    component.maxX - component.minX + 1.0;
 
+        final double componentHeight =
+            component.maxY - component.minY + 1.0;
+
+        // Reject components that are excessively large for a registration marker.
+        if (componentWidth > image.width * 0.12 ||
+            componentHeight > image.height * 0.12) {
+          continue;
+        }
         /*
          * Ignore extremely large connected regions.
          */
@@ -284,10 +295,7 @@ class AnswerSheetProcessor {
           continue;
         }
 
-        final double componentWidth = component.maxX - component.minX + 1.0;
-
-        final double componentHeight = component.maxY - component.minY + 1.0;
-
+        
         if (componentWidth < 3 || componentHeight < 3) {
           continue;
         }

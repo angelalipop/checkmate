@@ -57,7 +57,7 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
   bool _autoCaptureTriggered = false;
 
   int _stableFrameCount = 0;
-
+  DateTime? _stableSince;
   DateTime _lastFrameCheck = DateTime.fromMillisecondsSinceEpoch(0);
 
   List<Offset>? _previousNormalizedMarkers;
@@ -86,7 +86,7 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
         controller.value.isStreamingImages) {
       return;
     }
-
+    _stableSince = null;
     _stableFrameCount = 0;
     _previousNormalizedMarkers = null;
     _autoCaptureTriggered = false;
@@ -128,7 +128,7 @@ img.Image? _convertBgraFrame(CameraImage cameraImage) {
 
   if (bytesPerPixel < 4) return null;
 
-  const maxDimension = 360;
+  const maxDimension = 640;
 
   final scale = math.max(
     cameraImage.width / maxDimension,
@@ -173,6 +173,7 @@ img.Image? _convertBgraFrame(CameraImage cameraImage) {
   return result;
 }
 
+
 Future<void> _analyzeCameraFrame(CameraImage cameraImage) async {
   if (!mounted ||
       _autoCaptureTriggered ||
@@ -193,27 +194,27 @@ Future<void> _analyzeCameraFrame(CameraImage cameraImage) async {
 
   try {
     final frame = _convertBgraFrame(cameraImage);
-    debugPrint(
-      'CHECKMATE: Frame conversion ${frame == null ? "FAILED" : "SUCCESS"}',
-    );
+
     if (frame == null) {
       _stableFrameCount = 0;
       _previousNormalizedMarkers = null;
+      _stableSince = null;
+
       if (mounted) {
         setState(() {
-          _markerStatus = 'Automatic detection unavailable. Use the shutter.';
+          _markerStatus =
+              'Automatic detection unavailable. Use the shutter.';
         });
       }
       return;
     }
 
     final markers = AnswerSheetProcessor.detectLiveMarkers(frame);
-    debugPrint(
-      'CHECKMATE: Markers detected: ${markers?.length ?? 0}',
-    );
+
     if (markers == null || markers.length != 4) {
       _stableFrameCount = 0;
       _previousNormalizedMarkers = null;
+      _stableSince = null;
 
       if (mounted) {
         setState(() {
@@ -230,12 +231,11 @@ Future<void> _analyzeCameraFrame(CameraImage cameraImage) async {
       );
     }).toList();
 
-    bool stable = false;
+    bool stable = true;
 
-    if (_previousNormalizedMarkers != null &&
-        _previousNormalizedMarkers!.length == 4) {
-      stable = true;
-
+    if (_previousNormalizedMarkers == null) {
+      stable = false;
+    } else {
       for (int i = 0; i < 4; i++) {
         final dx = (currentMarkers[i].dx -
                 _previousNormalizedMarkers![i].dx)
@@ -252,14 +252,24 @@ Future<void> _analyzeCameraFrame(CameraImage cameraImage) async {
       }
     }
 
-    _stableFrameCount = stable ? _stableFrameCount + 1 : 1;
+    if (!stable) {
+      _stableFrameCount = 1;
+      _stableSince = now;
       _previousNormalizedMarkers = currentMarkers;
+    } else {
+      _stableFrameCount++;
+    }
 
-      debugPrint(
-        'CHECKMATE: Stable frames: $_stableFrameCount/5',
-      );
+    final stableDuration = _stableSince == null
+        ? 0
+        : now.difference(_stableSince!).inMilliseconds;
 
-    if (_stableFrameCount >= 5) {
+    debugPrint(
+      'CHECKMATE: Stable frames: $_stableFrameCount, '
+      'stable duration: ${stableDuration}ms',
+    );
+
+    if (_stableFrameCount >= 4 && stableDuration >= 800) {
       debugPrint('CHECKMATE: AUTO-CAPTURE TRIGGERED');
 
       _autoCaptureTriggered = true;
@@ -277,7 +287,7 @@ Future<void> _analyzeCameraFrame(CameraImage cameraImage) async {
     if (mounted) {
       setState(() {
         _markerStatus = stable
-            ? 'Hold still... ($_stableFrameCount/5)'
+            ? 'Hold still... (${stableDuration}ms / 800ms)'
             : 'Four markers detected. Hold still...';
       });
     }
@@ -287,7 +297,6 @@ Future<void> _analyzeCameraFrame(CameraImage cameraImage) async {
     _isAnalyzingFrame = false;
   }
 }
-
 
   Future<void> _initializeCamera() async {
   CameraController? controller;
@@ -545,9 +554,17 @@ Future<void> _chooseFromGallery() async {
         await controller.stopImageStream();
       }
 
+      debugPrint('CHECKMATE: Stopped image stream. Taking picture...');
+
       final XFile image = await controller.takePicture();
+
+      debugPrint('CHECKMATE: takePicture() SUCCESS');
+
       final Uint8List imageBytes = await image.readAsBytes();
 
+      debugPrint(
+        'CHECKMATE: Image bytes loaded: ${imageBytes.length}',
+      );
       final viewportSize = _scannerViewportSize;
 
       final Uint8List? croppedBytes = viewportSize == null
@@ -565,6 +582,10 @@ Future<void> _chooseFromGallery() async {
 
         _capturedFileName = 'Camera capture.jpg';
         _isTakingPicture = false;
+        debugPrint(
+          'CHECKMATE: Capture state updated. '
+          'Has image: ${_capturedImageBytes != null}',
+        );
       });
 
       debugPrint(
@@ -669,12 +690,22 @@ Future<void> _chooseFromGallery() async {
   _resetZoom();
 
   // Restart automatic detection after returning to the camera preview.
-  await Future.delayed(const Duration(milliseconds: 300));
+  // Restart automatic detection after returning to camera preview.
 
-  if (!mounted) return;
+await Future.delayed(const Duration(milliseconds: 500));
+
+if (!mounted) return;
+
+  debugPrint(
+    'CHECKMATE: Restart check - '
+    'initialized: ${controller.value.isInitialized}, '
+    'streaming: ${controller.value.isStreamingImages}',
+  );
 
   if (!controller.value.isStreamingImages) {
     await _startLiveMarkerDetection(controller);
+  } else {
+    debugPrint('CHECKMATE: Image stream is already active.');
   }
 }
 
