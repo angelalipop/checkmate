@@ -1,3 +1,4 @@
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 
@@ -151,9 +152,9 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
     final validation = _validation;
     if (targetStatus == 'published' && !validation.isValid) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: Theme.of(context).colorScheme.error,
-          content: Text(validation.errors.join('\n')),
+        CmTheme.feedbackSnackBar(
+          validation.errors.join('\n'),
+          color: CmTheme.redDanger,
         ),
       );
       return;
@@ -180,20 +181,19 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
       await _loadExam();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            targetStatus == 'published'
-                ? 'Assessment published successfully.'
-                : 'Assessment saved as draft.',
-          ),
+        CmTheme.feedbackSnackBar(
+          targetStatus == 'published'
+              ? 'Assessment published successfully.'
+              : 'Assessment saved as draft.',
+          color: CmTheme.emeraldSuccess,
         ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: Theme.of(context).colorScheme.error,
-          content: Text(e.toString().replaceFirst('Exception: ', '')),
+        CmTheme.feedbackSnackBar(
+          e.toString().replaceFirst('Exception: ', ''),
+          color: CmTheme.redDanger,
         ),
       );
     } finally {
@@ -217,6 +217,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: CmTheme.redDanger),
             onPressed: () => Navigator.pop(dialogContext, true),
             child: const Text('Delete'),
           ),
@@ -232,13 +233,19 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
       if (!mounted) return;
       await _loadExam();
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Section deleted.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        CmTheme.feedbackSnackBar(
+          'Section deleted.',
+          color: CmTheme.emeraldSuccess,
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        CmTheme.feedbackSnackBar(
+          e.toString().replaceFirst('Exception: ', ''),
+          color: CmTheme.redDanger,
+        ),
       );
     }
   }
@@ -315,7 +322,10 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        CmTheme.feedbackSnackBar(
+          e.toString().replaceFirst('Exception: ', ''),
+          color: CmTheme.redDanger,
+        ),
       );
     }
   }
@@ -379,7 +389,10 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        CmTheme.feedbackSnackBar(
+          e.toString().replaceFirst('Exception: ', ''),
+          color: CmTheme.redDanger,
+        ),
       );
     }
   }
@@ -418,7 +431,10 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        CmTheme.feedbackSnackBar(
+          e.toString().replaceFirst('Exception: ', ''),
+          color: CmTheme.redDanger,
+        ),
       );
     }
   }
@@ -674,7 +690,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
     final validation = _validation;
     final status = (_exam?['status']?.toString() ?? 'draft').toLowerCase();
     final isValid = validation.isValid;
-    final color = isValid ? Colors.green.shade700 : Colors.orange.shade800;
+    final color = isValid ? CmTheme.emeraldSuccess : CmTheme.redDanger;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -686,7 +702,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
             Row(
               children: [
                 Icon(
-                  isValid ? Icons.check_circle : Icons.warning_amber_rounded,
+                  isValid ? Icons.check_circle : Icons.error_outline,
                   color: color,
                 ),
                 const SizedBox(width: 8),
@@ -696,7 +712,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 15,
-                      color: color,
+                      color: isValid ? CmTheme.navy : CmTheme.redDanger,
                     ),
                   ),
                 ),
@@ -759,7 +775,9 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_isLoading && _errorMessage == null && _exam?['creation_mode'] == 'answer_key') {
+    if (!_isLoading &&
+        _errorMessage == null &&
+        _exam?['creation_mode'] == 'answer_key') {
       return Scaffold(
         body: SafeArea(
           child: buildAnswerKeyExam(
@@ -788,9 +806,17 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, size: 48),
+              const Icon(
+                Icons.error_outline,
+                size: 48,
+                color: CmTheme.redDanger,
+              ),
               const SizedBox(height: 12),
-              Text(_errorMessage!, textAlign: TextAlign.center),
+              Text(
+                _errorMessage!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: CmTheme.redDanger),
+              ),
               const SizedBox(height: 16),
               ElevatedButton(onPressed: _loadExam, child: const Text('Retry')),
             ],
@@ -975,9 +1001,7 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                 final normType = AssessmentValidator.normalizeQuestionType(
                   type,
                 );
-                final sectionId = int.tryParse(
-                  section['id']?.toString() ?? '',
-                );
+                final sectionId = int.tryParse(section['id']?.toString() ?? '');
                 final secQs = sectionId == null
                     ? const <Map<String, dynamic>>[]
                     : (_questions[sectionId] ?? const <Map<String, dynamic>>[]);

@@ -1,13 +1,16 @@
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 
 import '../services/auth_storage.dart';
 import '../services/api_service.dart';
 import '../services/grade_report_service.dart';
+
 import 'package:file_selector/file_selector.dart';
 import 'package:printing/printing.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/foundation.dart';
 import 'package:share_plus/share_plus.dart';
+
 import '../services/my_subjects_api_service.dart';
 import 'exams_tab.dart';
 import 'teacher_dashboard.dart' show TeacherPage, TeacherShell;
@@ -32,22 +35,14 @@ import 'teacher_dashboard.dart' show TeacherPage, TeacherShell;
 final ValueNotifier<String> mySubjectsSearch = ValueNotifier<String>('');
 
 /// Controls shell chrome only while a section scorebook is visible.
-final ValueNotifier<bool> mySubjectsScorebookVisible = ValueNotifier<bool>(false);
+final ValueNotifier<bool> mySubjectsScorebookVisible = ValueNotifier<bool>(
+  false,
+);
 
 const double _kDesktop = 900;
 const double _kTablet = 600;
 
 // Brand Palette & Visual Tokens
-const Color _navy = Color(0xFF162137);
-const Color _ink = Color(0xFF1E293B);
-const Color _slate = Color(0xFF64748B);
-const Color _bg = Color(0xFFF8FAFC);
-const Color _line = Color(0xFFE2E8F0);
-const Color _green = Color(0xFF10B981);
-const Color _greenDark = Color(0xFF047857);
-const Color _amber = Color(0xFFF59E0B);
-const Color _amberDark = Color(0xFF92400E);
-const Color _red = Color(0xFFB91C1C);
 
 // ---------------------------------------------------------------
 // Helpers
@@ -161,15 +156,15 @@ class _Subject {
       totalStudents: _int(j['total_students']) ?? 0,
       sections: rawSections is List
           ? rawSections
-              .whereType<Map>()
-              .map(
-                (s) => _Section(
-                  classId: _int(s['class_id']) ?? 0,
-                  name: s['name']?.toString() ?? '',
-                  students: _int(s['students']) ?? 0,
-                ),
-              )
-              .toList()
+                .whereType<Map>()
+                .map(
+                  (s) => _Section(
+                    classId: _int(s['class_id']) ?? 0,
+                    name: s['name']?.toString() ?? '',
+                    students: _int(s['students']) ?? 0,
+                  ),
+                )
+                .toList()
           : const [],
     );
   }
@@ -205,17 +200,19 @@ class _Subject {
   }
 
   /// Program · Year · Semester
-  String get contextLine => [programCode ?? '', yearLabel, semesterLabel]
-      .where((e) => e.isNotEmpty)
-      .join(' · ');
+  String get contextLine => [
+    programCode ?? '',
+    yearLabel,
+    semesterLabel,
+  ].where((e) => e.isNotEmpty).join(' · ');
 
   /// Department · Program · Year · Semester
   String get fullContextLine => [
-        departmentLabel,
-        programCode ?? '',
-        yearLabel,
-        semesterLabel,
-      ].where((e) => e.isNotEmpty).join(' · ');
+    departmentLabel,
+    programCode ?? '',
+    yearLabel,
+    semesterLabel,
+  ].where((e) => e.isNotEmpty).join(' · ');
 
   String get crumb => code.isNotEmpty ? code : name;
 }
@@ -376,12 +373,9 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
         // The current school year is the default filter (once).
         if (!_defaultsApplied) {
           _defaultsApplied = true;
-          final years = list
-              .map((s) => s.schoolYear)
-              .whereType<String>()
-              .toSet()
-              .toList()
-            ..sort();
+          final years =
+              list.map((s) => s.schoolYear).whereType<String>().toSet().toList()
+                ..sort();
           _schoolYear = years.isEmpty ? 'all' : years.last;
         }
       });
@@ -436,35 +430,34 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
   bool _matchesDept(_Subject s) => _dept == 'all' || s.department == _dept;
 
   List<String> get _programOptions {
-    final set = _subjects
-        .where(_matchesDept)
-        .map((s) => s.programCode)
-        .whereType<String>()
-        .toSet()
-        .toList()
-      ..sort();
+    final set =
+        _subjects
+            .where(_matchesDept)
+            .map((s) => s.programCode)
+            .whereType<String>()
+            .toSet()
+            .toList()
+          ..sort();
     return set;
   }
 
   List<int> get _yearOptions {
-    final set = _subjects
-        .where(_matchesDept)
-        .where((s) => _program == 'all' || s.programCode == _program)
-        .map((s) => s.yearLevel)
-        .whereType<int>()
-        .toSet()
-        .toList()
-      ..sort();
+    final set =
+        _subjects
+            .where(_matchesDept)
+            .where((s) => _program == 'all' || s.programCode == _program)
+            .map((s) => s.yearLevel)
+            .whereType<int>()
+            .toSet()
+            .toList()
+          ..sort();
     return set;
   }
 
   List<String> get _schoolYearOptions {
-    final set = _subjects
-        .map((s) => s.schoolYear)
-        .whereType<String>()
-        .toSet()
-        .toList()
-      ..sort((a, b) => b.compareTo(a));
+    final set =
+        _subjects.map((s) => s.schoolYear).whereType<String>().toSet().toList()
+          ..sort((a, b) => b.compareTo(a));
     return set;
   }
 
@@ -511,7 +504,7 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
         if (_stack.last.kind == _Kind.builder) return;
         _back();
       },
-      child: ColoredBox(color: _bg, child: _buildView(top)),
+      child: ColoredBox(color: CmTheme.background, child: _buildView(top)),
     );
   }
 
@@ -546,7 +539,8 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
           onGoList: _goList,
           onGoSubject: _goSubject,
           onSwitchSection: (sec) => _switchSectionInScorebook(subject, sec),
-          onOpenBuilder: (examId) => _push(_View(_Kind.builder, subject: subject, examId: examId)),
+          onOpenBuilder: (examId) =>
+              _push(_View(_Kind.builder, subject: subject, examId: examId)),
         );
 
       case _Kind.builder:
@@ -572,13 +566,13 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
             style: TextStyle(
               fontSize: 26,
               fontWeight: FontWeight.w700,
-              color: _ink,
+              color: CmTheme.navy,
             ),
           ),
           const SizedBox(height: 4),
           const Text(
             'Your assigned subjects and section scorebooks across College and Senior High School.',
-            style: TextStyle(fontSize: 14, color: _slate),
+            style: TextStyle(fontSize: 14, color: CmTheme.slateText),
           ),
           const SizedBox(height: 16),
           if (narrow) ...[
@@ -589,14 +583,17 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
             const SizedBox(height: 12),
           ],
           if (_loading)
-            const _Centered(child: CircularProgressIndicator(color: _navy))
+            const _Centered(
+              child: CircularProgressIndicator(color: CmTheme.navy),
+            )
           else if (_error != null)
             _ErrorBox(message: _error!, onRetry: _load)
           else if (_subjects.isEmpty)
             const _EmptyBox(
               icon: Icons.menu_book_outlined,
               title: 'No subjects assigned yet.',
-              message: 'Your assigned subjects will appear here once the '
+              message:
+                  'Your assigned subjects will appear here once the '
                   'administrator assigns you to a subject and section.',
             )
           else ...[
@@ -698,17 +695,17 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
     final groups = <(String, List<_Subject>)>[
       (
         'College Department',
-        filtered.where((s) => s.department == 'college').toList()
+        filtered.where((s) => s.department == 'college').toList(),
       ),
       (
         'Senior High School',
-        filtered.where((s) => s.department == 'shs').toList()
+        filtered.where((s) => s.department == 'shs').toList(),
       ),
       (
         'Other',
         filtered
             .where((s) => s.department != 'college' && s.department != 'shs')
-            .toList()
+            .toList(),
       ),
     ];
 
@@ -730,12 +727,16 @@ class _MySubjectsScreenState extends State<MySubjectsScreen> {
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
-                      color: _ink,
+                      color: CmTheme.navy,
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
-                _Pill(text: '$distinct', background: _line, color: _ink),
+                _Pill(
+                  text: '$distinct',
+                  background: CmTheme.lineBorder,
+                  color: CmTheme.navy,
+                ),
               ],
             ),
           ),
@@ -787,7 +788,11 @@ class _PageScroll extends StatelessWidget {
     final refresh = onRefresh;
     return refresh == null
         ? scroll
-        : RefreshIndicator(color: _navy, onRefresh: refresh, child: scroll);
+        : RefreshIndicator(
+            color: CmTheme.navy,
+            onRefresh: refresh,
+            child: scroll,
+          );
   }
 }
 
@@ -797,9 +802,9 @@ class _Centered extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 48),
-        child: Center(child: child),
-      );
+    padding: const EdgeInsets.symmetric(vertical: 48),
+    child: Center(child: child),
+  );
 }
 
 class _ErrorBox extends StatelessWidget {
@@ -814,17 +819,17 @@ class _ErrorBox extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.error_outline, size: 40, color: _slate),
+          const Icon(Icons.error_outline, size: 40, color: CmTheme.redDanger),
           const SizedBox(height: 12),
           Text(
             message,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: _ink),
+            style: const TextStyle(color: CmTheme.navy),
           ),
           const SizedBox(height: 12),
           OutlinedButton(
             style: OutlinedButton.styleFrom(
-              foregroundColor: _navy,
+              foregroundColor: CmTheme.navy,
               minimumSize: const Size(88, 44),
             ),
             onPressed: onRetry,
@@ -855,13 +860,13 @@ class _EmptyBox extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 36),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _line),
+        border: Border.all(color: CmTheme.lineBorder),
       ),
       child: Column(
         children: [
-          Icon(icon, size: 40, color: _slate),
+          Icon(icon, size: 40, color: CmTheme.slateText),
           const SizedBox(height: 12),
           Text(
             title,
@@ -869,7 +874,7 @@ class _EmptyBox extends StatelessWidget {
             style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
-              color: _ink,
+              color: CmTheme.navy,
             ),
           ),
           if (message != null) ...[
@@ -877,13 +882,10 @@ class _EmptyBox extends StatelessWidget {
             Text(
               message!,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 13, color: _slate),
+              style: const TextStyle(fontSize: 13, color: CmTheme.slateText),
             ),
           ],
-          if (action != null) ...[
-            const SizedBox(height: 16),
-            action!,
-          ],
+          if (action != null) ...[const SizedBox(height: 16), action!],
         ],
       ),
     );
@@ -897,13 +899,13 @@ class _AddStudentsButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return FilledButton.icon(
       onPressed: () {
-        context
-            .findAncestorWidgetOfExactType<TeacherShell>()
-            ?.onSelect(TeacherPage.students);
+        context.findAncestorWidgetOfExactType<TeacherShell>()?.onSelect(
+          TeacherPage.students,
+        );
       },
       style: FilledButton.styleFrom(
-        backgroundColor: _navy,
-        foregroundColor: Colors.white,
+        backgroundColor: CmTheme.navy,
+        foregroundColor: CmTheme.surfaceWhite,
         minimumSize: const Size(0, 44),
         padding: const EdgeInsets.symmetric(horizontal: 20),
         shape: const StadiumBorder(),
@@ -964,25 +966,25 @@ class _SearchField extends StatelessWidget {
     return TextField(
       controller: controller,
       onChanged: onChanged,
-      style: const TextStyle(color: _ink),
+      style: const TextStyle(color: CmTheme.navy),
       decoration: InputDecoration(
         hintText: hintText,
-        hintStyle: const TextStyle(color: _slate, fontSize: 14),
-        prefixIcon: const Icon(Icons.search, color: _slate),
+        hintStyle: const TextStyle(color: CmTheme.slateText, fontSize: 14),
+        prefixIcon: const Icon(Icons.search, color: CmTheme.slateText),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: CmTheme.surfaceWhite,
         contentPadding: const EdgeInsets.symmetric(vertical: 14),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: _line),
+          borderSide: const BorderSide(color: CmTheme.lineBorder),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: _line),
+          borderSide: const BorderSide(color: CmTheme.lineBorder),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: _navy, width: 1.5),
+          borderSide: const BorderSide(color: CmTheme.navy, width: 1.5),
         ),
       ),
     );
@@ -1008,16 +1010,16 @@ class _FilterField extends StatelessWidget {
       decoration: InputDecoration(
         labelText: label,
         filled: true,
-        fillColor: Colors.white,
+        fillColor: CmTheme.surfaceWhite,
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: _line),
+          borderSide: const BorderSide(color: CmTheme.lineBorder),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: _line),
+          borderSide: const BorderSide(color: CmTheme.lineBorder),
         ),
       ),
       child: DropdownButtonHideUnderline(
@@ -1027,7 +1029,11 @@ class _FilterField extends StatelessWidget {
             value: value,
             isExpanded: true,
             isDense: true,
-            style: const TextStyle(fontSize: 14, color: _ink),
+            style: const TextStyle(
+              fontFamily: CmTheme.fontFamily,
+              fontSize: 14,
+              color: CmTheme.navy,
+            ),
             items: [
               for (final o in options)
                 DropdownMenuItem<String>(
@@ -1103,27 +1109,31 @@ class _HoverCardState extends State<_HoverCard> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: CmTheme.surfaceWhite,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _hover ? _navy.withValues(alpha: 0.35) : _line),
+            border: Border.all(
+              color: _hover
+                  ? CmTheme.navy.withValues(alpha: 0.35)
+                  : CmTheme.lineBorder,
+            ),
             boxShadow: _hover
                 ? [
                     BoxShadow(
-                      color: _navy.withValues(alpha: 0.08),
+                      color: CmTheme.raisedPanelShadow,
                       blurRadius: 16,
                       offset: const Offset(0, 6),
                     ),
                   ]
                 : [
                     BoxShadow(
-                      color: _navy.withValues(alpha: 0.03),
+                      color: CmTheme.subtleCardShadow,
                       blurRadius: 10,
                       offset: const Offset(0, 3),
                     ),
                   ],
           ),
           child: Material(
-            color: Colors.transparent,
+            color: CmTheme.transparent,
             child: InkWell(
               borderRadius: BorderRadius.circular(16),
               onTap: widget.onTap,
@@ -1165,13 +1175,13 @@ class _SubjectCard extends StatelessWidget {
                 width: 38,
                 height: 38,
                 decoration: BoxDecoration(
-                  color: _navy.withValues(alpha: 0.08),
+                  color: CmTheme.navy.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Icon(
                   Icons.menu_book_outlined,
                   size: 20,
-                  color: _navy,
+                  color: CmTheme.navy,
                 ),
               ),
               const SizedBox(width: 10),
@@ -1179,8 +1189,8 @@ class _SubjectCard extends StatelessWidget {
                 Flexible(
                   child: _Pill(
                     text: s.code,
-                    background: _navy.withValues(alpha: 0.08),
-                    color: _navy,
+                    background: CmTheme.navy.withValues(alpha: 0.08),
+                    color: CmTheme.navy,
                   ),
                 ),
             ],
@@ -1193,14 +1203,14 @@ class _SubjectCard extends StatelessWidget {
             style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w700,
-              color: _ink,
+              color: CmTheme.navy,
             ),
           ),
           if (s.contextLine.isNotEmpty) ...[
             const SizedBox(height: 4),
             Text(
               s.contextLine,
-              style: const TextStyle(fontSize: 13, color: _slate),
+              style: const TextStyle(fontSize: 13, color: CmTheme.slateText),
             ),
           ],
           const SizedBox(height: 6),
@@ -1211,27 +1221,38 @@ class _SubjectCard extends StatelessWidget {
             style: const TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w500,
-              color: _slate,
+              color: CmTheme.slateText,
             ),
           ),
           const SizedBox(height: 12),
-          const Divider(height: 1, color: _line),
+          const Divider(height: 1, color: CmTheme.lineBorder),
           const SizedBox(height: 10),
           Row(
             children: [
-              const Icon(Icons.people_outline, size: 18, color: _slate),
+              const Icon(
+                Icons.people_outline,
+                size: 18,
+                color: CmTheme.slateText,
+              ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   '${s.sections.length} ${s.sections.length == 1 ? 'section' : 'sections'} • '
                   '${s.totalStudents} ${s.totalStudents == 1 ? 'student' : 'students'}',
-                  style: const TextStyle(fontSize: 13, color: _slate),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: CmTheme.slateText,
+                  ),
                 ),
               ),
               AnimatedSlide(
                 duration: const Duration(milliseconds: 160),
                 offset: hovered ? const Offset(0.25, 0) : Offset.zero,
-                child: const Icon(Icons.arrow_forward, size: 20, color: _navy),
+                child: const Icon(
+                  Icons.arrow_forward,
+                  size: 20,
+                  color: CmTheme.navy,
+                ),
               ),
             ],
           ),
@@ -1262,7 +1283,7 @@ class _Breadcrumb extends StatelessWidget {
           if (i > 0)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 4),
-              child: Text('/', style: TextStyle(color: _slate)),
+              child: Text('/', style: TextStyle(color: CmTheme.slateText)),
             ),
           if (items[i].onTap == null)
             Text(
@@ -1270,7 +1291,7 @@ class _Breadcrumb extends StatelessWidget {
               style: const TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
-                color: _ink,
+                color: CmTheme.navy,
               ),
             )
           else
@@ -1285,7 +1306,10 @@ class _Breadcrumb extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 4),
                     child: Text(
                       items[i].label,
-                      style: const TextStyle(fontSize: 14, color: _slate),
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: CmTheme.slateText,
+                      ),
                     ),
                   ),
                 ),
@@ -1376,13 +1400,19 @@ class _SubjectPageState extends State<_SubjectPage> {
           },
         },
     ];
-    final created = await showAssessmentCreation(context,classes:subjectClasses,initialClassId:s.sections.isNotEmpty?s.sections.first.classId:null);
-    if(created?.manual==true && mounted){
-      final section=s.sections.firstWhere((sec)=>sec.classId==created!.classId);
+    final created = await showAssessmentCreation(
+      context,
+      classes: subjectClasses,
+      initialClassId: s.sections.isNotEmpty ? s.sections.first.classId : null,
+    );
+    if (created?.manual == true && mounted) {
+      final section = s.sections.firstWhere(
+        (sec) => sec.classId == created!.classId,
+      );
       widget.onOpenSection(section);
       return;
     }
-    final examId=created?.examId;
+    final examId = created?.examId;
     if (examId != null && examId > 0 && mounted) {
       widget.onOpenBuilder(examId);
     } else if (examId != null && mounted) {
@@ -1401,8 +1431,8 @@ class _SubjectPageState extends State<_SubjectPage> {
             tooltip: 'New assessment',
             onPressed: _newAssessment,
             style: IconButton.styleFrom(
-              backgroundColor: _navy,
-              foregroundColor: Colors.white,
+              backgroundColor: CmTheme.navy,
+              foregroundColor: CmTheme.surfaceWhite,
               minimumSize: const Size(44, 44),
             ),
             icon: const Icon(Icons.add),
@@ -1410,8 +1440,8 @@ class _SubjectPageState extends State<_SubjectPage> {
         : FilledButton.icon(
             onPressed: _newAssessment,
             style: FilledButton.styleFrom(
-              backgroundColor: _navy,
-              foregroundColor: Colors.white,
+              backgroundColor: CmTheme.navy,
+              foregroundColor: CmTheme.surfaceWhite,
               minimumSize: const Size(0, 44),
               padding: const EdgeInsets.symmetric(horizontal: 18),
               shape: RoundedRectangleBorder(
@@ -1431,10 +1461,7 @@ class _SubjectPageState extends State<_SubjectPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _Breadcrumb(
-            items: [
-              _Crumb('My Subjects', widget.onGoList),
-              _Crumb(s.crumb),
-            ],
+            items: [_Crumb('My Subjects', widget.onGoList), _Crumb(s.crumb)],
           ),
           const SizedBox(height: 8),
           Row(
@@ -1446,7 +1473,7 @@ class _SubjectPageState extends State<_SubjectPage> {
                   style: const TextStyle(
                     fontSize: 26,
                     fontWeight: FontWeight.w700,
-                    color: _ink,
+                    color: CmTheme.navy,
                   ),
                 ),
               ),
@@ -1458,7 +1485,7 @@ class _SubjectPageState extends State<_SubjectPage> {
             const SizedBox(height: 4),
             Text(
               s.fullContextLine,
-              style: const TextStyle(fontSize: 14, color: _slate),
+              style: const TextStyle(fontSize: 14, color: CmTheme.slateText),
             ),
           ],
           const SizedBox(height: 28),
@@ -1470,15 +1497,15 @@ class _SubjectPageState extends State<_SubjectPage> {
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
-                    color: _ink,
+                    color: CmTheme.navy,
                   ),
                 ),
               ),
               _Pill(
                 text:
                     '${_assessments.length} ${_assessments.length == 1 ? 'exam' : 'exams'} • ${s.totalStudents} students',
-                background: _line,
-                color: _ink,
+                background: CmTheme.lineBorder,
+                color: CmTheme.navy,
               ),
             ],
           ),
@@ -1500,12 +1527,14 @@ class _SubjectPageState extends State<_SubjectPage> {
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w600,
-              color: _ink,
+              color: CmTheme.navy,
             ),
           ),
           const SizedBox(height: 12),
           if (_loading)
-            const _Centered(child: CircularProgressIndicator(color: _navy))
+            const _Centered(
+              child: CircularProgressIndicator(color: CmTheme.navy),
+            )
           else if (_error != null)
             _ErrorBox(message: _error!, onRetry: _load)
           else if (_assessments.isEmpty)
@@ -1523,10 +1552,17 @@ class _SubjectPageState extends State<_SubjectPage> {
                       assessment: a,
                       onTap: () {
                         final id = _int(a['id']);
-                        if(a['creation_mode']=='manual'){
-                          final names=(a['sections'] as List?)??[];
-                          widget.onOpenSection(s.sections.firstWhere((sec)=>names.contains(sec.name),orElse:()=>s.sections.first));
-                        }else if (id != null) {widget.onOpenBuilder(id);}
+                        if (a['creation_mode'] == 'manual') {
+                          final names = (a['sections'] as List?) ?? [];
+                          widget.onOpenSection(
+                            s.sections.firstWhere(
+                              (sec) => names.contains(sec.name),
+                              orElse: () => s.sections.first,
+                            ),
+                          );
+                        } else if (id != null) {
+                          widget.onOpenBuilder(id);
+                        }
                       },
                     ),
                   ),
@@ -1567,15 +1603,15 @@ class _SectionCard extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    color: _ink,
+                    color: CmTheme.navy,
                   ),
                 ),
               ),
               if (subject.code.isNotEmpty)
                 _Pill(
                   text: subject.code,
-                  background: _navy.withValues(alpha: 0.08),
-                  color: _navy,
+                  background: CmTheme.navy.withValues(alpha: 0.08),
+                  color: CmTheme.navy,
                 ),
             ],
           ),
@@ -1583,14 +1619,14 @@ class _SectionCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               subject.contextLine,
-              style: const TextStyle(fontSize: 13, color: _slate),
+              style: const TextStyle(fontSize: 13, color: CmTheme.slateText),
             ),
           ],
           const SizedBox(height: 6),
           Text(
             '${section.students} ${section.students == 1 ? 'student' : 'students'} • '
             '$examCount ${examCount == 1 ? 'assessment' : 'assessments'}',
-            style: const TextStyle(fontSize: 13, color: _slate),
+            style: const TextStyle(fontSize: 13, color: CmTheme.slateText),
           ),
           const SizedBox(height: 12),
           Row(
@@ -1600,14 +1636,18 @@ class _SectionCard extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: _navy,
+                  color: CmTheme.navy,
                 ),
               ),
               const SizedBox(width: 4),
               AnimatedSlide(
                 duration: const Duration(milliseconds: 160),
                 offset: hovered ? const Offset(0.25, 0) : Offset.zero,
-                child: const Icon(Icons.arrow_forward, size: 18, color: _navy),
+                child: const Icon(
+                  Icons.arrow_forward,
+                  size: 18,
+                  color: CmTheme.navy,
+                ),
               ),
             ],
           ),
@@ -1635,7 +1675,9 @@ class _AssessmentRow extends StatelessWidget {
         : <String>[];
 
     final published = status == 'published';
-    final statusText = a['creation_mode']=='manual' ? 'Manual Score' : published
+    final statusText = a['creation_mode'] == 'manual'
+        ? 'Manual Score'
+        : published
         ? 'Published'
         : (status == 'archived' ? 'Archived' : 'Draft');
 
@@ -1655,7 +1697,7 @@ class _AssessmentRow extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
-                    color: _ink,
+                    color: CmTheme.navy,
                   ),
                 ),
                 const SizedBox(height: 3),
@@ -1663,7 +1705,10 @@ class _AssessmentRow extends StatelessWidget {
                   '${_typeLabel(a['assessment_type']?.toString())} · '
                   '$questions ${questions == 1 ? 'question' : 'questions'} · '
                   'v$version',
-                  style: const TextStyle(fontSize: 13, color: _slate),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: CmTheme.slateText,
+                  ),
                 ),
                 if (sections.isNotEmpty) ...[
                   const SizedBox(height: 3),
@@ -1671,7 +1716,10 @@ class _AssessmentRow extends StatelessWidget {
                     sections.join(' · '),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: _slate),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: CmTheme.slateText,
+                    ),
                   ),
                 ],
               ],
@@ -1680,8 +1728,10 @@ class _AssessmentRow extends StatelessWidget {
           const SizedBox(width: 12),
           _Pill(
             text: statusText,
-            background: published ? _green.withValues(alpha: 0.15) : _line,
-            color: published ? _greenDark : _slate,
+            background: published
+                ? CmTheme.emeraldSuccess.withValues(alpha: 0.15)
+                : CmTheme.lineBorder,
+            color: published ? CmTheme.navy : CmTheme.slateText,
           ),
         ],
       ),
@@ -1730,21 +1780,44 @@ class _SectionPageState extends State<_SectionPage> {
   static const double _rowH = 56;
   static const double _headH = 90;
 
-  List<Map<String,dynamic>> _allAssessments=const [];
-  Map<String,dynamic> _book={};
-  String _period='prelims';
-  bool _targetPeriodApplied=false;
-  static const _categoryNames={'pt':'Performance Tasks / Laboratory','quiz':'Quizzes','exam':'Major Examination'};
-  Map<String,dynamic> get _preferences => Map<String,dynamic>.from(_book['preferences'] as Map? ?? {});
-  List<Map<String,dynamic>> get _assessments {
-    final result=_allAssessments.where((a)=>_period=='unclassified'?a['requires_classification']==true:a['grading_period']==_period && a['requires_classification']!=true).toList();
-    const rank={'pt':0,'quiz':1,'exam':2};
-    result.sort((a,b){final c=(rank[a['grading_category']]??3).compareTo(rank[b['grading_category']]??3);return c!=0?c:(_int(a['id'])??0).compareTo(_int(b['id'])??0);});
+  List<Map<String, dynamic>> _allAssessments = const [];
+  Map<String, dynamic> _book = {};
+  String _period = 'prelims';
+  bool _targetPeriodApplied = false;
+  static const _categoryNames = {
+    'pt': 'Performance Tasks / Laboratory',
+    'quiz': 'Quizzes',
+    'exam': 'Major Examination',
+  };
+  Map<String, dynamic> get _preferences =>
+      Map<String, dynamic>.from(_book['preferences'] as Map? ?? {});
+  List<Map<String, dynamic>> get _assessments {
+    final result = _allAssessments
+        .where(
+          (a) => _period == 'unclassified'
+              ? a['requires_classification'] == true
+              : a['grading_period'] == _period &&
+                    a['requires_classification'] != true,
+        )
+        .toList();
+    const rank = {'pt': 0, 'quiz': 1, 'exam': 2};
+    result.sort((a, b) {
+      final c = (rank[a['grading_category']] ?? 3).compareTo(
+        rank[b['grading_category']] ?? 3,
+      );
+      return c != 0 ? c : (_int(a['id']) ?? 0).compareTo(_int(b['id']) ?? 0);
+    });
     return result;
   }
-  Map<String,dynamic> _periodGrade(Map<String,dynamic> s)=>Map<String,dynamic>.from((s['grading'] as Map?)?[_period] as Map? ?? {});
-  String _percentage(Object? v)=>v is num?'${v.toStringAsFixed(2)}%':'INC';
-  String _categoryPercentage(Map<String,dynamic> student,String key)=>_percentage((_periodGrade(student)['categories'] as Map?)?[key]?['percentage']);
+
+  Map<String, dynamic> _periodGrade(Map<String, dynamic> s) =>
+      Map<String, dynamic>.from((s['grading'] as Map?)?[_period] as Map? ?? {});
+  String _percentage(Object? v) =>
+      v is num ? '${v.toStringAsFixed(2)}%' : 'INC';
+  String _categoryPercentage(Map<String, dynamic> student, String key) =>
+      _percentage(
+        (_periodGrade(student)['categories'] as Map?)?[key]?['percentage'],
+      );
 
   List<Map<String, dynamic>> _students = const [];
   bool _loading = true;
@@ -1791,12 +1864,18 @@ class _SectionPageState extends State<_SectionPage> {
 
       if (!mounted) return;
       setState(() {
-        _book=data;
+        _book = data;
         _allAssessments = _maps(data['assessments']);
-        if(!_targetPeriodApplied && _activeHighlightExamId!=null){
-          _targetPeriodApplied=true;
-          final target=_allAssessments.where((a)=>_int(a['id'])==_activeHighlightExamId).firstOrNull;
-          if(target!=null)_period=target['requires_classification']==true?'unclassified':target['grading_period']?.toString()??'unclassified';
+        if (!_targetPeriodApplied && _activeHighlightExamId != null) {
+          _targetPeriodApplied = true;
+          final target = _allAssessments
+              .where((a) => _int(a['id']) == _activeHighlightExamId)
+              .firstOrNull;
+          if (target != null) {
+            _period = target['requires_classification'] == true
+                ? 'unclassified'
+                : target['grading_period']?.toString() ?? 'unclassified';
+          }
         }
         _students = students;
         _loading = false;
@@ -1836,10 +1915,8 @@ class _SectionPageState extends State<_SectionPage> {
     if (eid != null && _hScroll.hasClients) {
       final idx = _assessments.indexWhere((a) => _int(a['id']) == eid);
       if (idx > 0) {
-        final targetOffset = _assessmentHorizontalOffset(eid).clamp(
-          0.0,
-          _hScroll.position.maxScrollExtent,
-        );
+        final targetOffset = _assessmentHorizontalOffset(eid)
+            .clamp(0.0, _hScroll.position.maxScrollExtent);
         _hScroll.animateTo(
           targetOffset,
           duration: const Duration(milliseconds: 450),
@@ -1857,9 +1934,18 @@ class _SectionPageState extends State<_SectionPage> {
     });
   }
 
-  List<Map<String,dynamic>> _cells(Map<String,dynamic> s) {
-    final byId={for(final c in _maps(s['cells'])) c['exam_id']:c};
-    return [for(final a in _assessments) byId[a['id']]??{'exam_id':a['id'],'status':'pending','score':null,'max_score':a['total_points']}];
+  List<Map<String, dynamic>> _cells(Map<String, dynamic> s) {
+    final byId = {for (final c in _maps(s['cells'])) c['exam_id']: c};
+    return [
+      for (final a in _assessments)
+        byId[a['id']] ??
+            {
+              'exam_id': a['id'],
+              'status': 'pending',
+              'score': null,
+              'max_score': a['total_points'],
+            },
+    ];
   }
 
   int _countFor(String f) => f == 'all'
@@ -1873,16 +1959,15 @@ class _SectionPageState extends State<_SectionPage> {
     return '$last $first'.trim();
   }
 
-  double? _studentAveragePercent(Map<String,dynamic> s) {
-    final grade=_periodGrade(s)['grade'];
-    return grade is num?grade.toDouble():null;
+  double? _studentAveragePercent(Map<String, dynamic> s) {
+    final grade = _periodGrade(s)['grade'];
+    return grade is num ? grade.toDouble() : null;
   }
 
   List<Map<String, dynamic>> get _visible {
     final q = _studentQuery.trim().toLowerCase();
     return _students.where((s) {
-      if (_filter != 'all' &&
-          !_cells(s).any((c) => c['status'] == _filter)) {
+      if (_filter != 'all' && !_cells(s).any((c) => c['status'] == _filter)) {
         return false;
       }
       if (q.isNotEmpty) {
@@ -1901,7 +1986,10 @@ class _SectionPageState extends State<_SectionPage> {
     Map<String, dynamic> cell,
     Map<String, dynamic> assessment,
   ) async {
-    if(assessment['creation_mode']=='manual'){await _editManualScore(student,cell,assessment);return;}
+    if (assessment['creation_mode'] == 'manual') {
+      await _editManualScore(student, cell, assessment);
+      return;
+    }
     final status = cell['status']?.toString() ?? 'pending';
     final examTitle = assessment['title']?.toString() ?? 'Assessment';
 
@@ -1918,22 +2006,25 @@ class _SectionPageState extends State<_SectionPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: CmTheme.surfaceWhite,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: Text(
           marking ? 'Mark as absent?' : 'Remove absent mark?',
-          style: const TextStyle(fontWeight: FontWeight.w700, color: _ink),
+          style: const TextStyle(
+            fontWeight: FontWeight.w700,
+            color: CmTheme.navy,
+          ),
         ),
         content: Text(
           marking
               ? '$name will be recorded as absent for "$examTitle". '
-                  'Only do this once you have confirmed they did not take it.'
+                    'Only do this once you have confirmed they did not take it.'
               : '$name will go back to Pending for "$examTitle".',
         ),
         actions: [
           TextButton(
             style: TextButton.styleFrom(
-              foregroundColor: _slate,
+              foregroundColor: CmTheme.slateText,
               minimumSize: const Size(88, 44),
             ),
             onPressed: () => Navigator.pop(c, false),
@@ -1941,8 +2032,8 @@ class _SectionPageState extends State<_SectionPage> {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-              backgroundColor: _navy,
-              foregroundColor: Colors.white,
+              backgroundColor: CmTheme.navy,
+              foregroundColor: CmTheme.surfaceWhite,
               minimumSize: const Size(88, 44),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -1970,7 +2061,7 @@ class _SectionPageState extends State<_SectionPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_err(e))),
+        CmTheme.feedbackSnackBar(_err(e), color: CmTheme.redDanger),
       );
     }
   }
@@ -1995,8 +2086,8 @@ class _SectionPageState extends State<_SectionPage> {
     final deleteRequested = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => Dialog(
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.transparent,
+        backgroundColor: CmTheme.surfaceWhite,
+        surfaceTintColor: CmTheme.transparent,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 440),
@@ -2012,12 +2103,12 @@ class _SectionPageState extends State<_SectionPage> {
                       width: 40,
                       height: 40,
                       decoration: BoxDecoration(
-                        color: _green.withValues(alpha: 0.14),
+                        color: CmTheme.emeraldSuccess.withValues(alpha: 0.14),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: const Icon(
                         Icons.fact_check_outlined,
-                        color: _greenDark,
+                        color: CmTheme.navy,
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -2030,14 +2121,14 @@ class _SectionPageState extends State<_SectionPage> {
                             style: const TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
-                              color: _ink,
+                              color: CmTheme.navy,
                             ),
                           ),
                           Text(
                             '${widget.subject.code} • ${widget.section.name}',
                             style: const TextStyle(
                               fontSize: 12.5,
-                              color: _slate,
+                              color: CmTheme.slateText,
                             ),
                           ),
                         ],
@@ -2045,7 +2136,7 @@ class _SectionPageState extends State<_SectionPage> {
                     ),
                     IconButton(
                       onPressed: () => Navigator.pop(dialogContext, false),
-                      icon: const Icon(Icons.close, color: _slate),
+                      icon: const Icon(Icons.close, color: CmTheme.slateText),
                     ),
                   ],
                 ),
@@ -2054,9 +2145,9 @@ class _SectionPageState extends State<_SectionPage> {
                   width: double.infinity,
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: _bg,
+                    color: CmTheme.background,
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: _line),
+                    border: Border.all(color: CmTheme.lineBorder),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -2066,13 +2157,16 @@ class _SectionPageState extends State<_SectionPage> {
                         style: const TextStyle(
                           fontSize: 14.5,
                           fontWeight: FontWeight.w700,
-                          color: _ink,
+                          color: CmTheme.navy,
                         ),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         'Student No: $snum • Section: ${widget.section.name}',
-                        style: const TextStyle(fontSize: 12.5, color: _slate),
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          color: CmTheme.slateText,
+                        ),
                       ),
                       const SizedBox(height: 12),
                       Row(
@@ -2084,15 +2178,15 @@ class _SectionPageState extends State<_SectionPage> {
                             style: const TextStyle(
                               fontSize: 24,
                               fontWeight: FontWeight.w800,
-                              color: _ink,
+                              color: CmTheme.navy,
                             ),
                           ),
                           if (pct != null) ...[
                             const SizedBox(width: 10),
                             _Pill(
                               text: '$pct%',
-                              background: _green.withValues(alpha: 0.15),
-                              color: _greenDark,
+                              background: CmTheme.lineBorder,
+                              color: CmTheme.navy,
                             ),
                           ],
                         ],
@@ -2107,8 +2201,10 @@ class _SectionPageState extends State<_SectionPage> {
                     OutlinedButton.icon(
                       onPressed: () => Navigator.pop(dialogContext, true),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: _red,
-                        side: BorderSide(color: _red.withValues(alpha: 0.4)),
+                        foregroundColor: CmTheme.redDanger,
+                        side: BorderSide(
+                          color: CmTheme.redDanger.withValues(alpha: 0.4),
+                        ),
                         minimumSize: const Size(0, 44),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -2124,8 +2220,8 @@ class _SectionPageState extends State<_SectionPage> {
                     FilledButton(
                       onPressed: () => Navigator.pop(dialogContext, false),
                       style: FilledButton.styleFrom(
-                        backgroundColor: _navy,
-                        foregroundColor: Colors.white,
+                        backgroundColor: CmTheme.navy,
+                        foregroundColor: CmTheme.surfaceWhite,
                         minimumSize: const Size(88, 44),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -2147,11 +2243,11 @@ class _SectionPageState extends State<_SectionPage> {
     final confirmDelete = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: CmTheme.surfaceWhite,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: const Text(
           'Delete recorded score?',
-          style: TextStyle(fontWeight: FontWeight.w700, color: _ink),
+          style: TextStyle(fontWeight: FontWeight.w700, color: CmTheme.navy),
         ),
         content: Text(
           'Delete $name\'s recorded score for "$examTitle"? Their status will return to Pending.',
@@ -2163,8 +2259,8 @@ class _SectionPageState extends State<_SectionPage> {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-              backgroundColor: _red,
-              foregroundColor: Colors.white,
+              backgroundColor: CmTheme.redDanger,
+              foregroundColor: CmTheme.surfaceWhite,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -2195,17 +2291,17 @@ class _SectionPageState extends State<_SectionPage> {
         student['average_percentage'] = null;
       });
       await _load();
-      if(!mounted)return;
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: _navy,
-          content: Text('Deleted recorded score for $name on "$examTitle".'),
+        CmTheme.feedbackSnackBar(
+          'Deleted recorded score for $name on "$examTitle".',
+          color: CmTheme.emeraldSuccess,
         ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(backgroundColor: _red, content: Text(_err(e))),
+        CmTheme.feedbackSnackBar(_err(e), color: CmTheme.redDanger),
       );
     }
   }
@@ -2222,7 +2318,7 @@ class _SectionPageState extends State<_SectionPage> {
           style: TextStyle(
             fontSize: 27,
             fontWeight: FontWeight.w700,
-            color: Color(0xFF26334B),
+            color: CmTheme.navy,
           ),
         ),
         const SizedBox(height: 5),
@@ -2233,7 +2329,7 @@ class _SectionPageState extends State<_SectionPage> {
             section.name,
             subject.fullContextLine,
           ].where((s) => s.isNotEmpty).join(' · '),
-          style: const TextStyle(fontSize: 13, color: Color(0xFF7A8AA5)),
+          style: const TextStyle(fontSize: 13, color: CmTheme.slateText),
         ),
       ],
     );
@@ -2306,7 +2402,7 @@ class _SectionPageState extends State<_SectionPage> {
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: const Color(0xFFF3F7FD),
+                color: CmTheme.background,
                 borderRadius: BorderRadius.circular(9),
               ),
               child: Column(
@@ -2326,7 +2422,9 @@ class _SectionPageState extends State<_SectionPage> {
             const SizedBox(height: 16),
           ],
           if (_loading)
-            const _Centered(child: CircularProgressIndicator(color: _navy))
+            const _Centered(
+              child: CircularProgressIndicator(color: CmTheme.navy),
+            )
           else if (_error != null)
             _ErrorBox(message: _error!, onRetry: _load)
           else
@@ -2337,13 +2435,17 @@ class _SectionPageState extends State<_SectionPage> {
   }
 
   ButtonStyle get _scorebookOutline => OutlinedButton.styleFrom(
-    foregroundColor: const Color(0xFF182238),
-    backgroundColor: Colors.white,
-    side: const BorderSide(color: Color(0xFFDCE4EF)),
+    foregroundColor: CmTheme.navy,
+    backgroundColor: CmTheme.surfaceWhite,
+    side: const BorderSide(color: CmTheme.lineBorder),
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
     minimumSize: const Size(0, 42),
     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-    textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+    textStyle: const TextStyle(
+      fontFamily: CmTheme.fontFamily,
+      fontSize: 13,
+      fontWeight: FontWeight.w700,
+    ),
   );
 
   Widget _sectionSelector() => SizedBox(
@@ -2380,16 +2482,14 @@ class _SectionPageState extends State<_SectionPage> {
           onPressed: () => setState(() => _period = entry.key),
           style: _scorebookOutline.copyWith(
             backgroundColor: WidgetStatePropertyAll(
-              _period == entry.key ? const Color(0xFF182238) : Colors.white,
+              _period == entry.key ? CmTheme.navy : CmTheme.surfaceWhite,
             ),
             foregroundColor: WidgetStatePropertyAll(
-              _period == entry.key ? Colors.white : const Color(0xFF66758E),
+              _period == entry.key ? CmTheme.surfaceWhite : CmTheme.slateText,
             ),
             side: WidgetStatePropertyAll(
               BorderSide(
-                color: _period == entry.key
-                    ? const Color(0xFF182238)
-                    : const Color(0xFFDCE4EF),
+                color: _period == entry.key ? CmTheme.navy : CmTheme.lineBorder,
               ),
             ),
           ),
@@ -2417,12 +2517,16 @@ class _SectionPageState extends State<_SectionPage> {
       FilledButton.icon(
         onPressed: _createSectionAssessment,
         style: FilledButton.styleFrom(
-          backgroundColor: const Color(0xFF182238),
-          foregroundColor: Colors.white,
+          backgroundColor: CmTheme.navy,
+          foregroundColor: CmTheme.surfaceWhite,
           minimumSize: const Size(0, 42),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
-          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+          textStyle: const TextStyle(
+            fontFamily: CmTheme.fontFamily,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
         ),
         icon: const Icon(Icons.add, size: 16),
         label: const Text('Add Assessment'),
@@ -2475,10 +2579,10 @@ class _SectionPageState extends State<_SectionPage> {
       .where((a) => (a['grading_category'] ?? 'unknown') == key)
       .toList();
   Color _assessmentHeaderColor(String key) => switch (key) {
-    'pt' => const Color(0xFFD4E5F8),
-    'quiz' => const Color(0xFFD9F6DF),
-    'exam' => const Color(0xFFFFF1AC),
-    _ => const Color(0xFFEDF2F8),
+    'pt' => CmTheme.lineBorder,
+    'quiz' => CmTheme.background,
+    'exam' => CmTheme.lineBorder,
+    _ => CmTheme.background,
   };
   double _assessmentHorizontalOffset(int examId) {
     double offset = 0;
@@ -2506,12 +2610,12 @@ class _SectionPageState extends State<_SectionPage> {
           style: const TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w700,
-            color: Color(0xFF26334B),
+            color: CmTheme.navy,
           ),
         ),
         Text(
           '·  ${_assessments.length} assessments · Click a student to open grade information',
-          style: const TextStyle(fontSize: 12, color: Color(0xFF7A8AA5)),
+          style: const TextStyle(fontSize: 12, color: CmTheme.slateText),
         ),
       ],
     ),
@@ -2626,7 +2730,7 @@ class _SectionPageState extends State<_SectionPage> {
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      barrierColor: const Color(0x990D1420),
+      barrierColor: CmTheme.scorebookDialogBackdrop,
       builder: (c) => StatefulBuilder(
         builder: (c, setS) {
           Future<void> save() async {
@@ -2685,17 +2789,14 @@ class _SectionPageState extends State<_SectionPage> {
             return Container(
               padding: const EdgeInsets.symmetric(vertical: 9),
               decoration: const BoxDecoration(
-                border: Border(bottom: BorderSide(color: Color(0xFFEDF0F5))),
+                border: Border(bottom: BorderSide(color: CmTheme.background)),
               ),
               child: Row(
                 children: [
                   Expanded(
                     child: Text(
                       labels[key]!,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: Color(0xFF39465E),
-                      ),
+                      style: const TextStyle(fontSize: 14, color: CmTheme.navy),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -2712,12 +2813,12 @@ class _SectionPageState extends State<_SectionPage> {
                         ),
                         style: const TextStyle(
                           fontSize: 14,
-                          color: Color(0xFF182238),
+                          color: CmTheme.navy,
                         ),
                         decoration: InputDecoration(
                           isDense: true,
                           filled: true,
-                          fillColor: Colors.white,
+                          fillColor: CmTheme.surfaceWhite,
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 12,
@@ -2725,25 +2826,25 @@ class _SectionPageState extends State<_SectionPage> {
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                             borderSide: const BorderSide(
-                              color: Color(0xFFDCE4EF),
+                              color: CmTheme.lineBorder,
                             ),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                             borderSide: const BorderSide(
-                              color: Color(0xFFDCE4EF),
+                              color: CmTheme.lineBorder,
                             ),
                           ),
                           disabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                             borderSide: const BorderSide(
-                              color: Color(0xFFDCE4EF),
+                              color: CmTheme.lineBorder,
                             ),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                             borderSide: const BorderSide(
-                              color: Color(0xFF7E9FD5),
+                              color: CmTheme.slateText,
                               width: 1.5,
                             ),
                           ),
@@ -2754,7 +2855,7 @@ class _SectionPageState extends State<_SectionPage> {
                   const SizedBox(width: 6),
                   const Text(
                     '%',
-                    style: TextStyle(fontSize: 14, color: Color(0xFF60718B)),
+                    style: TextStyle(fontSize: 14, color: CmTheme.slateText),
                   ),
                 ],
               ),
@@ -2771,7 +2872,7 @@ class _SectionPageState extends State<_SectionPage> {
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF33435B),
+                    color: CmTheme.navy,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -2781,23 +2882,24 @@ class _SectionPageState extends State<_SectionPage> {
           }
 
           final outlinedStyle = OutlinedButton.styleFrom(
-            foregroundColor: const Color(0xFF182238),
-            backgroundColor: Colors.white,
-            side: const BorderSide(color: Color(0xFFDCE4EF)),
+            foregroundColor: CmTheme.navy,
+            backgroundColor: CmTheme.surfaceWhite,
+            side: const BorderSide(color: CmTheme.lineBorder),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(9),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             minimumSize: const Size(0, 42),
             textStyle: const TextStyle(
+              fontFamily: CmTheme.fontFamily,
               fontSize: 14,
               fontWeight: FontWeight.w700,
             ),
           );
 
           return Dialog(
-            backgroundColor: Colors.white,
-            surfaceTintColor: Colors.transparent,
+            backgroundColor: CmTheme.surfaceWhite,
+            surfaceTintColor: CmTheme.transparent,
             elevation: 0,
             insetPadding: const EdgeInsets.symmetric(
               horizontal: 20,
@@ -2832,7 +2934,7 @@ class _SectionPageState extends State<_SectionPage> {
                                   style: TextStyle(
                                     fontSize: 21,
                                     fontWeight: FontWeight.w700,
-                                    color: Color(0xFF26334B),
+                                    color: CmTheme.navy,
                                   ),
                                 ),
                                 SizedBox(height: 2),
@@ -2840,7 +2942,7 @@ class _SectionPageState extends State<_SectionPage> {
                                   'Configure weights for this subject and section',
                                   style: TextStyle(
                                     fontSize: 13,
-                                    color: Color(0xFF7A8AA5),
+                                    color: CmTheme.slateText,
                                   ),
                                 ),
                               ],
@@ -2913,10 +3015,10 @@ class _SectionPageState extends State<_SectionPage> {
                                 vertical: 14,
                               ),
                               decoration: const BoxDecoration(
-                                color: Color(0xFFF3F7FD),
+                                color: CmTheme.background,
                                 border: Border(
                                   left: BorderSide(
-                                    color: Color(0xFF8FA3C4),
+                                    color: CmTheme.slateText,
                                     width: 3,
                                   ),
                                 ),
@@ -2925,7 +3027,7 @@ class _SectionPageState extends State<_SectionPage> {
                                 'Each group must total exactly 100%. Grade calculations update when you save. Preferences are saved for this subject and section.',
                                 style: TextStyle(
                                   fontSize: 12,
-                                  color: Color(0xFF60718B),
+                                  color: CmTheme.slateText,
                                   height: 1.5,
                                 ),
                               ),
@@ -2937,7 +3039,7 @@ class _SectionPageState extends State<_SectionPage> {
                                   error!,
                                   style: const TextStyle(
                                     fontSize: 13,
-                                    color: Colors.red,
+                                    color: CmTheme.redDanger,
                                   ),
                                 ),
                               ),
@@ -2960,8 +3062,8 @@ class _SectionPageState extends State<_SectionPage> {
                           FilledButton(
                             onPressed: saving ? null : save,
                             style: FilledButton.styleFrom(
-                              foregroundColor: Colors.white,
-                              backgroundColor: const Color(0xFF182238),
+                              foregroundColor: CmTheme.surfaceWhite,
+                              backgroundColor: CmTheme.navy,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(9),
                               ),
@@ -2971,6 +3073,7 @@ class _SectionPageState extends State<_SectionPage> {
                               ),
                               minimumSize: const Size(158, 42),
                               textStyle: const TextStyle(
+                                fontFamily: CmTheme.fontFamily,
                                 fontSize: 14,
                                 fontWeight: FontWeight.w700,
                               ),
@@ -3023,8 +3126,9 @@ class _SectionPageState extends State<_SectionPage> {
       if (mounted) await _load();
     } catch (e) {
       if (mounted)
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(_err(e))));
+        ScaffoldMessenger.of(context).showSnackBar(
+          CmTheme.feedbackSnackBar(_err(e), color: CmTheme.redDanger),
+        );
     }
   }
 
@@ -3034,10 +3138,10 @@ class _SectionPageState extends State<_SectionPage> {
       for (final cell in _maps(student['cells'])) cell['exam_id']: cell,
     };
     bool expandedDetails = false;
-    const ink = Color(0xFF26334B),
-        muted = Color(0xFF7A8AA5),
-        line = Color(0xFFDCE4EF),
-        pale = Color(0xFFEDF2F8);
+    const ink = CmTheme.navy,
+        muted = CmTheme.slateText,
+        line = CmTheme.lineBorder,
+        pale = CmTheme.background;
     String percent(Object? value, {bool incomplete = false}) => value is num
         ? '${value.toStringAsFixed(2)}%'
         : incomplete
@@ -3048,28 +3152,36 @@ class _SectionPageState extends State<_SectionPage> {
     Widget panel(Widget child) => Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         border: Border.all(color: line),
         borderRadius: BorderRadius.circular(13),
       ),
       child: child,
     );
     final outline = OutlinedButton.styleFrom(
-      foregroundColor: const Color(0xFF182238),
-      backgroundColor: Colors.white,
+      foregroundColor: CmTheme.navy,
+      backgroundColor: CmTheme.surfaceWhite,
       side: const BorderSide(color: line),
       minimumSize: const Size(0, 40),
       padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
-      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+      textStyle: const TextStyle(
+        fontFamily: CmTheme.fontFamily,
+        fontSize: 13,
+        fontWeight: FontWeight.w700,
+      ),
     );
     final filled = FilledButton.styleFrom(
-      foregroundColor: Colors.white,
-      backgroundColor: const Color(0xFF182238),
+      foregroundColor: CmTheme.surfaceWhite,
+      backgroundColor: CmTheme.navy,
       minimumSize: const Size(0, 40),
       padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
-      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+      textStyle: const TextStyle(
+        fontFamily: CmTheme.fontFamily,
+        fontSize: 13,
+        fontWeight: FontWeight.w700,
+      ),
     );
     Widget tableCell(
       String value, {
@@ -3083,7 +3195,7 @@ class _SectionPageState extends State<_SectionPage> {
         textAlign: left ? TextAlign.left : TextAlign.center,
         style: TextStyle(
           fontSize: 12,
-          color: header ? const Color(0xFF41516B) : ink,
+          color: header ? CmTheme.slateText : ink,
           fontWeight: header || bold ? FontWeight.w700 : FontWeight.w400,
         ),
       ),
@@ -3092,7 +3204,7 @@ class _SectionPageState extends State<_SectionPage> {
       final card = Container(
         padding: const EdgeInsets.all(15),
         decoration: BoxDecoration(
-          color: const Color(0xFFF4F7FB),
+          color: CmTheme.background,
           border: Border.all(color: line),
           borderRadius: BorderRadius.circular(11),
         ),
@@ -3211,11 +3323,11 @@ class _SectionPageState extends State<_SectionPage> {
 
     await showDialog<void>(
       context: context,
-      barrierColor: const Color(0x990D1420),
+      barrierColor: CmTheme.scorebookDialogBackdrop,
       builder: (c) => StatefulBuilder(
         builder: (c, setDialog) => Dialog(
-          backgroundColor: const Color(0xFFF4F7FB),
-          surfaceTintColor: Colors.transparent,
+          backgroundColor: CmTheme.background,
+          surfaceTintColor: CmTheme.transparent,
           elevation: 0,
           insetPadding: const EdgeInsets.symmetric(
             horizontal: 20,
@@ -3504,7 +3616,7 @@ class _SectionPageState extends State<_SectionPage> {
                                 'INC: historical assessments still require teacher classification.',
                                 style: TextStyle(
                                   fontSize: 12,
-                                  color: Color(0xFFB91C1C),
+                                  color: CmTheme.redDanger,
                                 ),
                               ),
                             ),
@@ -3638,10 +3750,10 @@ class _SectionPageState extends State<_SectionPage> {
             .toList(),
     };
     final horizontal = ScrollController();
-    const ink = Color(0xFF26334B),
-        muted = Color(0xFF7A8AA5),
-        grid = Color(0xFF8793A5),
-        navy = Color(0xFF182238);
+    const ink = CmTheme.navy,
+        muted = CmTheme.slateText,
+        grid = CmTheme.lineBorder,
+        navy = CmTheme.navy;
     const studentWidth = 110.0,
         nameWidth = 245.0,
         assessmentWidth = 62.0,
@@ -3676,16 +3788,16 @@ class _SectionPageState extends State<_SectionPage> {
         3 * totalWidth +
         gradeWidth;
     Color categoryColor(String category) => switch (category) {
-      'pt' => const Color(0xFFD4E5F8),
-      'quiz' => const Color(0xFFD9FFE0),
-      'exam' => const Color(0xFFFFF2A5),
-      _ => const Color(0xFFEDF2F8),
+      'pt' => CmTheme.lineBorder,
+      'quiz' => CmTheme.background,
+      'exam' => CmTheme.lineBorder,
+      _ => CmTheme.background,
     };
     Widget cell(
       String text,
       double width,
       double height, {
-      Color background = Colors.white,
+      Color background = CmTheme.surfaceWhite,
       bool bold = false,
       bool white = false,
       bool left = false,
@@ -3711,7 +3823,7 @@ class _SectionPageState extends State<_SectionPage> {
           style: TextStyle(
             fontSize: 10,
             fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
-            color: white ? Colors.white : ink,
+            color: white ? CmTheme.surfaceWhite : ink,
           ),
         ),
       );
@@ -3731,14 +3843,14 @@ class _SectionPageState extends State<_SectionPage> {
                 'Student No.',
                 studentWidth,
                 headerHeight,
-                background: const Color(0xFFD8E4F3),
+                background: CmTheme.lineBorder,
                 bold: true,
               ),
               cell(
                 'Student Name',
                 nameWidth,
                 headerHeight,
-                background: const Color(0xFFD8E4F3),
+                background: CmTheme.lineBorder,
                 bold: true,
               ),
             ],
@@ -3834,7 +3946,7 @@ class _SectionPageState extends State<_SectionPage> {
                         'Grade',
                         gradeWidth,
                         groupHeight + labelHeight,
-                        background: const Color(0xFFD8E4F3),
+                        background: CmTheme.lineBorder,
                         bold: true,
                       ),
                     ],
@@ -3891,12 +4003,16 @@ class _SectionPageState extends State<_SectionPage> {
     );
     final outline = OutlinedButton.styleFrom(
       foregroundColor: navy,
-      backgroundColor: Colors.white,
-      side: const BorderSide(color: Color(0xFFDCE4EF)),
+      backgroundColor: CmTheme.surfaceWhite,
+      side: const BorderSide(color: CmTheme.lineBorder),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
       minimumSize: const Size(0, 40),
       padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
-      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+      textStyle: const TextStyle(
+        fontFamily: CmTheme.fontFamily,
+        fontSize: 13,
+        fontWeight: FontWeight.w700,
+      ),
     );
     final unknown = assessments
         .where((a) => a['grading_period'] == null)
@@ -3904,10 +4020,10 @@ class _SectionPageState extends State<_SectionPage> {
     try {
       await showDialog<void>(
         context: context,
-        barrierColor: const Color(0x990D1420),
+        barrierColor: CmTheme.scorebookDialogBackdrop,
         builder: (c) => Dialog(
-          backgroundColor: Colors.white,
-          surfaceTintColor: Colors.transparent,
+          backgroundColor: CmTheme.surfaceWhite,
+          surfaceTintColor: CmTheme.transparent,
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
@@ -3984,7 +4100,7 @@ class _SectionPageState extends State<_SectionPage> {
                             FilledButton.icon(
                               onPressed: () => _exportReport(pdf: false),
                               style: FilledButton.styleFrom(
-                                foregroundColor: Colors.white,
+                                foregroundColor: CmTheme.surfaceWhite,
                                 backgroundColor: navy,
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(9),
@@ -3995,6 +4111,7 @@ class _SectionPageState extends State<_SectionPage> {
                                   vertical: 12,
                                 ),
                                 textStyle: const TextStyle(
+                                  fontFamily: CmTheme.fontFamily,
                                   fontSize: 13,
                                   fontWeight: FontWeight.w700,
                                 ),
@@ -4124,14 +4241,14 @@ class _SectionPageState extends State<_SectionPage> {
                                   'Student No.',
                                   studentWidth,
                                   50,
-                                  background: const Color(0xFFD8E4F3),
+                                  background: CmTheme.lineBorder,
                                   bold: true,
                                 ),
                                 cell(
                                   'Student Name',
                                   nameWidth,
                                   50,
-                                  background: const Color(0xFFD8E4F3),
+                                  background: CmTheme.lineBorder,
                                   bold: true,
                                 ),
                                 for (final assessment in unknown)
@@ -4139,7 +4256,7 @@ class _SectionPageState extends State<_SectionPage> {
                                     '${assessment['title']}\n/${_formatScore(assessment['total_points'] as num?)}',
                                     130,
                                     50,
-                                    background: const Color(0xFFEDF2F8),
+                                    background: CmTheme.background,
                                     bold: true,
                                   ),
                               ],
@@ -4238,9 +4355,9 @@ class _SectionPageState extends State<_SectionPage> {
         if (kIsWeb) {
           await file.saveTo(name);
         } else if ([
-              TargetPlatform.android,
-              TargetPlatform.iOS,
-            ].contains(defaultTargetPlatform)) {
+          TargetPlatform.android,
+          TargetPlatform.iOS,
+        ].contains(defaultTargetPlatform)) {
           await SharePlus.instance.share(
             ShareParams(files: [file], subject: 'CheckMate Grade Report'),
           );
@@ -4256,8 +4373,12 @@ class _SectionPageState extends State<_SectionPage> {
       }
     } catch (e) {
       if (mounted)
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Export failed: ${_err(e)}')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          CmTheme.feedbackSnackBar(
+            'Export failed: ${_err(e)}',
+            color: CmTheme.redDanger,
+          ),
+        );
     }
   }
 
@@ -4308,16 +4429,20 @@ class _SectionPageState extends State<_SectionPage> {
                   materialTapTargetSize: MaterialTapTargetSize.padded,
                   label: Text('${f.$2} (${_countFor(f.$1)})'),
                   selected: _filter == f.$1,
-                  selectedColor: _navy,
-                  backgroundColor: Colors.white,
-                  side: const BorderSide(color: _line),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  selectedColor: CmTheme.navy,
+                  backgroundColor: CmTheme.surfaceWhite,
+                  side: const BorderSide(color: CmTheme.lineBorder),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                   labelStyle: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: _filter == f.$1 ? Colors.white : _ink,
+                    color: _filter == f.$1
+                        ? CmTheme.surfaceWhite
+                        : CmTheme.navy,
                   ),
-                  checkmarkColor: Colors.white,
+                  checkmarkColor: CmTheme.surfaceWhite,
                   onSelected: (_) => setState(() => _filter = f.$1),
                 ),
             ],
@@ -4341,11 +4466,7 @@ class _SectionPageState extends State<_SectionPage> {
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              searchWidget,
-              const SizedBox(height: 12),
-              filterChips,
-            ],
+            children: [searchWidget, const SizedBox(height: 12), filterChips],
           );
         },
       ),
@@ -4362,7 +4483,7 @@ class _SectionPageState extends State<_SectionPage> {
       const SizedBox(height: 12),
       const Text(
         'Blank scores remain Pending; recorded zero is valid. Tap a manual column to enter or edit a score. Draft assessments do not affect grades. Click a student name for grade information.',
-        style: TextStyle(fontSize: 12, color: _slate),
+        style: TextStyle(fontSize: 12, color: CmTheme.slateText),
       ),
     ];
   }
@@ -4381,8 +4502,10 @@ class _SectionPageState extends State<_SectionPage> {
               final isHighlighted = _activeHighlightStudentId == sid;
               final avg = _studentAveragePercent(s);
               final cells = _cells(s);
-              final rowKey =
-                  _studentRowKeys.putIfAbsent(sid, () => GlobalKey());
+              final rowKey = _studentRowKeys.putIfAbsent(
+                sid,
+                () => GlobalKey(),
+              );
 
               return AnimatedContainer(
                 key: rowKey,
@@ -4391,16 +4514,16 @@ class _SectionPageState extends State<_SectionPage> {
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: isHighlighted
-                      ? _green.withValues(alpha: 0.10)
-                      : Colors.white,
+                      ? CmTheme.navy.withValues(alpha: 0.10)
+                      : CmTheme.surfaceWhite,
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: isHighlighted ? _green : _line,
+                    color: isHighlighted ? CmTheme.navy : CmTheme.lineBorder,
                     width: isHighlighted ? 2 : 1,
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: _navy.withValues(alpha: 0.03),
+                      color: CmTheme.subtleCardShadow,
                       blurRadius: 10,
                       offset: const Offset(0, 3),
                     ),
@@ -4415,20 +4538,23 @@ class _SectionPageState extends State<_SectionPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              InkWell(onTap:()=>_showStudentGrades(s),child:Text(
-                                _studentName(s),
-                                style: const TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                  color: _ink,
+                              InkWell(
+                                onTap: () => _showStudentGrades(s),
+                                child: Text(
+                                  _studentName(s),
+                                  style: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                    color: CmTheme.navy,
+                                  ),
                                 ),
-                              )),
+                              ),
                               const SizedBox(height: 2),
                               Text(
                                 '${s['student_number'] ?? ''} • ${widget.section.name}',
                                 style: const TextStyle(
                                   fontSize: 12.5,
-                                  color: _slate,
+                                  color: CmTheme.slateText,
                                 ),
                               ),
                             ],
@@ -4441,13 +4567,13 @@ class _SectionPageState extends State<_SectionPage> {
                           ),
                           decoration: BoxDecoration(
                             color: avg != null
-                                ? _green.withValues(alpha: 0.14)
-                                : _bg,
+                                ? CmTheme.navy.withValues(alpha: 0.08)
+                                : CmTheme.background,
                             borderRadius: BorderRadius.circular(999),
                             border: Border.all(
                               color: avg != null
-                                  ? _green.withValues(alpha: 0.4)
-                                  : _line,
+                                  ? CmTheme.navy.withValues(alpha: 0.4)
+                                  : CmTheme.lineBorder,
                             ),
                           ),
                           child: Text(
@@ -4457,7 +4583,9 @@ class _SectionPageState extends State<_SectionPage> {
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
-                              color: avg != null ? _greenDark : _slate,
+                              color: avg != null
+                                  ? CmTheme.navy
+                                  : CmTheme.slateText,
                             ),
                           ),
                         ),
@@ -4465,7 +4593,7 @@ class _SectionPageState extends State<_SectionPage> {
                     ),
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 10),
-                      child: Divider(height: 1, color: _line),
+                      child: Divider(height: 1, color: CmTheme.lineBorder),
                     ),
                     Wrap(
                       spacing: 8,
@@ -4473,17 +4601,16 @@ class _SectionPageState extends State<_SectionPage> {
                       children: [
                         for (var i = 0; i < _assessments.length; i++)
                           _MobileScoreChip(
-                            title: '${_assessments[i]['column_label']} · ${_assessments[i]['title']} / ${_formatScore(_assessments[i]['total_points'] as num?)}',
+                            title:
+                                '${_assessments[i]['column_label']} · ${_assessments[i]['title']} / ${_formatScore(_assessments[i]['total_points'] as num?)}',
                             cell: cells[i],
-                            highlighted: isHighlighted &&
+                            highlighted:
+                                isHighlighted &&
                                 (_activeHighlightExamId == null ||
                                     _activeHighlightExamId ==
                                         _int(_assessments[i]['id'])),
-                            onTap: () => _onCellTapped(
-                              s,
-                              cells[i],
-                              _assessments[i],
-                            ),
+                            onTap: () =>
+                                _onCellTapped(s, cells[i], _assessments[i]),
                           ),
                       ],
                     ),
@@ -4532,12 +4659,12 @@ class _SectionPageState extends State<_SectionPage> {
           for (final cell in _cells(student)) cell['exam_id']: cell,
         },
     };
-    const grid = Color(0xFFE3E9F1);
+    const grid = CmTheme.lineBorder;
     Widget cell(
       Widget child,
       double width,
       double height, {
-      Color background = Colors.white,
+      Color background = CmTheme.surfaceWhite,
       Alignment alignment = Alignment.center,
     }) => Container(
       width: width,
@@ -4556,7 +4683,7 @@ class _SectionPageState extends State<_SectionPage> {
     Widget text(
       String value, {
       bool bold = false,
-      Color color = const Color(0xFF41516B),
+      Color color = CmTheme.slateText,
     }) => Text(
       value,
       maxLines: 2,
@@ -4570,8 +4697,8 @@ class _SectionPageState extends State<_SectionPage> {
     return Container(
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFDCE4EF)),
+        color: CmTheme.surfaceWhite,
+        border: Border.all(color: CmTheme.lineBorder),
         borderRadius: BorderRadius.circular(13),
       ),
       child: Column(
@@ -4592,14 +4719,14 @@ class _SectionPageState extends State<_SectionPage> {
                           text('Student No.', bold: true),
                           numberWidth,
                           _headH,
-                          background: const Color(0xFFEDF2F8),
+                          background: CmTheme.background,
                           alignment: Alignment.centerLeft,
                         ),
                         cell(
                           text('Student Name', bold: true),
                           nameWidth,
                           _headH,
-                          background: const Color(0xFFEDF2F8),
+                          background: CmTheme.background,
                           alignment: Alignment.centerLeft,
                         ),
                       ],
@@ -4610,8 +4737,8 @@ class _SectionPageState extends State<_SectionPage> {
                           final id = _int(student['id']) ?? 0;
                           final highlighted = _activeHighlightStudentId == id;
                           final background = highlighted
-                              ? const Color(0xFFE7F7EE)
-                              : Colors.white;
+                              ? CmTheme.background
+                              : CmTheme.surfaceWhite;
                           return AnimatedContainer(
                             key: _studentRowKeys.putIfAbsent(
                               id,
@@ -4639,9 +4766,9 @@ class _SectionPageState extends State<_SectionPage> {
                                         style: const TextStyle(
                                           fontSize: 12,
                                           fontWeight: FontWeight.w700,
-                                          color: Color(0xFF2358A0),
+                                          color: CmTheme.navy,
                                           decoration: TextDecoration.underline,
-                                          decorationColor: Color(0xFF2358A0),
+                                          decorationColor: CmTheme.navy,
                                         ),
                                       ),
                                     ),
@@ -4700,10 +4827,10 @@ class _SectionPageState extends State<_SectionPage> {
                                         ),
                                         alignment: Alignment.center,
                                         decoration: const BoxDecoration(
-                                          color: Color(0xFF182238),
+                                          color: CmTheme.navy,
                                           border: Border(
                                             right: BorderSide(
-                                              color: Color(0xFF8D98AB),
+                                              color: CmTheme.slateText,
                                             ),
                                           ),
                                         ),
@@ -4717,7 +4844,7 @@ class _SectionPageState extends State<_SectionPage> {
                                           style: const TextStyle(
                                             fontSize: 12,
                                             fontWeight: FontWeight.w700,
-                                            color: Colors.white,
+                                            color: CmTheme.surfaceWhite,
                                           ),
                                         ),
                                       ),
@@ -4725,7 +4852,10 @@ class _SectionPageState extends State<_SectionPage> {
                                         children: [
                                           if (items[key]!.isEmpty)
                                             cell(
-                                              text('—'),
+                                              text(
+                                                '—',
+                                                color: CmTheme.slateText,
+                                              ),
                                               scoreWidth,
                                               labelHeight,
                                               background:
@@ -4748,9 +4878,8 @@ class _SectionPageState extends State<_SectionPage> {
                                                       '/${_formatScore(assessment['total_points'] as num?)}',
                                                       style: const TextStyle(
                                                         fontSize: 10,
-                                                        color: Color(
-                                                          0xFF60718B,
-                                                        ),
+                                                        color:
+                                                            CmTheme.slateText,
                                                       ),
                                                     ),
                                                   ],
@@ -4766,9 +4895,7 @@ class _SectionPageState extends State<_SectionPage> {
                                               text('Total %', bold: true),
                                               totalWidth,
                                               labelHeight,
-                                              background: const Color(
-                                                0xFFEDF2F8,
-                                              ),
+                                              background: CmTheme.background,
                                             ),
                                         ],
                                       ),
@@ -4778,7 +4905,7 @@ class _SectionPageState extends State<_SectionPage> {
                                   text('Period Grade', bold: true),
                                   gradeWidth,
                                   _headH,
-                                  background: const Color(0xFFEDF2F8),
+                                  background: CmTheme.background,
                                 ),
                               ],
                             ),
@@ -4789,14 +4916,14 @@ class _SectionPageState extends State<_SectionPage> {
                                       _activeHighlightStudentId ==
                                       _int(student['id']);
                                   final background = highlighted
-                                      ? const Color(0xFFE7F7EE)
-                                      : Colors.white;
+                                      ? CmTheme.background
+                                      : CmTheme.surfaceWhite;
                                   return Row(
                                     children: [
                                       for (final key in groups) ...[
                                         if (items[key]!.isEmpty)
                                           cell(
-                                            text('—'),
+                                            text('—', color: CmTheme.slateText),
                                             scoreWidth,
                                             _rowH,
                                             background: background,
@@ -4891,20 +5018,20 @@ class _MobileScoreChip extends StatelessWidget {
         valueText = max == null
             ? _formatScore(score)
             : '${_formatScore(score)}/${_formatScore(max)}';
-        bg = _green.withValues(alpha: 0.15);
-        fg = _greenDark;
+        bg = CmTheme.background;
+        fg = score == null ? CmTheme.slateText : CmTheme.navy;
       case 'needs_review':
         valueText = 'Needs Review';
-        bg = _amber.withValues(alpha: 0.20);
-        fg = _amberDark;
+        bg = CmTheme.amberWarning.withValues(alpha: 0.20);
+        fg = CmTheme.navy;
       case 'absent':
         valueText = 'Absent';
-        bg = _red.withValues(alpha: 0.10);
-        fg = _red;
+        bg = CmTheme.surfaceWhite;
+        fg = CmTheme.slateText;
       default:
         valueText = 'Pending';
-        bg = _line;
-        fg = _slate;
+        bg = CmTheme.background;
+        fg = CmTheme.slateText;
     }
 
     return InkWell(
@@ -4915,7 +5042,9 @@ class _MobileScoreChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(10),
-          border: highlighted ? Border.all(color: _green, width: 1.5) : null,
+          border: highlighted
+              ? Border.all(color: CmTheme.navy, width: 1.5)
+              : null,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -4928,7 +5057,7 @@ class _MobileScoreChip extends StatelessWidget {
               style: const TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: _ink,
+                color: CmTheme.navy,
               ),
             ),
             const SizedBox(height: 2),
@@ -4973,12 +5102,12 @@ class _ScoreCell extends StatelessWidget {
       'completed' => _formatScore(score),
       'needs_review' => 'Review',
       'absent' => 'Absent',
-      _ => '',
+      _ => '—',
     };
     final color = switch (status) {
-      'needs_review' => _amberDark,
-      'absent' => _red,
-      _ => const Color(0xFF26334B),
+      'needs_review' => CmTheme.navy,
+      'completed' when score != null => CmTheme.navy,
+      _ => CmTheme.slateText,
     };
     final tooltip = status == 'completed'
         ? 'Score ${_formatScore(score)} / ${_formatScore(max)} · Click to review'
@@ -4999,10 +5128,10 @@ class _ScoreCell extends StatelessWidget {
             height: height,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: highlighted ? const Color(0xFFE7F7EE) : Colors.white,
+              color: highlighted ? CmTheme.lineBorder : CmTheme.surfaceWhite,
               border: const Border(
-                right: BorderSide(color: Color(0xFFE3E9F1)),
-                bottom: BorderSide(color: Color(0xFFE3E9F1)),
+                right: BorderSide(color: CmTheme.lineBorder),
+                bottom: BorderSide(color: CmTheme.lineBorder),
               ),
             ),
             child: Container(
@@ -5011,9 +5140,11 @@ class _ScoreCell extends StatelessWidget {
               alignment: Alignment.center,
               padding: const EdgeInsets.symmetric(horizontal: 3),
               decoration: BoxDecoration(
-                color: const Color(0xFFFBFCFE),
+                color: status == 'needs_review'
+                    ? CmTheme.amberWarning.withValues(alpha: 0.20)
+                    : CmTheme.surfaceWhite,
                 border: Border.all(
-                  color: highlighted ? _green : const Color(0xFFDCE4EF),
+                  color: highlighted ? CmTheme.navy : CmTheme.lineBorder,
                 ),
                 borderRadius: BorderRadius.circular(6),
               ),

@@ -57,6 +57,14 @@ flutter:
     - assets/logo_circle1.png
     - assets/Systems_Technology_Institute.png
 
+  fonts:
+    - family: CheckMate
+      fonts:
+        - asset: assets/fonts/CheckMateGrades-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/CheckMateGrades-Bold.ttf
+          weight: 700
+
 hooks:
   user_defines:
     dartcv4:

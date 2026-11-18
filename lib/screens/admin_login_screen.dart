@@ -1,10 +1,10 @@
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import 'admin_dashboard.dart';
-import 'login_screen.dart' show CmColors, CmBrandPanel, kDesktopBreakpoint;
-
+import 'login_screen.dart' show CmBrandPanel, kDesktopBreakpoint;
 
 class AdminLoginScreen extends StatefulWidget {
   const AdminLoginScreen({super.key});
@@ -47,10 +47,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
     });
 
     try {
-      final result = await ApiService.login(
-        email: email,
-        password: password,
-      );
+      final result = await ApiService.login(email: email, password: password);
 
       if (!mounted) {
         return;
@@ -90,9 +87,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
 
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(
-          builder: (context) => const AdminDashboard(),
-        ),
+        MaterialPageRoute(builder: (context) => const AdminDashboard()),
       );
     } catch (e) {
       if (!mounted) {
@@ -128,21 +123,21 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   }) {
     return InputDecoration(
       labelText: label,
-      prefixIcon: Icon(icon, color: CmColors.slate),
+      prefixIcon: Icon(icon, color: CmTheme.slateText),
       suffixIcon: suffixIcon,
       filled: true,
-      fillColor: CmColors.bg,
+      fillColor: CmTheme.background,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: CmColors.line),
+        borderSide: BorderSide(color: CmTheme.lineBorder),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: CmColors.line),
+        borderSide: BorderSide(color: CmTheme.lineBorder),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: CmColors.navy, width: 1.5),
+        borderSide: const BorderSide(color: CmTheme.navy, width: 1.5),
       ),
     );
   }
@@ -152,10 +147,10 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
       constraints: const BoxConstraints(maxWidth: 420),
       child: Card(
         elevation: 0,
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(24),
-          side: BorderSide(color: CmColors.line),
+          side: BorderSide(color: CmTheme.lineBorder),
         ),
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -169,10 +164,9 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                   errorBuilder: (context, error, stackTrace) => const Icon(
                     Icons.admin_panel_settings_outlined,
                     size: 72,
-                    color: CmColors.navy,
-                  
+                    color: CmTheme.navy,
+                  ),
                 ),
-              ),
               ),
 
               const SizedBox(height: 20),
@@ -183,12 +177,11 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                 style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.w700,
-                  color: CmColors.navy,
+                  color: CmTheme.navy,
                 ),
               ),
 
               const SizedBox(height: 6),
-
 
               const SizedBox(height: 28),
 
@@ -221,7 +214,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                       _obscure
                           ? Icons.visibility_outlined
                           : Icons.visibility_off_outlined,
-                      color: CmColors.slate,
+                      color: CmTheme.slateText,
                     ),
                     onPressed: () => setState(() => _obscure = !_obscure),
                   ),
@@ -233,14 +226,14 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFEF2F2),
+                    color: CmTheme.surfaceWhite,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFFECACA)),
+                    border: Border.all(color: CmTheme.redDanger),
                   ),
                   child: Text(
                     _error!,
                     style: const TextStyle(
-                      color: Color(0xFFDC2626),
+                      color: CmTheme.redDanger,
                       fontSize: 13,
                     ),
                   ),
@@ -255,7 +248,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                 child: FilledButton(
                   onPressed: _loading ? null : _login,
                   style: FilledButton.styleFrom(
-                    backgroundColor: CmColors.navy,
+                    backgroundColor: CmTheme.navy,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -266,7 +259,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                           height: 22,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: Colors.white,
+                            color: CmTheme.surfaceWhite,
                           ),
                         )
                       : const Text(
@@ -285,7 +278,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                   child: const Text(
                     'Back to teacher sign in',
                     style: TextStyle(
-                      color: CmColors.slate,
+                      color: CmTheme.slateText,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -304,9 +297,9 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
       padding: const EdgeInsets.all(24),
       child: Center(child: _buildFormCard(context)),
     );
-    
+
     return Scaffold(
-      backgroundColor: CmColors.bg,
+      backgroundColor: CmTheme.background,
       body: LayoutBuilder(
         builder: (context, constraints) {
           final isDesktop = constraints.maxWidth >= kDesktopBreakpoint;
@@ -322,7 +315,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                   subheading:
                       'Finalize exam questionnaires, manage teacher '
                       'accounts, and oversee enrollment by section.',
-                  backgroundColor: CmColors.navy,
+                  backgroundColor: CmTheme.navy,
                   illustrationAsset: 'assets/admin_illustration.png',
                 ),
               ),

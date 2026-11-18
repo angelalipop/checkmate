@@ -1,6 +1,8 @@
 import 'dart:math' as math;
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:printing/printing.dart';
@@ -12,8 +14,8 @@ import '../services/auth_storage.dart';
 import '../services/my_subjects_api_service.dart';
 import '../services/question_paper_import_service.dart';
 import '../services/question_paper_pdf_service.dart';
-import 'login_screen.dart' show CmColors;
-import 'teacher_dashboard.dart' show openTeacherScansForExam, TeacherShell, TeacherPage;
+import 'teacher_dashboard.dart'
+    show openTeacherScansForExam, TeacherShell, TeacherPage;
 import 'my_subjects_screen.dart' show MySubjectsScreen;
 
 // =============================================================
@@ -46,24 +48,6 @@ class _UpperCaseTextFormatter extends TextInputFormatter {
       composing: TextRange.empty,
     );
   }
-}
-
-/// CheckMate teacher palette (same values as the sidebar palette in
-/// teacher_dashboard.dart).
-class _Brand {
-  _Brand._();
-
-  /// Primary: headings, primary buttons, sidebar.
-  static const Color ink = Color(0xFF162137);
-
-  /// Secondary dark surface (active / hovered items).
-  static const Color inkSoft = Color(0xFF2D384D);
-
-  /// Light blue-grey: field and button outlines, text on dark.
-  static const Color mist = Color(0xFFCFD8E5);
-
-  /// Accent: draft status and warning chips (buttons use [ink]).
-  static const Color amber = Color(0xFFF7A224);
 }
 
 const double _kWide = 760;
@@ -100,8 +84,12 @@ void _disposeControllersLater(List<TextEditingController> controllers) {
   });
 }
 
-void _toast(BuildContext c, String m) {
-  ScaffoldMessenger.of(c).showSnackBar(SnackBar(content: Text(m)));
+void _toast(BuildContext c, String m, {Color? color}) {
+  ScaffoldMessenger.of(c).showSnackBar(
+    color == null
+        ? SnackBar(content: Text(m))
+        : CmTheme.feedbackSnackBar(m, color: color),
+  );
 }
 
 String _typeLabel(String t) {
@@ -219,13 +207,9 @@ String _statusLabel(String s) {
 Color _statusColor(String s) {
   switch (s.toLowerCase()) {
     case 'published':
-      return CmColors.green;
-    case 'archived':
-      return CmColors.slate;
-    case 'manual':
-      return Colors.blue;
+      return CmTheme.emeraldSuccess;
     default:
-      return _Brand.amber;
+      return CmTheme.slateText;
   }
 }
 
@@ -245,16 +229,18 @@ OutlineInputBorder _ob(Color c, [double w = 1]) => OutlineInputBorder(
 
 InputDecoration _deco(String hint, {Widget? prefix}) => InputDecoration(
   hintText: hint,
-  hintStyle: const TextStyle(color: CmColors.slate, fontSize: 13),
+  hintStyle: const TextStyle(color: CmTheme.slateText, fontSize: 13),
   prefixIcon: prefix,
   isDense: true,
   filled: true,
-  fillColor: Colors.white,
+  fillColor: CmTheme.surfaceWhite,
   contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-  border: _ob(_Brand.mist),
-  enabledBorder: _ob(_Brand.mist),
-  disabledBorder: _ob(_Brand.mist),
-  focusedBorder: _ob(_Brand.ink, 1.5),
+  border: _ob(CmTheme.lineBorder),
+  enabledBorder: _ob(CmTheme.lineBorder),
+  disabledBorder: _ob(CmTheme.lineBorder),
+  focusedBorder: _ob(CmTheme.navy, 1.5),
+  errorBorder: _ob(CmTheme.redDanger),
+  focusedErrorBorder: _ob(CmTheme.redDanger, 1.5),
 );
 
 InputDecoration _floatingDeco(
@@ -262,58 +248,71 @@ InputDecoration _floatingDeco(
   String? hint,
   Widget? suffixIcon,
   bool locked = false,
-}) =>
-    _deco(hint ?? '').copyWith(
-      labelText: label,
-      floatingLabelBehavior: FloatingLabelBehavior.always,
-      labelStyle: const TextStyle(
-        color: CmColors.slate,
-        fontSize: 13,
-      ),
-      floatingLabelStyle: const TextStyle(
-        color: CmColors.slate,
-        fontSize: 13,
-      ),
-      fillColor: locked ? const Color(0xFFF1F5F9) : Colors.white,
-      suffixIcon: suffixIcon,
-    );
+}) => _deco(hint ?? '').copyWith(
+  labelText: label,
+  floatingLabelBehavior: FloatingLabelBehavior.always,
+  labelStyle: const TextStyle(color: CmTheme.slateText, fontSize: 13),
+  floatingLabelStyle: const TextStyle(color: CmTheme.slateText, fontSize: 13),
+  fillColor: locked ? CmTheme.background : CmTheme.surfaceWhite,
+  suffixIcon: suffixIcon,
+);
 
-const TextStyle _inputText = TextStyle(fontSize: 13.5, color: _Brand.ink);
+const TextStyle _inputText = TextStyle(
+  fontFamily: CmTheme.fontFamily,
+  fontSize: 13.5,
+  color: CmTheme.navy,
+);
 
 final ButtonStyle _primaryStyle = FilledButton.styleFrom(
-  backgroundColor: _Brand.ink,
-  foregroundColor: Colors.white,
+  backgroundColor: CmTheme.navy,
+  foregroundColor: CmTheme.surfaceWhite,
   minimumSize: const Size(0, 40),
   padding: const EdgeInsets.symmetric(horizontal: 16),
   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-  textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+  textStyle: const TextStyle(
+    fontFamily: CmTheme.fontFamily,
+    fontWeight: FontWeight.w700,
+    fontSize: 13.5,
+  ),
 );
 
-final ButtonStyle _amberStyle = FilledButton.styleFrom(
-  backgroundColor: _Brand.ink,
-  foregroundColor: Colors.white,
+final ButtonStyle _compactPrimaryStyle = FilledButton.styleFrom(
+  backgroundColor: CmTheme.navy,
+  foregroundColor: CmTheme.surfaceWhite,
   minimumSize: const Size(0, 38),
   padding: const EdgeInsets.symmetric(horizontal: 14),
   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-  textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+  textStyle: const TextStyle(
+    fontFamily: CmTheme.fontFamily,
+    fontWeight: FontWeight.w700,
+    fontSize: 13,
+  ),
 );
 
-final ButtonStyle _greenSaveStyle = FilledButton.styleFrom(
-  backgroundColor: CmColors.green,
-  foregroundColor: Colors.white,
+final ButtonStyle _saveStyle = FilledButton.styleFrom(
+  backgroundColor: CmTheme.navy,
+  foregroundColor: CmTheme.surfaceWhite,
   minimumSize: const Size(0, 38),
   padding: const EdgeInsets.symmetric(horizontal: 14),
   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-  textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+  textStyle: const TextStyle(
+    fontFamily: CmTheme.fontFamily,
+    fontWeight: FontWeight.w700,
+    fontSize: 13,
+  ),
 );
 
 final ButtonStyle _outlineStyle = OutlinedButton.styleFrom(
-  foregroundColor: _Brand.ink,
-  side: const BorderSide(color: _Brand.mist),
+  foregroundColor: CmTheme.navy,
+  side: const BorderSide(color: CmTheme.lineBorder),
   minimumSize: const Size(0, 40),
   padding: const EdgeInsets.symmetric(horizontal: 14),
   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-  textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+  textStyle: const TextStyle(
+    fontFamily: CmTheme.fontFamily,
+    fontWeight: FontWeight.w600,
+    fontSize: 13.5,
+  ),
 );
 
 class _Card extends StatelessWidget {
@@ -327,9 +326,9 @@ class _Card extends StatelessWidget {
       width: double.infinity,
       padding: EdgeInsets.all(padding),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: CmColors.line),
+        border: Border.all(color: CmTheme.lineBorder),
       ),
       child: child,
     );
@@ -353,7 +352,7 @@ class _Field extends StatelessWidget {
             style: const TextStyle(
               fontSize: 12.5,
               fontWeight: FontWeight.w700,
-              color: _Brand.ink,
+              color: CmTheme.navy,
             ),
           ),
           const SizedBox(height: 6),
@@ -365,7 +364,7 @@ class _Field extends StatelessWidget {
 }
 
 class _Spin extends StatelessWidget {
-  const _Spin() : color = Colors.white;
+  const _Spin() : color = CmTheme.surfaceWhite;
   final Color color;
 
   @override
@@ -404,7 +403,7 @@ class _Badge extends StatelessWidget {
     height: size,
     alignment: Alignment.center,
     decoration: BoxDecoration(
-      color: CmColors.bg,
+      color: CmTheme.background,
       borderRadius: BorderRadius.circular(7),
     ),
     child: Text(
@@ -412,7 +411,7 @@ class _Badge extends StatelessWidget {
       style: const TextStyle(
         fontSize: 11.5,
         fontWeight: FontWeight.w800,
-        color: _Brand.ink,
+        color: CmTheme.navy,
       ),
     ),
   );
@@ -428,7 +427,9 @@ class _StatusPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: c.withValues(alpha: 0.14),
+        color: c == CmTheme.slateText
+            ? CmTheme.background
+            : c.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -445,9 +446,7 @@ class _StatusPill extends StatelessWidget {
             style: TextStyle(
               fontSize: 11.5,
               fontWeight: FontWeight.w700,
-              color: c == CmColors.slate
-                  ? _Brand.ink
-                  : HSLColor.fromColor(c).withLightness(0.28).toColor(),
+              color: c == CmTheme.slateText ? CmTheme.slateText : CmTheme.navy,
             ),
           ),
         ],
@@ -475,8 +474,8 @@ class _CmDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: Colors.white,
-      surfaceTintColor: Colors.transparent,
+      backgroundColor: CmTheme.surfaceWhite,
+      surfaceTintColor: CmTheme.transparent,
       insetPadding: const EdgeInsets.all(16),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: ConstrainedBox(
@@ -499,7 +498,7 @@ class _CmDialog extends StatelessWidget {
                           style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w800,
-                            color: _Brand.ink,
+                            color: CmTheme.navy,
                           ),
                         ),
                         if (subtitle != null)
@@ -509,7 +508,7 @@ class _CmDialog extends StatelessWidget {
                               subtitle!,
                               style: const TextStyle(
                                 fontSize: 12,
-                                color: CmColors.slate,
+                                color: CmTheme.slateText,
                               ),
                             ),
                           ),
@@ -520,7 +519,11 @@ class _CmDialog extends StatelessWidget {
                     onTap: () => Navigator.maybePop(context),
                     child: const Padding(
                       padding: EdgeInsets.all(2),
-                      child: Icon(Icons.close, size: 18, color: CmColors.slate),
+                      child: Icon(
+                        Icons.close,
+                        size: 18,
+                        color: CmTheme.slateText,
+                      ),
                     ),
                   ),
                 ],
@@ -572,7 +575,7 @@ Future<bool> _confirm(
         padding: const EdgeInsets.only(bottom: 12),
         child: Text(
           message,
-          style: const TextStyle(fontSize: 13.5, color: _Brand.ink),
+          style: const TextStyle(fontSize: 13.5, color: CmTheme.navy),
         ),
       ),
     ),
@@ -824,7 +827,7 @@ Future<ImportedQuestionPaper?> _pickAndParseFileFromDisk(
               child: Text(
                 'Could not find numbered questions (e.g. "1. ...") or tabular question rows in "${file.name}".$unreadableNote '
                 'Please make sure the uploaded file is a text-based PDF or supported document with numbered items.',
-                style: const TextStyle(fontSize: 13.5, color: _Brand.ink),
+                style: const TextStyle(fontSize: 13.5, color: CmTheme.navy),
               ),
             ),
           ),
@@ -835,7 +838,11 @@ Future<ImportedQuestionPaper?> _pickAndParseFileFromDisk(
     return parsed;
   } catch (e) {
     if (context.mounted) {
-      _toast(context, 'Failed to read questionnaire: ${_err(e)}');
+      _toast(
+        context,
+        'Failed to read questionnaire: ${_err(e)}',
+        color: CmTheme.redDanger,
+      );
     }
     return null;
   }
@@ -889,7 +896,8 @@ class _EditableTemplateRow {
   double get parsedPoints =>
       double.tryParse(pointsController.text.trim()) ?? 0.0;
 
-  bool get isValid => parsedCount > 0 && parsedPoints > 0 && parsedPoints.isFinite;
+  bool get isValid =>
+      parsedCount > 0 && parsedPoints > 0 && parsedPoints.isFinite;
 
   QuestionnaireTemplateSectionConfig toConfig() =>
       QuestionnaireTemplateSectionConfig(
@@ -980,11 +988,12 @@ class _UploadQuestionnaireDialogState
   List<QuestionnaireTemplateSectionConfig> get _currentConfigs =>
       _rows.map((r) => r.toConfig()).toList();
 
-  bool get _allRowsValid =>
-      _rows.isNotEmpty && _rows.every((r) => r.isValid);
+  bool get _allRowsValid => _rows.isNotEmpty && _rows.every((r) => r.isValid);
 
-  int get _totalTemplateItems =>
-      _rows.fold<int>(0, (sum, r) => sum + (r.parsedCount > 0 ? r.parsedCount : 0));
+  int get _totalTemplateItems => _rows.fold<int>(
+    0,
+    (sum, r) => sum + (r.parsedCount > 0 ? r.parsedCount : 0),
+  );
 
   double get _totalTemplatePoints => _rows.fold<double>(
     0.0,
@@ -1047,8 +1056,9 @@ class _UploadQuestionnaireDialogState
     try {
       final picked = await _pickAndParseFileFromDisk(
         context,
-        expectedTemplate:
-            (_templateMode && _allRowsValid) ? _currentConfigs : null,
+        expectedTemplate: (_templateMode && _allRowsValid)
+            ? _currentConfigs
+            : null,
       );
       if (!mounted) return;
       if (picked != null) {
@@ -1168,8 +1178,9 @@ class _UploadQuestionnaireDialogState
       setState(() {
         _reviewedPaper = paper.rebuildWithUpdatedSections(
           sectionsCopy,
-          expectedTemplate:
-              (_templateMode && _allRowsValid) ? _currentConfigs : null,
+          expectedTemplate: (_templateMode && _allRowsValid)
+              ? _currentConfigs
+              : null,
         );
       });
     }
@@ -1266,7 +1277,9 @@ class _UploadQuestionnaireDialogState
                     TextField(
                       controller: choiceCs[i],
                       style: _inputText,
-                      decoration: _deco('Choice ${String.fromCharCode(65 + i)}'),
+                      decoration: _deco(
+                        'Choice ${String.fromCharCode(65 + i)}',
+                      ),
                     ),
                   ),
               ],
@@ -1313,8 +1326,9 @@ class _UploadQuestionnaireDialogState
       setState(() {
         _reviewedPaper = paper.rebuildWithUpdatedSections(
           sectionsCopy,
-          expectedTemplate:
-              (_templateMode && _allRowsValid) ? _currentConfigs : null,
+          expectedTemplate: (_templateMode && _allRowsValid)
+              ? _currentConfigs
+              : null,
         );
       });
     }
@@ -1343,8 +1357,9 @@ class _UploadQuestionnaireDialogState
     setState(() {
       _reviewedPaper = paper.rebuildWithUpdatedSections(
         sectionsCopy,
-        expectedTemplate:
-            (_templateMode && _allRowsValid) ? _currentConfigs : null,
+        expectedTemplate: (_templateMode && _allRowsValid)
+            ? _currentConfigs
+            : null,
       );
     });
   }
@@ -1478,7 +1493,7 @@ class _UploadQuestionnaireDialogState
                     style: TextStyle(
                       fontSize: 14.5,
                       fontWeight: FontWeight.w800,
-                      color: _Brand.ink,
+                      color: CmTheme.navy,
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -1493,10 +1508,7 @@ class _UploadQuestionnaireDialogState
                           in QuestionPaperImportService.templatePresets)
                         DropdownMenuItem<String>(
                           value: p.id,
-                          child: Text(
-                            p.label,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                          child: Text(p.label, overflow: TextOverflow.ellipsis),
                         ),
                       const DropdownMenuItem<String>(
                         value: 'custom',
@@ -1510,7 +1522,10 @@ class _UploadQuestionnaireDialogState
                           .firstOrNull;
                       if (match != null) {
                         setState(() {
-                          _applyPresetConfig(match.sections, presetId: match.id);
+                          _applyPresetConfig(
+                            match.sections,
+                            presetId: match.id,
+                          );
                         });
                       }
                     },
@@ -1526,13 +1541,16 @@ class _UploadQuestionnaireDialogState
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Padding(
-                            padding: const EdgeInsets.only(bottom: 10, right: 8),
+                            padding: const EdgeInsets.only(
+                              bottom: 10,
+                              right: 8,
+                            ),
                             child: Text(
                               '${QuestionPaperImportService.subpartLetterFromIndex(idx)}.',
                               style: const TextStyle(
                                 fontWeight: FontWeight.w800,
                                 fontSize: 13.5,
-                                color: _Brand.ink,
+                                color: CmTheme.navy,
                               ),
                             ),
                           ),
@@ -1600,7 +1618,7 @@ class _UploadQuestionnaireDialogState
                             icon: const Icon(
                               Icons.close,
                               size: 18,
-                              color: CmColors.slate,
+                              color: CmTheme.slateText,
                             ),
                           ),
                         ],
@@ -1631,9 +1649,9 @@ class _UploadQuestionnaireDialogState
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: CmColors.bg,
+                      color: CmTheme.background,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: CmColors.line),
+                      border: Border.all(color: CmTheme.lineBorder),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1646,7 +1664,7 @@ class _UploadQuestionnaireDialogState
                             fontSize: 12.5,
                             fontWeight: FontWeight.w800,
                             color: _allRowsValid
-                                ? _Brand.ink
+                                ? CmTheme.navy
                                 : Theme.of(context).colorScheme.error,
                           ),
                         ),
@@ -1663,7 +1681,7 @@ class _UploadQuestionnaireDialogState
                                       style: const TextStyle(
                                         fontSize: 12.5,
                                         fontWeight: FontWeight.w700,
-                                        color: _Brand.ink,
+                                        color: CmTheme.navy,
                                       ),
                                     ),
                                   ),
@@ -1671,7 +1689,7 @@ class _UploadQuestionnaireDialogState
                                     'Items ${r.itemRangeLabel} (${r.itemCount}) \u00B7 ${_trim(r.totalPoints)} pts',
                                     style: const TextStyle(
                                       fontSize: 12,
-                                      color: CmColors.slate,
+                                      color: CmTheme.slateText,
                                     ),
                                   ),
                                 ],
@@ -1686,7 +1704,7 @@ class _UploadQuestionnaireDialogState
                                   style: const TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w700,
-                                    color: _Brand.inkSoft,
+                                    color: CmTheme.slateText,
                                   ),
                                 ),
                               ),
@@ -1717,7 +1735,7 @@ class _UploadQuestionnaireDialogState
                     'Fill in the question prompts and A\u2013D choices, keep the Part headings, '
                     'point instructions, and numbering, then export as a text-based PDF and upload it below. '
                     'Enter the answer keys in CheckMate after import.',
-                    style: TextStyle(fontSize: 12, color: CmColors.slate),
+                    style: TextStyle(fontSize: 12, color: CmTheme.slateText),
                   ),
                   if (_statusMessage != null) ...[
                     const SizedBox(height: 8),
@@ -1726,7 +1744,7 @@ class _UploadQuestionnaireDialogState
                       style: const TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w600,
-                        color: CmColors.green,
+                        color: CmTheme.emeraldSuccess,
                       ),
                     ),
                   ],
@@ -1743,11 +1761,13 @@ class _UploadQuestionnaireDialogState
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  _templateMode ? '2. Upload and review' : '1. Upload and review',
+                  _templateMode
+                      ? '2. Upload and review'
+                      : '1. Upload and review',
                   style: const TextStyle(
                     fontSize: 14.5,
                     fontWeight: FontWeight.w800,
-                    color: _Brand.ink,
+                    color: CmTheme.navy,
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -1755,13 +1775,18 @@ class _UploadQuestionnaireDialogState
                   _templateMode
                       ? 'Select the completed questionnaire PDF (or Word file) to classify and review before importing.'
                       : 'Select an existing questionnaire (PDF, Word, Excel, CSV, TXT, RTF, ODT, or HTML) to classify and review.',
-                  style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    color: CmTheme.slateText,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Align(
                   alignment: Alignment.centerLeft,
                   child: FilledButton.icon(
-                    style: _reviewedPaper == null ? _primaryStyle : _outlineStyle,
+                    style: _reviewedPaper == null
+                        ? _primaryStyle
+                        : _outlineStyle,
                     onPressed: _pickingFile ? null : _pickQuestionnaireFile,
                     icon: _pickingFile
                         ? const _Spin()
@@ -1794,7 +1819,9 @@ class _UploadQuestionnaireDialogState
     final itemSubtotals = paper.itemCountSubtotalByType;
     final typeSectionCounts = <String, int>{};
     for (final s in paper.sections) {
-      final t = QuestionPaperImportService.normalizeQuestionType(s.questionType);
+      final t = QuestionPaperImportService.normalizeQuestionType(
+        s.questionType,
+      );
       typeSectionCounts[t] = (typeSectionCounts[t] ?? 0) + 1;
     }
 
@@ -1805,9 +1832,9 @@ class _UploadQuestionnaireDialogState
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: CmColors.bg,
+            color: CmTheme.background,
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: CmColors.line),
+            border: Border.all(color: CmTheme.lineBorder),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1817,7 +1844,7 @@ class _UploadQuestionnaireDialogState
                   const Icon(
                     Icons.fact_check_outlined,
                     size: 18,
-                    color: _Brand.ink,
+                    color: CmTheme.navy,
                   ),
                   const SizedBox(width: 8),
                   Expanded(
@@ -1828,7 +1855,7 @@ class _UploadQuestionnaireDialogState
                       style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w800,
-                        color: _Brand.ink,
+                        color: CmTheme.navy,
                       ),
                     ),
                   ),
@@ -1845,7 +1872,7 @@ class _UploadQuestionnaireDialogState
                       style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
-                        color: _Brand.inkSoft,
+                        color: CmTheme.slateText,
                       ),
                     ),
                   ),
@@ -1857,7 +1884,7 @@ class _UploadQuestionnaireDialogState
                           '(you will confirm or change this in Exam Details).'
                     : 'No explicit assessment-type heading detected in file \u2014 '
                           'you will choose whether this is a Quiz or Major Exam in Exam Details.',
-                style: const TextStyle(fontSize: 12, color: CmColors.slate),
+                style: const TextStyle(fontSize: 12, color: CmTheme.slateText),
               ),
             ],
           ),
@@ -1869,9 +1896,11 @@ class _UploadQuestionnaireDialogState
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: _Brand.amber.withValues(alpha: 0.12),
+              color: CmTheme.amberWarning.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: _Brand.amber.withValues(alpha: 0.6)),
+              border: Border.all(
+                color: CmTheme.amberWarning.withValues(alpha: 0.6),
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1881,7 +1910,7 @@ class _UploadQuestionnaireDialogState
                     const Icon(
                       Icons.warning_amber_rounded,
                       size: 18,
-                      color: _Brand.ink,
+                      color: CmTheme.navy,
                     ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -1892,7 +1921,7 @@ class _UploadQuestionnaireDialogState
                         style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w800,
-                          color: _Brand.ink,
+                          color: CmTheme.navy,
                         ),
                       ),
                     ),
@@ -1911,7 +1940,7 @@ class _UploadQuestionnaireDialogState
                             : FontWeight.w500,
                         color: issue.isBlocking
                             ? Theme.of(context).colorScheme.error
-                            : _Brand.ink,
+                            : CmTheme.navy,
                       ),
                     ),
                   ),
@@ -1926,7 +1955,7 @@ class _UploadQuestionnaireDialogState
           style: TextStyle(
             fontSize: 12.5,
             fontWeight: FontWeight.w800,
-            color: _Brand.ink,
+            color: CmTheme.navy,
           ),
         ),
         const SizedBox(height: 8),
@@ -1946,10 +1975,10 @@ class _UploadQuestionnaireDialogState
       padding: const EdgeInsets.only(bottom: 10),
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: CmTheme.surfaceWhite,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: hasSecIssues ? _Brand.amber : CmColors.line,
+            color: hasSecIssues ? CmTheme.amberWarning : CmTheme.lineBorder,
             width: hasSecIssues ? 1.4 : 1.0,
           ),
         ),
@@ -1976,7 +2005,7 @@ class _UploadQuestionnaireDialogState
                             style: const TextStyle(
                               fontSize: 13.5,
                               fontWeight: FontWeight.w800,
-                              color: _Brand.ink,
+                              color: CmTheme.navy,
                             ),
                           ),
                           const SizedBox(height: 2),
@@ -1987,7 +2016,7 @@ class _UploadQuestionnaireDialogState
                             '${_trim(sec.totalPoints)} pts total',
                             style: const TextStyle(
                               fontSize: 11.5,
-                              color: CmColors.slate,
+                              color: CmTheme.slateText,
                             ),
                           ),
                         ],
@@ -2006,14 +2035,14 @@ class _UploadQuestionnaireDialogState
                           ? Icons.keyboard_arrow_down
                           : Icons.chevron_right,
                       size: 18,
-                      color: CmColors.slate,
+                      color: CmTheme.slateText,
                     ),
                   ],
                 ),
               ),
             ),
             if (expanded) ...[
-              const Divider(height: 1, color: CmColors.line),
+              const Divider(height: 1, color: CmTheme.lineBorder),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 280),
                 child: ListView.separated(
@@ -2021,7 +2050,7 @@ class _UploadQuestionnaireDialogState
                   padding: const EdgeInsets.all(12),
                   itemCount: sec.questions.length,
                   separatorBuilder: (_, _) =>
-                      const Divider(height: 14, color: CmColors.line),
+                      const Divider(height: 14, color: CmTheme.lineBorder),
                   itemBuilder: (context, qIdx) {
                     final q = sec.questions[qIdx];
                     return Column(
@@ -2038,7 +2067,7 @@ class _UploadQuestionnaireDialogState
                                   fontWeight: FontWeight.w600,
                                   color: q.hasIssues
                                       ? Theme.of(context).colorScheme.error
-                                      : _Brand.ink,
+                                      : CmTheme.navy,
                                 ),
                               ),
                             ),
@@ -2048,17 +2077,18 @@ class _UploadQuestionnaireDialogState
                               style: const TextStyle(
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w700,
-                                color: CmColors.slate,
+                                color: CmTheme.slateText,
                               ),
                             ),
                             IconButton(
                               tooltip: 'Edit item ${q.questionNumber}',
                               visualDensity: VisualDensity.compact,
                               iconSize: 16,
-                              onPressed: () => _editReviewedQuestion(sIdx, qIdx),
+                              onPressed: () =>
+                                  _editReviewedQuestion(sIdx, qIdx),
                               icon: const Icon(
                                 Icons.edit_outlined,
-                                color: CmColors.slate,
+                                color: CmTheme.slateText,
                               ),
                             ),
                             IconButton(
@@ -2069,7 +2099,7 @@ class _UploadQuestionnaireDialogState
                                   _deleteReviewedQuestion(sIdx, qIdx),
                               icon: const Icon(
                                 Icons.delete_outline,
-                                color: CmColors.slate,
+                                color: CmTheme.slateText,
                               ),
                             ),
                           ],
@@ -2099,10 +2129,10 @@ class _UploadQuestionnaireDialogState
                                             ? FontWeight.w700
                                             : FontWeight.w500,
                                         color: isMissing
-                                            ? Theme.of(
-                                                context,
-                                              ).colorScheme.error
-                                            : CmColors.slate,
+                                            ? Theme.of(context)
+                                                  .colorScheme
+                                                  .error
+                                            : CmTheme.slateText,
                                       ),
                                     );
                                   },
@@ -2290,7 +2320,8 @@ Future<int> importParsedSectionsIntoExam({
     for (var i = 0; i < sec.questions.length; i++) {
       final q = sec.questions[i];
       final targetQNum =
-          baseQuestionOffset + (q.questionNumber > 0 ? q.questionNumber : (i + 1));
+          baseQuestionOffset +
+          (q.questionNumber > 0 ? q.questionNumber : (i + 1));
       final normalizedAnswer = q.correctAnswer == null
           ? null
           : _normalizeAnswerByType(q.correctAnswer!, sec.questionType);
@@ -2301,8 +2332,8 @@ Future<int> importParsedSectionsIntoExam({
       if (existingQ != null && existingQId != null) {
         final normalizedExistingAnswer =
             normalizedAnswer == null || normalizedAnswer.isEmpty
-                ? existingQ['correct_answer']?.toString()
-                : normalizedAnswer;
+            ? existingQ['correct_answer']?.toString()
+            : normalizedAnswer;
 
         await ApiService.updateQuestion(
           token: token,
@@ -2315,8 +2346,8 @@ Future<int> importParsedSectionsIntoExam({
       } else {
         final normalizedCreatedAnswer =
             normalizedAnswer == null || normalizedAnswer.isEmpty
-                ? null
-                : normalizedAnswer;
+            ? null
+            : normalizedAnswer;
 
         await ApiService.createQuestion(
           token: token,
@@ -2378,10 +2409,11 @@ Future<AssessmentCreationResult?> showAssessmentCreation(
         actions: [
           TextButton(
             style: TextButton.styleFrom(
-              foregroundColor: _Brand.inkSoft,
+              foregroundColor: CmTheme.slateText,
               minimumSize: const Size(0, 40),
               padding: const EdgeInsets.symmetric(horizontal: 14),
               textStyle: const TextStyle(
+                fontFamily: CmTheme.fontFamily,
                 fontWeight: FontWeight.w600,
                 fontSize: 13.5,
               ),
@@ -2391,7 +2423,7 @@ Future<AssessmentCreationResult?> showAssessmentCreation(
           ),
           if (!['performance_task', 'laboratory'].contains(type))
             FilledButton(
-              style: _amberStyle,
+              style: _compactPrimaryStyle,
               onPressed: () {
                 mode = 'builder';
                 Navigator.pop(c, true);
@@ -2468,7 +2500,7 @@ Future<AssessmentCreationResult?> showAssessmentCreation(
                 ['quiz', 'short_quiz', 'long_quiz'].contains(type)
                     ? 'Counts under Quizzes.'
                     : 'Counts under Major Examination.',
-                style: const TextStyle(color: CmColors.slate, fontSize: 13),
+                style: const TextStyle(color: CmTheme.slateText, fontSize: 13),
               ),
           ],
         ),
@@ -2530,10 +2562,11 @@ Future<AssessmentCreationResult?> _showManualColumnForm(
           actions: [
             TextButton(
               style: TextButton.styleFrom(
-                foregroundColor: _Brand.inkSoft,
+                foregroundColor: CmTheme.slateText,
                 minimumSize: const Size(0, 40),
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 textStyle: const TextStyle(
+                  fontFamily: CmTheme.fontFamily,
                   fontWeight: FontWeight.w600,
                   fontSize: 13.5,
                 ),
@@ -2542,7 +2575,7 @@ Future<AssessmentCreationResult?> _showManualColumnForm(
               child: const Text('Cancel'),
             ),
             FilledButton(
-              style: _amberStyle,
+              style: _compactPrimaryStyle,
               onPressed: saving
                   ? null
                   : () async {
@@ -2635,7 +2668,7 @@ Future<AssessmentCreationResult?> _showManualColumnForm(
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
-                  color: _Brand.ink,
+                  color: CmTheme.navy,
                 ),
               ),
               const SizedBox(height: 4),
@@ -2643,7 +2676,7 @@ Future<AssessmentCreationResult?> _showManualColumnForm(
                 CheckboxListTile(
                   contentPadding: EdgeInsets.zero,
                   controlAffinity: ListTileControlAffinity.leading,
-                  activeColor: _Brand.ink,
+                  activeColor: CmTheme.navy,
                   dense: true,
                   title: Text('${sec['section'] ?? ''}', style: _inputText),
                   value: selected.contains(_id(sec['id'])),
@@ -2689,7 +2722,7 @@ Future<AssessmentCreationResult?> _showManualColumnForm(
                   padding: const EdgeInsets.only(top: 12),
                   child: Text(
                     error!,
-                    style: const TextStyle(color: Colors.red),
+                    style: const TextStyle(color: CmTheme.redDanger),
                   ),
                 ),
             ],
@@ -2822,10 +2855,9 @@ Future<int?> showExamDetailsModal(
   int? createdExamIdForRetry;
 
   // Initial Quiz Name (for Quiz / Short Quiz / Long Quiz / Other).
-  final rawExistingTitle = (exam?['title']?.toString() ??
-          importedPaper?.detectedQuizTitle ??
-          '')
-      .trim();
+  final rawExistingTitle =
+      (exam?['title']?.toString() ?? importedPaper?.detectedQuizTitle ?? '')
+          .trim();
   final isExistingTitleFormalMajor = const {
     'preliminary examination',
     'midterm examination',
@@ -2834,7 +2866,8 @@ Future<int?> showExamDetailsModal(
   }.contains(rawExistingTitle.toLowerCase());
 
   final quizNameC = TextEditingController(
-    text: (!AssessmentValidator.isMajorExamination(type) &&
+    text:
+        (!AssessmentValidator.isMajorExamination(type) &&
             !isExistingTitleFormalMajor)
         ? rawExistingTitle
         : '',
@@ -2863,10 +2896,11 @@ Future<int?> showExamDetailsModal(
   );
 
   // Initial Instructions (pre-filled with default STI Notice & instructions when empty).
-  final rawInstructions = (exam?['instructions']?.toString() ??
-          importedPaper?.detectedInstructions ??
-          '')
-      .trim();
+  final rawInstructions =
+      (exam?['instructions']?.toString() ??
+              importedPaper?.detectedInstructions ??
+              '')
+          .trim();
   final instC = TextEditingController(
     text: rawInstructions.isNotEmpty
         ? rawInstructions
@@ -2945,8 +2979,7 @@ Future<int?> showExamDetailsModal(
               gradingPeriod == null ||
               !classificationConfirmed) {
             setS(
-              () => error =
-                  'Please choose and confirm an assessment type and grading period.',
+              () => error = 'Please choose and confirm an assessment type and grading period.',
             );
             return;
           }
@@ -3057,7 +3090,7 @@ Future<int?> showExamDetailsModal(
                 children: [
                   Checkbox(
                     value: selected.contains(secId),
-                    activeColor: _Brand.ink,
+                    activeColor: CmTheme.navy,
                     onChanged: enabled ? (v) => toggle(v == true) : null,
                   ),
                   Expanded(
@@ -3070,7 +3103,7 @@ Future<int?> showExamDetailsModal(
                     '$count ${count == 1 ? 'student' : 'students'}',
                     style: const TextStyle(
                       fontSize: 12.5,
-                      color: CmColors.slate,
+                      color: CmTheme.slateText,
                     ),
                   ),
                 ],
@@ -3105,13 +3138,13 @@ Future<int?> showExamDetailsModal(
                           child: Icon(
                             Icons.clear,
                             size: 15,
-                            color: CmColors.slate,
+                            color: CmTheme.slateText,
                           ),
                         ),
                       ),
                     Padding(
                       padding: const EdgeInsets.only(right: 10),
-                      child: Icon(icon, size: 17, color: CmColors.slate),
+                      child: Icon(icon, size: 17, color: CmTheme.slateText),
                     ),
                   ],
                 ),
@@ -3120,7 +3153,7 @@ Future<int?> showExamDetailsModal(
                 value.isEmpty ? placeholder : value,
                 overflow: TextOverflow.ellipsis,
                 style: value.isEmpty
-                    ? const TextStyle(color: CmColors.slate, fontSize: 13)
+                    ? const TextStyle(color: CmTheme.slateText, fontSize: 13)
                     : _inputText,
               ),
             ),
@@ -3133,7 +3166,7 @@ Future<int?> showExamDetailsModal(
             child: Text(
               value,
               overflow: TextOverflow.ellipsis,
-              style: _inputText.copyWith(color: CmColors.slate),
+              style: _inputText.copyWith(color: CmTheme.slateText),
             ),
           );
         }
@@ -3149,9 +3182,9 @@ Future<int?> showExamDetailsModal(
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
             decoration: BoxDecoration(
-              color: CmColors.bg,
+              color: CmTheme.background,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: _Brand.mist),
+              border: Border.all(color: CmTheme.lineBorder),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -3165,7 +3198,7 @@ Future<int?> showExamDetailsModal(
                           fontSize: 10.5,
                           letterSpacing: 0.7,
                           fontWeight: FontWeight.w800,
-                          color: CmColors.slate,
+                          color: CmTheme.slateText,
                         ),
                       ),
                     ),
@@ -3175,7 +3208,7 @@ Future<int?> showExamDetailsModal(
                         style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
-                          color: _Brand.ink,
+                          color: CmTheme.navy,
                         ),
                       )
                     else
@@ -3184,7 +3217,7 @@ Future<int?> showExamDetailsModal(
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
-                          color: _Brand.ink,
+                          color: CmTheme.navy,
                         ),
                       ),
                   ],
@@ -3196,7 +3229,7 @@ Future<int?> showExamDetailsModal(
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w800,
-                    color: _Brand.ink,
+                    color: CmTheme.navy,
                   ),
                 ),
                 if (isMajor) ...[
@@ -3208,7 +3241,7 @@ Future<int?> showExamDetailsModal(
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           fontSize: 11.5,
-                          color: _Brand.inkSoft,
+                          color: CmTheme.slateText,
                         ),
                       ),
                     ),
@@ -3220,7 +3253,7 @@ Future<int?> showExamDetailsModal(
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           fontSize: 11.5,
-                          color: _Brand.inkSoft,
+                          color: CmTheme.slateText,
                         ),
                       ),
                     ),
@@ -3231,7 +3264,7 @@ Future<int?> showExamDetailsModal(
                     style: const TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w800,
-                      color: _Brand.ink,
+                      color: CmTheme.navy,
                     ),
                   ),
                   Text(
@@ -3240,7 +3273,7 @@ Future<int?> showExamDetailsModal(
                     style: const TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w800,
-                      color: _Brand.ink,
+                      color: CmTheme.navy,
                     ),
                   ),
                 ] else ...[
@@ -3251,7 +3284,7 @@ Future<int?> showExamDetailsModal(
                     style: const TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w800,
-                      color: _Brand.ink,
+                      color: CmTheme.navy,
                     ),
                   ),
                 ],
@@ -3271,21 +3304,20 @@ Future<int?> showExamDetailsModal(
           actions: [
             TextButton(
               style: TextButton.styleFrom(
-                foregroundColor: _Brand.inkSoft,
+                foregroundColor: CmTheme.slateText,
                 minimumSize: const Size(0, 40),
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 textStyle: const TextStyle(
+                  fontFamily: CmTheme.fontFamily,
                   fontWeight: FontWeight.w600,
                   fontSize: 13.5,
                 ),
               ),
-              onPressed: saving
-                  ? null
-                  : () => Navigator.pop(dialogContext),
+              onPressed: saving ? null : () => Navigator.pop(dialogContext),
               child: const Text('Cancel'),
             ),
             FilledButton(
-              style: _amberStyle,
+              style: _compactPrimaryStyle,
               onPressed: saving ? null : save,
               child: saving
                   ? const SizedBox(
@@ -3293,7 +3325,7 @@ Future<int?> showExamDetailsModal(
                       height: 18,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: _Brand.ink,
+                        color: CmTheme.navy,
                       ),
                     )
                   : Text(
@@ -3312,10 +3344,10 @@ Future<int?> showExamDetailsModal(
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: CmColors.green.withValues(alpha: 0.1),
+                    color: CmTheme.emeraldSuccess.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color: CmColors.green.withValues(alpha: 0.4),
+                      color: CmTheme.emeraldSuccess.withValues(alpha: 0.4),
                     ),
                   ),
                   child: Column(
@@ -3326,7 +3358,7 @@ Future<int?> showExamDetailsModal(
                           const Icon(
                             Icons.upload_file_outlined,
                             size: 20,
-                            color: _Brand.ink,
+                            color: CmTheme.navy,
                           ),
                           const SizedBox(width: 10),
                           Expanded(
@@ -3340,7 +3372,7 @@ Future<int?> showExamDetailsModal(
                                   style: const TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w700,
-                                    color: _Brand.ink,
+                                    color: CmTheme.navy,
                                   ),
                                 ),
                                 const SizedBox(height: 2),
@@ -3351,7 +3383,7 @@ Future<int?> showExamDetailsModal(
                                   '· ${_trim(importedPaper!.totalPoints)} total points.',
                                   style: const TextStyle(
                                     fontSize: 11.5,
-                                    color: CmColors.slate,
+                                    color: CmTheme.slateText,
                                   ),
                                 ),
                               ],
@@ -3430,7 +3462,7 @@ Future<int?> showExamDetailsModal(
                             '• ${sec.name} (Items ${sec.itemRangeLabel} · ${_trim(sec.totalPoints)} pts)',
                             style: const TextStyle(
                               fontSize: 11.5,
-                              color: _Brand.inkSoft,
+                              color: CmTheme.slateText,
                             ),
                           ),
                         ),
@@ -3447,7 +3479,7 @@ Future<int?> showExamDetailsModal(
                       style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: CmColors.green,
+                        color: CmTheme.emeraldSuccess,
                       ),
                     ),
                   )
@@ -3460,7 +3492,7 @@ Future<int?> showExamDetailsModal(
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: _Brand.inkSoft,
+                        color: CmTheme.slateText,
                       ),
                     ),
                   ),
@@ -3507,18 +3539,45 @@ Future<int?> showExamDetailsModal(
               const SizedBox(height: 14),
 
               DropdownButtonFormField<String>(
-                key: ValueKey('period-$type-$gradingPeriod'), initialValue:gradingPeriod,
-                decoration:_floatingDeco('Grading Period',hint:'Select period'),
-                items:[for(final e in gradingPeriodLabels.entries)DropdownMenuItem(value:e.key,child:Text(e.value))],
-                onChanged:saving||_majorGradingPeriod(type)!=null?null:(v)=>setS(()=>gradingPeriod=v),
+                key: ValueKey('period-$type-$gradingPeriod'),
+                initialValue: gradingPeriod,
+                decoration: _floatingDeco(
+                  'Grading Period',
+                  hint: 'Select period',
+                ),
+                items: [
+                  for (final e in gradingPeriodLabels.entries)
+                    DropdownMenuItem(value: e.key, child: Text(e.value)),
+                ],
+                onChanged: saving || _majorGradingPeriod(type) != null
+                    ? null
+                    : (v) => setS(() => gradingPeriod = v),
               ),
-              const SizedBox(height:14),
-              if(!editing && importedPaper==null && onManualCreated!=null && ['performance_task','laboratory'].contains(type))...[
-                OutlinedButton.icon(onPressed:saving?null:()async{
-                  final result=await _showManualColumnForm(dialogContext,classes:classes,type:type,period:gradingPeriod??'prelims',initialClassId:selected.firstOrNull);
-                  if(result!=null && dialogContext.mounted){onManualCreated(result);Navigator.pop(dialogContext,result.examId);}
-                },icon:const Icon(Icons.table_chart_outlined),label:const Text('Create Scorebook Column Only')),
-                const SizedBox(height:14),
+              const SizedBox(height: 14),
+              if (!editing &&
+                  importedPaper == null &&
+                  onManualCreated != null &&
+                  ['performance_task', 'laboratory'].contains(type)) ...[
+                OutlinedButton.icon(
+                  onPressed: saving
+                      ? null
+                      : () async {
+                          final result = await _showManualColumnForm(
+                            dialogContext,
+                            classes: classes,
+                            type: type,
+                            period: gradingPeriod ?? 'prelims',
+                            initialClassId: selected.firstOrNull,
+                          );
+                          if (result != null && dialogContext.mounted) {
+                            onManualCreated(result);
+                            Navigator.pop(dialogContext, result.examId);
+                          }
+                        },
+                  icon: const Icon(Icons.table_chart_outlined),
+                  label: const Text('Create Scorebook Column Only'),
+                ),
+                const SizedBox(height: 14),
               ],
               // 2. Subject name dropdown
               if (subjectGroups.isNotEmpty) ...[
@@ -3569,8 +3628,12 @@ Future<int?> showExamDetailsModal(
                   onChanged: (_) => setS(() {}),
                   style: _inputText,
                   decoration: _floatingDeco(
-                    ['performance_task','laboratory'].contains(type)?'Assessment name':'Quiz name',
-                    hint: ['performance_task','laboratory'].contains(type)?'Enter assessment name':'e.g. Long Quiz 1 - Loops',
+                    ['performance_task', 'laboratory'].contains(type)
+                        ? 'Assessment name'
+                        : 'Quiz name',
+                    hint: ['performance_task', 'laboratory'].contains(type)
+                        ? 'Enter assessment name'
+                        : 'e.g. Long Quiz 1 - Loops',
                   ),
                 ),
               ] else ...[
@@ -3664,7 +3727,7 @@ Future<int?> showExamDetailsModal(
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
-                    color: _Brand.ink,
+                    color: CmTheme.navy,
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -3674,7 +3737,7 @@ Future<int?> showExamDetailsModal(
                   padding: EdgeInsets.only(top: 4),
                   child: Text(
                     'Checked sections are pre-selected when you assign & publish.',
-                    style: TextStyle(fontSize: 12, color: CmColors.slate),
+                    style: TextStyle(fontSize: 12, color: CmTheme.slateText),
                   ),
                 ),
               ],
@@ -3765,11 +3828,19 @@ class _ExamsTabState extends State<ExamsTab> {
       if (!mounted) return;
       setState(() {
         _exams = results[0];
-        if(!_initialTargetResolved){
-          _initialTargetResolved=true;
-          final initial=_exams.where((e)=>_id(e['id'])==widget.initialExamId).firstOrNull;
-          if(initial!=null && initial['creation_mode']!='manual')_openExamId=widget.initialExamId;
-          if(initial?['creation_mode']=='manual')WidgetsBinding.instance.addPostFrameCallback((_){if(mounted)_openManualScorebook(context,initial!);});
+        if (!_initialTargetResolved) {
+          _initialTargetResolved = true;
+          final initial = _exams
+              .where((e) => _id(e['id']) == widget.initialExamId)
+              .firstOrNull;
+          if (initial != null && initial['creation_mode'] != 'manual') {
+            _openExamId = widget.initialExamId;
+          }
+          if (initial?['creation_mode'] == 'manual') {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _openManualScorebook(context, initial!);
+            });
+          }
         }
         _classes = results[1];
         _loading = false;
@@ -3788,7 +3859,7 @@ class _ExamsTabState extends State<ExamsTab> {
   Future<void> _loadCounts(String token, List<_Json> exams) async {
     await Future.wait(
       exams.map((exam) async {
-        if(exam['creation_mode']=='manual') return;
+        if (exam['creation_mode'] == 'manual') return;
         final key = exam['id']?.toString();
         final examId = _id(exam['id']);
         if (key == null || examId == null) return;
@@ -3838,7 +3909,7 @@ class _ExamsTabState extends State<ExamsTab> {
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
-      backgroundColor: Colors.white,
+      backgroundColor: CmTheme.surfaceWhite,
       constraints: const BoxConstraints(maxWidth: 560),
       builder: (sheetContext) => SafeArea(
         child: Padding(
@@ -3852,12 +3923,12 @@ class _ExamsTabState extends State<ExamsTab> {
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w800,
-                  color: _Brand.ink,
+                  color: CmTheme.navy,
                 ),
               ),
               const SizedBox(height: 8),
               ListTile(
-                leading: const Icon(Icons.edit_document, color: _Brand.ink),
+                leading: const Icon(Icons.edit_document, color: CmTheme.navy),
                 title: const Text('Build Exam'),
                 subtitle: const Text(
                   'Create an exam using CheckMate questions and answer keys.',
@@ -3865,14 +3936,14 @@ class _ExamsTabState extends State<ExamsTab> {
                 onTap: () => Navigator.pop(sheetContext, 'builder'),
               ),
               ListTile(
-                leading: const Icon(Icons.key_outlined, color: _Brand.ink),
+                leading: const Icon(Icons.key_outlined, color: CmTheme.navy),
                 title: const Text('Add Answer Key and Create Answer Sheets'),
                 onTap: () => Navigator.pop(sheetContext, 'answer_key'),
               ),
               ListTile(
                 leading: const Icon(
                   Icons.picture_as_pdf_outlined,
-                  color: _Brand.ink,
+                  color: CmTheme.navy,
                 ),
                 title: const Text('Upload Questionnaire'),
                 subtitle: const Text(
@@ -3921,9 +3992,14 @@ class _ExamsTabState extends State<ExamsTab> {
           initialClassId: preselect,
         );
       }
-      if(created?.manual == true){
+      if (created?.manual == true) {
         await _loadData();
-        if(mounted)_openManualScorebook(context,{'id':created!.examId,'class_id':created.classId});
+        if (mounted) {
+          _openManualScorebook(context, {
+            'id': created!.examId,
+            'class_id': created.classId,
+          });
+        }
         return;
       }
       final createdId = created?.examId;
@@ -3936,7 +4012,11 @@ class _ExamsTabState extends State<ExamsTab> {
             _openExamId = createdId;
           });
         }
-        _toast(context, 'Exam added successfully.');
+        _toast(
+          context,
+          'Exam added successfully.',
+          color: CmTheme.emeraldSuccess,
+        );
       }
     } else if (choice == 'pdf') {
       if (_classes.isEmpty) {
@@ -3979,17 +4059,24 @@ class _ExamsTabState extends State<ExamsTab> {
             'Select the answer keys and click "Save Questions and Answers".',
           );
         } else {
-          _toast(context, 'Exam imported successfully.');
+          _toast(
+            context,
+            'Exam imported successfully.',
+            color: CmTheme.emeraldSuccess,
+          );
         }
       }
     }
   }
 
   void _openBuilder(_Json exam) {
-    if(exam['creation_mode']=='manual'){_openManualScorebook(context,exam);return;}
+    if (exam['creation_mode'] == 'manual') {
+      _openManualScorebook(context, exam);
+      return;
+    }
     final id = _id(exam['id']);
     if (id == null) {
-      _toast(context, 'Invalid exam ID.');
+      _toast(context, 'Invalid exam ID.', color: CmTheme.redDanger);
       return;
     }
     setState(() {
@@ -4050,7 +4137,7 @@ class _ExamsTabState extends State<ExamsTab> {
                     prefix: const Icon(
                       Icons.filter_list,
                       size: 18,
-                      color: CmColors.slate,
+                      color: CmTheme.slateText,
                     ),
                   ),
                   items: [
@@ -4085,7 +4172,7 @@ class _ExamsTabState extends State<ExamsTab> {
                       style: TextStyle(
                         fontSize: 26,
                         fontWeight: FontWeight.w800,
-                        color: _Brand.ink,
+                        color: CmTheme.navy,
                       ),
                     ),
                   ),
@@ -4122,12 +4209,12 @@ class _ExamsTabState extends State<ExamsTab> {
         padding: 24,
         child: Column(
           children: [
-            const Icon(Icons.error_outline, size: 40, color: CmColors.slate),
+            const Icon(Icons.error_outline, size: 40, color: CmTheme.redDanger),
             const SizedBox(height: 12),
             Text(
               _error!,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: _Brand.ink),
+              style: const TextStyle(color: CmTheme.navy),
             ),
             const SizedBox(height: 12),
             FilledButton(
@@ -4150,7 +4237,7 @@ class _ExamsTabState extends State<ExamsTab> {
             const Icon(
               Icons.assignment_outlined,
               size: 44,
-              color: CmColors.slate,
+              color: CmTheme.slateText,
             ),
             const SizedBox(height: 12),
             Text(
@@ -4163,7 +4250,7 @@ class _ExamsTabState extends State<ExamsTab> {
               style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
-                color: _Brand.ink,
+                color: CmTheme.navy,
               ),
             ),
             const SizedBox(height: 6),
@@ -4174,7 +4261,7 @@ class _ExamsTabState extends State<ExamsTab> {
                         ? 'Tap Add exam to create one.'
                         : 'Choose another section or tap Add exam.'),
               textAlign: TextAlign.center,
-              style: const TextStyle(color: CmColors.slate),
+              style: const TextStyle(color: CmTheme.slateText),
             ),
           ],
         ),
@@ -4194,7 +4281,9 @@ class _ExamsTabState extends State<ExamsTab> {
 
   Widget _examCard(_Json exam, bool narrow) {
     final title = exam['title']?.toString() ?? 'Untitled Exam';
-    final status = exam['creation_mode']=='manual'?'manual':exam['status']?.toString() ?? 'draft';
+    final status = exam['creation_mode'] == 'manual'
+        ? 'manual'
+        : exam['status']?.toString() ?? 'draft';
     final counts = _counts[exam['id']?.toString() ?? ''];
 
     final info = Row(
@@ -4203,13 +4292,13 @@ class _ExamsTabState extends State<ExamsTab> {
           width: 42,
           height: 42,
           decoration: BoxDecoration(
-            color: CmColors.bg,
+            color: CmTheme.background,
             borderRadius: BorderRadius.circular(10),
           ),
           child: const Icon(
             Icons.assignment_outlined,
             size: 20,
-            color: _Brand.ink,
+            color: CmTheme.navy,
           ),
         ),
         const SizedBox(width: 14),
@@ -4222,20 +4311,26 @@ class _ExamsTabState extends State<ExamsTab> {
                 style: const TextStyle(
                   fontSize: 15.5,
                   fontWeight: FontWeight.w700,
-                  color: _Brand.ink,
+                  color: CmTheme.navy,
                 ),
               ),
               const SizedBox(height: 3),
               Text(
                 '${_examSubjectAndSectionsLabel(exam)} · ${gradingPeriodLabels[exam['grading_period']] ?? 'Period unassigned'}',
-                style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  color: CmTheme.slateText,
+                ),
               ),
               if (counts != null) ...[
                 const SizedBox(height: 3),
                 Text(
                   '${counts.sections} ${counts.sections == 1 ? 'section' : 'sections'}'
                   ' · ${counts.questions} ${counts.questions == 1 ? 'question' : 'questions'}',
-                  style: const TextStyle(fontSize: 11.5, color: CmColors.slate),
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    color: CmTheme.slateText,
+                  ),
                 ),
               ],
             ],
@@ -4250,7 +4345,11 @@ class _ExamsTabState extends State<ExamsTab> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(exam['creation_mode']=='manual'?'Open Scorebook':'Open builder'),
+          Text(
+            exam['creation_mode'] == 'manual'
+                ? 'Open Scorebook'
+                : 'Open builder',
+          ),
           SizedBox(width: 6),
           Icon(Icons.arrow_forward, size: 16),
         ],
@@ -4486,9 +4585,11 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
       // Process the questions.
       final identificationQuestionIds = <int>[];
 
-      for (var sectionIndex = 0;
-          sectionIndex < sections.length;
-          sectionIndex++) {
+      for (
+        var sectionIndex = 0;
+        sectionIndex < sections.length;
+        sectionIndex++
+      ) {
         final section = sections[sectionIndex];
         final sid = _id(section['id']);
 
@@ -4518,14 +4619,16 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
           if (qid != null && qType == 'identification') {
             identificationQuestionIds.add(qid);
 
-            final effectiveAns = _pendingAnswerKeys[qid] ??
+            final effectiveAns =
+                _pendingAnswerKeys[qid] ??
                 ((rawAns.toLowerCase() == 'null') ? '' : rawAns.toUpperCase());
 
             final existingCtrl = _identificationAnswerControllers[qid];
 
             if (existingCtrl == null) {
-              _identificationAnswerControllers[qid] =
-                  TextEditingController(text: effectiveAns);
+              _identificationAnswerControllers[qid] = TextEditingController(
+                text: effectiveAns,
+              );
             } else if (!_pendingAnswerKeys.containsKey(qid) &&
                 existingCtrl.text != effectiveAns) {
               existingCtrl.text = effectiveAns;
@@ -4559,47 +4662,47 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
           ? <_Json>[]
           : await ApiService.getExamStudents(token, match.first);
       // Fetch classes and subjects for the answer sheet PDF header.
-        final allClasses = await ApiService.getClasses(token);
+      final allClasses = await ApiService.getClasses(token);
 
-        final examWithHeaders = Map<String, dynamic>.from(match.first);
+      final examWithHeaders = Map<String, dynamic>.from(match.first);
 
-        // Get the class IDs assigned to this exam.
-        final classIds = <int>{};
+      // Get the class IDs assigned to this exam.
+      final classIds = <int>{};
 
-        final rawClassIds = examWithHeaders['class_ids'];
+      final rawClassIds = examWithHeaders['class_ids'];
 
-        if (rawClassIds is List) {
-          for (final id in rawClassIds) {
-            final parsedId = _id(id);
-            if (parsedId != null) classIds.add(parsedId);
-          }
+      if (rawClassIds is List) {
+        for (final id in rawClassIds) {
+          final parsedId = _id(id);
+          if (parsedId != null) classIds.add(parsedId);
         }
+      }
 
-        // Support exams assigned to a single class.
-        final singleClassId = _id(examWithHeaders['class_id']);
-        if (singleClassId != null) {
-          classIds.add(singleClassId);
-        }
+      // Support exams assigned to a single class.
+      final singleClassId = _id(examWithHeaders['class_id']);
+      if (singleClassId != null) {
+        classIds.add(singleClassId);
+      }
 
-        // Match the assigned classes.
-        final matchingClasses = allClasses.where((classItem) {
-          final classId = _id(classItem['id']);
-          return classId != null && classIds.contains(classId);
-        }).toList();
+      // Match the assigned classes.
+      final matchingClasses = allClasses.where((classItem) {
+        final classId = _id(classItem['id']);
+        return classId != null && classIds.contains(classId);
+      }).toList();
 
-        // Get the subject IDs from the matching classes.
-        final matchingSubjects = matchingClasses
+      // Get the subject IDs from the matching classes.
+      final matchingSubjects = matchingClasses
           .map((classItem) => classItem['subject'])
           .whereType<Map>()
           .map((subject) => Map<String, dynamic>.from(subject))
           .toList();
 
-        // Attach the data to the exam for PDF generation.
-        examWithHeaders['header_classes'] = matchingClasses;
-        examWithHeaders['header_subjects'] = matchingSubjects;
+      // Attach the data to the exam for PDF generation.
+      examWithHeaders['header_classes'] = matchingClasses;
+      examWithHeaders['header_subjects'] = matchingSubjects;
 
-        print('PDF HEADER CLASSES: ${examWithHeaders['header_classes']}');
-        print('PDF HEADER SUBJECTS: ${examWithHeaders['header_subjects']}');
+      print('PDF HEADER CLASSES: ${examWithHeaders['header_classes']}');
+      print('PDF HEADER SUBJECTS: ${examWithHeaders['header_subjects']}');
       if (!mounted) return;
       setState(() {
         _exam = examWithHeaders;
@@ -4625,7 +4728,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     } catch (e) {
       if (!mounted) return;
       if (silent) {
-        _toast(context, _err(e));
+        _toast(context, _err(e), color: CmTheme.redDanger);
         return;
       }
       setState(() {
@@ -4719,7 +4822,10 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
 
   Future<void> _setStatus(String targetStatus) async {
     if (_isPublished) {
-      _toast(context, 'Once published, an assessment cannot be republished or reverted to draft.');
+      _toast(
+        context,
+        'Once published, an assessment cannot be republished or reverted to draft.',
+      );
       return;
     }
     if (_showCentralizedSaveButton) {
@@ -4732,7 +4838,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
 
     final validation = _validation;
     if (targetStatus == 'published' && !validation.isValid) {
-      _toast(context, validation.errors.join('\n'));
+      _toast(context, validation.errors.join('\n'), color: CmTheme.redDanger);
       return;
     }
 
@@ -4755,9 +4861,10 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         targetStatus == 'published'
             ? 'Assessment published successfully.'
             : 'Assessment saved as draft.',
+        color: CmTheme.emeraldSuccess,
       );
     } catch (e) {
-      if (mounted) _toast(context, _err(e));
+      if (mounted) _toast(context, _err(e), color: CmTheme.redDanger);
     } finally {
       if (mounted) setState(() => _updatingStatus = false);
     }
@@ -4802,7 +4909,9 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
           ...exam,
           'class': classInfo,
           'header_classes': [classInfo],
-          'header_subjects': [if (classInfo['subject'] is Map) classInfo['subject']],
+          'header_subjects': [
+            if (classInfo['subject'] is Map) classInfo['subject'],
+          ],
         },
         sections: sections,
         questions: questions,
@@ -4838,7 +4947,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
       final bytes = await _generate(answerSheet: answerSheet);
       await Printing.layoutPdf(onLayout: (format) async => bytes);
     } catch (e) {
-      if (mounted) _toast(context, _err(e));
+      if (mounted) _toast(context, _err(e), color: CmTheme.redDanger);
     }
   }
 
@@ -4864,7 +4973,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         );
       }
     } catch (e) {
-      if (mounted) _toast(context, _err(e));
+      if (mounted) _toast(context, _err(e), color: CmTheme.redDanger);
     }
   }
 
@@ -4939,9 +5048,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 : rawName;
             final points = num.tryParse(ptsC.text.trim());
             if (points == null || !points.isFinite || points <= 0) {
-              setS(
-                () => error = 'Enter default points greater than zero.',
-              );
+              setS(() => error = 'Enter default points greater than zero.');
               return;
             }
             setS(() {
@@ -5090,16 +5197,13 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
       if (_expandedId == sectionId) _expandedId = null;
 
       // Re-sequence remaining sections' auto-generated Part & subpart headings
-      await resequenceExamSectionHeadings(
-        token: token,
-        examId: widget.examId,
-      );
+      await resequenceExamSectionHeadings(token: token, examId: widget.examId);
 
       await _load(silent: true);
       if (!mounted) return;
-      _toast(context, 'Section deleted.');
+      _toast(context, 'Section deleted.', color: CmTheme.emeraldSuccess);
     } catch (e) {
-      if (mounted) _toast(context, _err(e));
+      if (mounted) _toast(context, _err(e), color: CmTheme.redDanger);
     }
   }
 
@@ -5282,7 +5386,10 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
       if (mounted) {
         _toast(
           context,
-          _answerKeyOnly ? 'Answer key saved.' : 'All questions and answers saved successfully.',
+          _answerKeyOnly
+              ? 'Answer key saved.'
+              : 'All questions and answers saved successfully.',
+          color: CmTheme.emeraldSuccess,
         );
       }
       return true;
@@ -5290,7 +5397,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
       // Refresh so questions that were already saved are not re-created and
       // question numbers stay in sync on the next attempt.
       if (mounted) await _load(silent: true);
-      if (mounted) _toast(context, _err(e));
+      if (mounted) _toast(context, _err(e), color: CmTheme.redDanger);
       return false;
     } finally {
       if (mounted) setState(() => _savingBulk = false);
@@ -5321,7 +5428,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     }
 
     if (savedQs.length < 2) {
-      _toast(context, 'Questions shuffled.');
+      _toast(context, 'Questions shuffled.', color: CmTheme.emeraldSuccess);
       return;
     }
 
@@ -5426,7 +5533,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         }
       } catch (_) {}
       if (mounted) await _load(silent: true);
-      if (mounted) _toast(context, _err(e));
+      if (mounted) _toast(context, _err(e), color: CmTheme.redDanger);
     }
   }
 
@@ -5459,7 +5566,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         );
       }
     } catch (e) {
-      if (mounted) _toast(context, _err(e));
+      if (mounted) _toast(context, _err(e), color: CmTheme.redDanger);
     }
   }
 
@@ -5504,7 +5611,9 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
 
     if (mounted) setState(() => _editingQuestionId = null);
     await _load(silent: true);
-    if (mounted) _toast(context, 'Question updated.');
+    if (mounted) {
+      _toast(context, 'Question updated.', color: CmTheme.emeraldSuccess);
+    }
   }
 
   Future<void> _deleteQuestion(int questionId, String number) async {
@@ -5522,9 +5631,9 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
       if (!mounted) return;
       await _load(silent: true);
       if (!mounted) return;
-      _toast(context, 'Question deleted.');
+      _toast(context, 'Question deleted.', color: CmTheme.emeraldSuccess);
     } catch (e) {
-      if (mounted) _toast(context, _err(e));
+      if (mounted) _toast(context, _err(e), color: CmTheme.redDanger);
     }
   }
 
@@ -5565,7 +5674,8 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
 
           return _CmDialog(
             title: 'Add acceptable answer',
-            subtitle: 'Another answer in CAPITAL LETTERS that earns full credit',
+            subtitle:
+                'Another answer in CAPITAL LETTERS that earns full credit',
             maxWidth: 400,
             actions: [
               OutlinedButton(
@@ -5607,7 +5717,13 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     _disposeControllersLater([c]);
     if (ok == true) {
       await _load(silent: true);
-      if (mounted) _toast(context, 'Acceptable answer added successfully.');
+      if (mounted) {
+        _toast(
+          context,
+          'Acceptable answer added successfully.',
+          color: CmTheme.emeraldSuccess,
+        );
+      }
     }
   }
 
@@ -5679,7 +5795,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                       fontSize: 11,
                       letterSpacing: 0.8,
                       fontWeight: FontWeight.w700,
-                      color: CmColors.slate,
+                      color: CmTheme.slateText,
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -5692,7 +5808,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 style: const TextStyle(
                   fontSize: 21,
                   fontWeight: FontWeight.w800,
-                  color: _Brand.ink,
+                  color: CmTheme.navy,
                 ),
               ),
               const SizedBox(height: 6),
@@ -5702,7 +5818,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                   const Icon(
                     Icons.class_outlined,
                     size: 14,
-                    color: CmColors.slate,
+                    color: CmTheme.slateText,
                   ),
                   const SizedBox(width: 6),
                   Flexible(
@@ -5710,7 +5826,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                       subjectAndSections,
                       style: const TextStyle(
                         fontSize: 12.5,
-                        color: CmColors.slate,
+                        color: CmTheme.slateText,
                       ),
                     ),
                   ),
@@ -5722,7 +5838,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                   metaParts.join(' · '),
                   style: const TextStyle(
                     fontSize: 12.5,
-                    color: CmColors.slate,
+                    color: CmTheme.slateText,
                   ),
                 ),
               ],
@@ -5753,12 +5869,16 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, size: 44, color: CmColors.slate),
+              const Icon(
+                Icons.error_outline,
+                size: 44,
+                color: CmTheme.redDanger,
+              ),
               const SizedBox(height: 12),
               Text(
                 _error!,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: _Brand.ink),
+                style: const TextStyle(color: CmTheme.navy),
               ),
               const SizedBox(height: 14),
               Wrap(
@@ -5805,7 +5925,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                       style: TextStyle(
                         fontSize: 26,
                         fontWeight: FontWeight.w800,
-                        color: _Brand.ink,
+                        color: CmTheme.navy,
                       ),
                     ),
                   ),
@@ -5856,7 +5976,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
               _validationBanner(status),
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 18),
-                child: Divider(height: 1, color: CmColors.line),
+                child: Divider(height: 1, color: CmTheme.lineBorder),
               ),
 
               if (wide)
@@ -5884,7 +6004,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     final v = _validation;
     final ok = v.isValid;
     final isPublished = status.toLowerCase() == 'published';
-    final accent = ok ? CmColors.green : _Brand.amber;
+    final accent = ok ? CmTheme.emeraldSuccess : CmTheme.redDanger;
 
     return _Card(
       padding: 16,
@@ -5895,7 +6015,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Icon(
-                ok ? Icons.check_circle_outline : Icons.info_outline,
+                ok ? Icons.check_circle_outline : Icons.error_outline,
                 size: 20,
                 color: accent,
               ),
@@ -5909,7 +6029,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                       style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w800,
-                        color: _Brand.ink,
+                        color: CmTheme.navy,
                       ),
                     ),
                     const SizedBox(height: 3),
@@ -5918,7 +6038,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                       '${v.requiredPerQuestionType} questions.',
                       style: const TextStyle(
                         fontSize: 12,
-                        color: CmColors.slate,
+                        color: CmTheme.slateText,
                       ),
                     ),
                   ],
@@ -5993,11 +6113,11 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
           width: tile,
           height: tile,
           decoration: BoxDecoration(
-            color: CmColors.bg,
+            color: CmTheme.background,
             borderRadius: BorderRadius.circular(9),
-            border: Border.all(color: CmColors.line),
+            border: Border.all(color: CmTheme.lineBorder),
           ),
-          child: Icon(icon, size: compact ? 16 : 18, color: _Brand.ink),
+          child: Icon(icon, size: compact ? 16 : 18, color: CmTheme.navy),
         ),
         SizedBox(width: compact ? 8 : 10),
         Flexible(
@@ -6009,7 +6129,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 style: TextStyle(
                   fontSize: compact ? 16 : 18,
                   fontWeight: FontWeight.w800,
-                  color: _Brand.ink,
+                  color: CmTheme.navy,
                 ),
               ),
               FittedBox(
@@ -6017,7 +6137,10 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 alignment: Alignment.centerLeft,
                 child: Text(
                   label,
-                  style: const TextStyle(fontSize: 11.5, color: CmColors.slate),
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    color: CmTheme.slateText,
+                  ),
                 ),
               ),
             ],
@@ -6036,53 +6159,62 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         SizedBox(
           width: double.infinity,
           child: Wrap(
-          alignment: WrapAlignment.spaceBetween,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Exam Sections',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: _Brand.ink,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  '(${_sections.length})',
-                  style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
-                ),
-              ],
-            ),
-            if (!_isPublished)
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (!_answerKeyOnly)
-                    OutlinedButton.icon(
-                      style: _outlineStyle.copyWith(
-                        minimumSize: const WidgetStatePropertyAll(Size(0, 38)),
-                      ),
-                      onPressed: _savingBulk ? null : _importPdfIntoCurrentExam,
-                      icon: const Icon(Icons.upload_file_outlined, size: 17),
-                      label: const Text('Upload PDF'),
+                  const Text(
+                    'Exam Sections',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: CmTheme.navy,
                     ),
-                  FilledButton.icon(
-                    style: _amberStyle,
-                    onPressed: _savingBulk ? null : () => _showSectionDialog(),
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add section'),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '(${_sections.length})',
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      color: CmTheme.slateText,
+                    ),
                   ),
                 ],
               ),
-          ],
+              if (!_isPublished)
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (!_answerKeyOnly)
+                      OutlinedButton.icon(
+                        style: _outlineStyle.copyWith(
+                          minimumSize: const WidgetStatePropertyAll(
+                            Size(0, 38),
+                          ),
+                        ),
+                        onPressed: _savingBulk
+                            ? null
+                            : _importPdfIntoCurrentExam,
+                        icon: const Icon(Icons.upload_file_outlined, size: 17),
+                        label: const Text('Upload PDF'),
+                      ),
+                    FilledButton.icon(
+                      style: _compactPrimaryStyle,
+                      onPressed: _savingBulk
+                          ? null
+                          : () => _showSectionDialog(),
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Add section'),
+                    ),
+                  ],
+                ),
+            ],
           ),
         ),
         const SizedBox(height: 12),
@@ -6092,7 +6224,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
             child: Center(
               child: Text(
                 'No sections yet',
-                style: TextStyle(fontSize: 13, color: CmColors.slate),
+                style: TextStyle(fontSize: 13, color: CmTheme.slateText),
               ),
             ),
           )
@@ -6102,7 +6234,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         const SizedBox(height: 4),
         const Text(
           'Changes updated for this session',
-          style: TextStyle(fontSize: 11.5, color: CmColors.slate),
+          style: TextStyle(fontSize: 11.5, color: CmTheme.slateText),
         ),
       ],
     );
@@ -6119,25 +6251,29 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         : (_drafts[sid] ?? <_DraftQuestionEntry>[]);
     final expanded = sid != null && _expandedId == sid;
     final order = section['section_order']?.toString() ?? '${index + 1}';
-    final name = section['name']?.toString() ?? _autoSectionName(index + 1, type);
+    final name =
+        section['name']?.toString() ?? _autoSectionName(index + 1, type);
     final totalInSection = qs.length + drafts.length;
     final itemLabel = _answerKeyOnly
         ? (qs.length == 1 ? 'item' : 'items')
         : (qs.length == 1 ? 'question' : 'questions');
     // The answer-sheet PDF numbers items across parts in their saved order.
     final numberOffset = _answerKeyOnly
-        ? _sections.take(index).fold<int>(
-            0,
-            (count, part) => count +
-                (_questions[_id(part['id'])]?.length ?? 0) +
-                (_drafts[_id(part['id'])]?.length ?? 0),
-          )
+        ? _sections
+              .take(index)
+              .fold<int>(
+                0,
+                (count, part) =>
+                    count +
+                    (_questions[_id(part['id'])]?.length ?? 0) +
+                    (_drafts[_id(part['id'])]?.length ?? 0),
+              )
         : 0;
     final savedItemsLabel = qs.isEmpty
         ? '0 $itemLabel'
         : 'Items ${_answerKeyOnly ? numberOffset + 1 : (qs.first['question_number'] ?? 1)}'
-          '–${_answerKeyOnly ? numberOffset + qs.length : (qs.last['question_number'] ?? qs.length)}'
-          ' (${qs.length} $itemLabel)';
+              '–${_answerKeyOnly ? numberOffset + qs.length : (qs.last['question_number'] ?? qs.length)}'
+              ' (${qs.length} $itemLabel)';
 
     return Padding(
       key: ValueKey('section-${sid ?? index}'),
@@ -6166,7 +6302,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                             style: const TextStyle(
                               fontSize: 14.5,
                               fontWeight: FontWeight.w700,
-                              color: _Brand.ink,
+                              color: CmTheme.navy,
                             ),
                           ),
                           const SizedBox(height: 2),
@@ -6177,13 +6313,14 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                             '${drafts.isNotEmpty ? ' (+${drafts.length} unsaved)' : ''}',
                             style: const TextStyle(
                               fontSize: 11.5,
-                              color: CmColors.slate,
+                              color: CmTheme.slateText,
                             ),
                           ),
                         ],
                       ),
                     ),
-                    if (!_answerKeyOnly && !_isPublished &&
+                    if (!_answerKeyOnly &&
+                        !_isPublished &&
                         _isQuizAssessment &&
                         totalInSection >= 2 &&
                         sid != null)
@@ -6191,7 +6328,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                         tooltip: 'Shuffle questions',
                         visualDensity: VisualDensity.compact,
                         iconSize: 18,
-                        color: CmColors.slate,
+                        color: CmTheme.slateText,
                         icon: const Icon(Icons.shuffle),
                         onPressed: _savingBulk
                             ? null
@@ -6202,7 +6339,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                         tooltip: 'Edit section',
                         visualDensity: VisualDensity.compact,
                         iconSize: 18,
-                        color: CmColors.slate,
+                        color: CmTheme.slateText,
                         icon: const Icon(Icons.edit_outlined),
                         onPressed: () => _showSectionDialog(
                           section: section,
@@ -6213,7 +6350,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                         tooltip: 'Delete section',
                         visualDensity: VisualDensity.compact,
                         iconSize: 18,
-                        color: CmColors.slate,
+                        color: CmTheme.slateText,
                         icon: const Icon(Icons.delete_outline),
                         onPressed: sid == null
                             ? null
@@ -6225,7 +6362,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                           ? Icons.keyboard_arrow_down
                           : Icons.chevron_right,
                       size: 20,
-                      color: CmColors.slate,
+                      color: CmTheme.slateText,
                     ),
                     const SizedBox(width: 4),
                   ],
@@ -6233,7 +6370,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
               ),
             ),
             if (expanded) ...[
-              const Divider(height: 1, color: CmColors.line),
+              const Divider(height: 1, color: CmTheme.lineBorder),
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -6248,14 +6385,16 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                               const Icon(
                                 Icons.description_outlined,
                                 size: 22,
-                                color: CmColors.slate,
+                                color: CmTheme.slateText,
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                _answerKeyOnly ? 'No items yet' : 'No questions yet',
+                                _answerKeyOnly
+                                    ? 'No items yet'
+                                    : 'No questions yet',
                                 style: const TextStyle(
                                   fontSize: 12.5,
-                                  color: CmColors.slate,
+                                  color: CmTheme.slateText,
                                 ),
                               ),
                             ],
@@ -6263,7 +6402,12 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                         ),
                       ),
                     for (var i = 0; i < qs.length; i++)
-                      _savedQuestion(qs[i], i, type, numberOffset: numberOffset),
+                      _savedQuestion(
+                        qs[i],
+                        i,
+                        type,
+                        numberOffset: numberOffset,
+                      ),
                     for (var i = 0; i < drafts.length; i++)
                       _buildBulkDraftQuestionCard(
                         entry: drafts[i],
@@ -6278,20 +6422,22 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                             child: OutlinedButton.icon(
                               style: _outlineStyle.copyWith(
                                 backgroundColor: WidgetStatePropertyAll(
-                                  CmColors.bg,
+                                  CmTheme.background,
                                 ),
                               ),
                               onPressed: _savingBulk
                                   ? null
                                   : () => _addDraft(sid, type),
                               icon: const Icon(Icons.add, size: 16),
-                              label: Text(_answerKeyOnly ? 'Add item' : 'Add question'),
+                              label: Text(
+                                _answerKeyOnly ? 'Add item' : 'Add question',
+                              ),
                             ),
                           ),
                           if (_showCentralizedSaveButton) ...[
                             const SizedBox(width: 10),
                             FilledButton.icon(
-                              style: _greenSaveStyle.copyWith(
+                              style: _saveStyle.copyWith(
                                 minimumSize: const WidgetStatePropertyAll(
                                   Size(0, 40),
                                 ),
@@ -6306,7 +6452,9 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                                       size: 17,
                                     ),
                               label: Text(
-                                _answerKeyOnly ? 'Save Answer Key' : 'Save Questions and Answers',
+                                _answerKeyOnly
+                                    ? 'Save Answer Key'
+                                    : 'Save Questions and Answers',
                               ),
                             ),
                           ],
@@ -6336,8 +6484,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
 
     Widget choiceInputRow(int idx) {
       final letter = String.fromCharCode(65 + idx);
-      final isSelected =
-          !missingKey && currentAnswer.toUpperCase() == letter;
+      final isSelected = !missingKey && currentAnswer.toUpperCase() == letter;
       return Row(
         children: [
           InkWell(
@@ -6353,7 +6500,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
               height: 26,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: isSelected ? CmColors.green : CmColors.bg,
+                color: isSelected ? CmTheme.navy : CmTheme.background,
                 borderRadius: BorderRadius.circular(7),
               ),
               child: Text(
@@ -6361,7 +6508,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w800,
-                  color: isSelected ? Colors.white : _Brand.ink,
+                  color: isSelected ? CmTheme.surfaceWhite : CmTheme.navy,
                 ),
               ),
             ),
@@ -6379,10 +6526,10 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
               style: _inputText,
               decoration: _deco('Option $letter').copyWith(
                 fillColor: isSelected
-                    ? CmColors.green.withValues(alpha: 0.08)
-                    : Colors.white,
+                    ? CmTheme.navy.withValues(alpha: 0.08)
+                    : CmTheme.surfaceWhite,
                 enabledBorder: _ob(
-                  isSelected ? CmColors.green : _Brand.mist,
+                  isSelected ? CmTheme.navy : CmTheme.lineBorder,
                 ),
               ),
             ),
@@ -6425,9 +6572,9 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
           style: _inputText.copyWith(fontWeight: FontWeight.w700),
           decoration: _deco('ENTER ANSWER IN CAPS').copyWith(
             fillColor: !missingKey
-                ? CmColors.green.withValues(alpha: 0.08)
-                : Colors.white,
-            enabledBorder: _ob(!missingKey ? CmColors.green : _Brand.mist),
+                ? CmTheme.navy.withValues(alpha: 0.08)
+                : CmTheme.surfaceWhite,
+            enabledBorder: _ob(!missingKey ? CmTheme.navy : CmTheme.lineBorder),
           ),
         ),
       );
@@ -6446,13 +6593,16 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w800,
-                  color: _Brand.ink,
+                  color: CmTheme.navy,
                 ),
               ),
               const SizedBox(width: 8),
               Text(
                 '$pointsLabel ${pointsLabel == '1' ? 'pt' : 'pts'}',
-                style: const TextStyle(fontSize: 11.5, color: CmColors.slate),
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  color: CmTheme.slateText,
+                ),
               ),
               if (missingKey) ...[
                 const SizedBox(width: 8),
@@ -6462,7 +6612,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                     vertical: 2,
                   ),
                   decoration: BoxDecoration(
-                    color: _Brand.amber.withValues(alpha: 0.18),
+                    color: CmTheme.amberWarning.withValues(alpha: 0.18),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: const Text(
@@ -6470,7 +6620,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
-                      color: _Brand.ink,
+                      color: CmTheme.navy,
                     ),
                   ),
                 ),
@@ -6480,7 +6630,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 tooltip: 'Discard question',
                 visualDensity: VisualDensity.compact,
                 iconSize: 17,
-                color: CmColors.slate,
+                color: CmTheme.slateText,
                 icon: const Icon(Icons.delete_outline),
                 onPressed: _savingBulk
                     ? null
@@ -6552,7 +6702,9 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                   Icon(
                     missingKey ? Icons.key_outlined : Icons.check,
                     size: 16,
-                    color: missingKey ? _Brand.amber : CmColors.green,
+                    color: missingKey
+                        ? CmTheme.amberWarning
+                        : CmTheme.emeraldSuccess,
                   ),
                   const SizedBox(width: 6),
                   Text(
@@ -6560,7 +6712,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                     style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w700,
-                      color: missingKey ? _Brand.ink : CmColors.green,
+                      color: CmTheme.navy,
                     ),
                   ),
                 ],
@@ -6573,7 +6725,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
             _ErrorText(entry.errorMessage!),
           ],
           const SizedBox(height: 8),
-          const Divider(height: 1, color: CmColors.line),
+          const Divider(height: 1, color: CmTheme.lineBorder),
         ],
       ),
     );
@@ -6582,7 +6734,12 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
   // A saved question, shown in the same layout as the editor. The pencil
   // swaps it for the inline per-question editor (prefilled) while preserving
   // its exact position and question_number.
-  Widget _savedQuestion(_Json q, int i, String type, {required int numberOffset}) {
+  Widget _savedQuestion(
+    _Json q,
+    int i,
+    String type, {
+    required int numberOffset,
+  }) {
     final qid = _id(q['id']);
     final number = _answerKeyOnly
         ? '${numberOffset + i + 1}'
@@ -6637,15 +6794,15 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
               height: 26,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: isCorrect ? CmColors.green : CmColors.bg,
+                color: isCorrect ? CmTheme.emeraldSuccess : CmTheme.background,
                 borderRadius: BorderRadius.circular(7),
               ),
               child: Text(
                 letter,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w800,
-                  color: isCorrect ? Colors.white : _Brand.ink,
+                  color: CmTheme.navy,
                 ),
               ),
             ),
@@ -6694,9 +6851,11 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
             style: _inputText.copyWith(fontWeight: FontWeight.w700),
             decoration: _deco('ENTER ANSWER IN CAPS').copyWith(
               fillColor: !missingKey
-                  ? CmColors.green.withValues(alpha: 0.08)
-                  : Colors.white,
-              enabledBorder: _ob(!missingKey ? CmColors.green : _Brand.mist),
+                  ? CmTheme.navy.withValues(alpha: 0.08)
+                  : CmTheme.surfaceWhite,
+              enabledBorder: _ob(
+                !missingKey ? CmTheme.navy : CmTheme.lineBorder,
+              ),
             ),
           ),
         );
@@ -6724,13 +6883,16 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w800,
-                  color: _Brand.ink,
+                  color: CmTheme.navy,
                 ),
               ),
               const SizedBox(width: 8),
               Text(
                 '$points ${points == '1' ? 'pt' : 'pts'}',
-                style: const TextStyle(fontSize: 11.5, color: CmColors.slate),
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  color: CmTheme.slateText,
+                ),
               ),
               if (missingKey) ...[
                 const SizedBox(width: 8),
@@ -6740,7 +6902,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                     vertical: 2,
                   ),
                   decoration: BoxDecoration(
-                    color: _Brand.amber.withValues(alpha: 0.18),
+                    color: CmTheme.amberWarning.withValues(alpha: 0.18),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: const Text(
@@ -6748,7 +6910,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
-                      color: _Brand.ink,
+                      color: CmTheme.navy,
                     ),
                   ),
                 ),
@@ -6759,7 +6921,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                   tooltip: 'Edit question',
                   visualDensity: VisualDensity.compact,
                   iconSize: 17,
-                  color: CmColors.slate,
+                  color: CmTheme.slateText,
                   icon: const Icon(Icons.edit_outlined),
                   onPressed: qid == null
                       ? null
@@ -6769,7 +6931,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                   tooltip: 'Delete question',
                   visualDensity: VisualDensity.compact,
                   iconSize: 17,
-                  color: CmColors.slate,
+                  color: CmTheme.slateText,
                   icon: const Icon(Icons.delete_outline),
                   onPressed: qid == null
                       ? null
@@ -6780,7 +6942,9 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
           ),
           const SizedBox(height: 4),
           if (!_answerKeyOnly) _ReadBox(text),
-          if (!_answerKeyOnly && type == 'multiple_choice' && choices is List) ...[
+          if (!_answerKeyOnly &&
+              type == 'multiple_choice' &&
+              choices is List) ...[
             const SizedBox(height: 10),
             LayoutBuilder(
               builder: (context, box) {
@@ -6829,7 +6993,9 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                   Icon(
                     missingKey ? Icons.key_outlined : Icons.check,
                     size: 16,
-                    color: missingKey ? _Brand.amber : CmColors.green,
+                    color: missingKey
+                        ? CmTheme.amberWarning
+                        : CmTheme.emeraldSuccess,
                   ),
                   const SizedBox(width: 6),
                   Text(
@@ -6837,7 +7003,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                     style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w700,
-                      color: missingKey ? _Brand.ink : CmColors.green,
+                      color: CmTheme.navy,
                     ),
                   ),
                 ],
@@ -6855,16 +7021,16 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 if (answers.isNotEmpty)
                   const Text(
                     'Also accepted:',
-                    style: TextStyle(fontSize: 12, color: CmColors.slate),
+                    style: TextStyle(fontSize: 12, color: CmTheme.slateText),
                   ),
                 for (final a in answers)
                   Chip(
                     visualDensity: VisualDensity.compact,
-                    backgroundColor: CmColors.bg,
-                    side: const BorderSide(color: CmColors.line),
+                    backgroundColor: CmTheme.background,
+                    side: const BorderSide(color: CmTheme.lineBorder),
                     label: Text(
                       (a['answer']?.toString() ?? '').toUpperCase(),
-                      style: const TextStyle(fontSize: 12, color: _Brand.ink),
+                      style: const TextStyle(fontSize: 12, color: CmTheme.navy),
                     ),
                   ),
                 if (!_isPublished)
@@ -6873,8 +7039,9 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                     icon: const Icon(Icons.add, size: 15),
                     label: const Text('Add acceptable answer'),
                     style: TextButton.styleFrom(
-                      foregroundColor: _Brand.ink,
+                      foregroundColor: CmTheme.navy,
                       textStyle: const TextStyle(
+                        fontFamily: CmTheme.fontFamily,
                         fontSize: 12.5,
                         fontWeight: FontWeight.w600,
                       ),
@@ -6884,7 +7051,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
             ),
           ],
           const SizedBox(height: 4),
-          const Divider(height: 1, color: CmColors.line),
+          const Divider(height: 1, color: CmTheme.lineBorder),
         ],
       ),
     );
@@ -6905,7 +7072,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w800,
-            color: _Brand.ink,
+            color: CmTheme.navy,
           ),
         ),
         const SizedBox(height: 12),
@@ -6925,14 +7092,14 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         if (!_answerKeyOnly && instructions.isNotEmpty) ...[
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
-            child: Divider(height: 1, color: CmColors.line),
+            child: Divider(height: 1, color: CmTheme.lineBorder),
           ),
           const Text(
             'Instructions',
             style: TextStyle(
               fontSize: 12.5,
               fontWeight: FontWeight.w800,
-              color: _Brand.ink,
+              color: CmTheme.navy,
             ),
           ),
           const SizedBox(height: 6),
@@ -6941,7 +7108,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
             style: const TextStyle(
               fontSize: 12.5,
               height: 1.4,
-              color: CmColors.slate,
+              color: CmTheme.slateText,
             ),
           ),
         ],
@@ -6965,10 +7132,10 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: CmColors.bg,
+                  color: CmTheme.background,
                   borderRadius: BorderRadius.circular(9),
                 ),
-                child: Icon(icon, size: 18, color: _Brand.ink),
+                child: Icon(icon, size: 18, color: CmTheme.navy),
               ),
               const SizedBox(width: 10),
               Column(
@@ -6979,12 +7146,12 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                     style: const TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w700,
-                      color: _Brand.ink,
+                      color: CmTheme.navy,
                     ),
                   ),
                   const Text(
                     'A4 · PDF document',
-                    style: TextStyle(fontSize: 11.5, color: CmColors.slate),
+                    style: TextStyle(fontSize: 11.5, color: CmTheme.slateText),
                   ),
                 ],
               ),
@@ -6994,9 +7161,12 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
             const SizedBox(height: 12),
             DropdownButtonFormField<int>(
               key: ValueKey(_answerSheetClassId),
-              initialValue: _answerSheetClasses.any(
-                (entry) => _id(entry['id']) == _answerSheetClassId,
-              ) ? _answerSheetClassId : null,
+              initialValue:
+                  _answerSheetClasses.any(
+                    (entry) => _id(entry['id']) == _answerSheetClassId,
+                  )
+                  ? _answerSheetClassId
+                  : null,
               isExpanded: true,
               decoration: _floatingDeco('Class section'),
               items: [
@@ -7006,7 +7176,8 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                     child: Text(entry['section']?.toString() ?? 'Section'),
                   ),
               ],
-              onChanged: (classId) => setState(() => _answerSheetClassId = classId),
+              onChanged: (classId) =>
+                  setState(() => _answerSheetClassId = classId),
             ),
           ],
           const SizedBox(height: 12),
@@ -7014,14 +7185,15 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
             width: double.infinity,
             child: FilledButton.icon(
               style: FilledButton.styleFrom(
-                backgroundColor: CmColors.bg,
-                foregroundColor: _Brand.ink,
+                backgroundColor: CmTheme.background,
+                foregroundColor: CmTheme.navy,
                 minimumSize: const Size(0, 38),
-                side: const BorderSide(color: CmColors.line),
+                side: const BorderSide(color: CmTheme.lineBorder),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
                 textStyle: const TextStyle(
+                  fontFamily: CmTheme.fontFamily,
                   fontWeight: FontWeight.w600,
                   fontSize: 13,
                 ),
@@ -7036,7 +7208,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
             children: [
               Expanded(
                 child: TextButton.icon(
-                  style: TextButton.styleFrom(foregroundColor: _Brand.ink),
+                  style: TextButton.styleFrom(foregroundColor: CmTheme.navy),
                   onPressed: () => _printPaper(answerSheet),
                   icon: const Icon(Icons.print_outlined, size: 16),
                   label: const Text('Print', style: linkStyle),
@@ -7044,7 +7216,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
               ),
               Expanded(
                 child: TextButton.icon(
-                  style: TextButton.styleFrom(foregroundColor: _Brand.ink),
+                  style: TextButton.styleFrom(foregroundColor: CmTheme.navy),
                   onPressed: () => _downloadPaper(answerSheet),
                   icon: const Icon(Icons.file_download_outlined, size: 16),
                   label: const Text('Download', style: linkStyle),
@@ -7086,10 +7258,10 @@ Widget _buildMultipleChoiceKeyTiles({
                   vertical: 7,
                 ),
                 decoration: BoxDecoration(
-                  color: isSelected ? CmColors.green : CmColors.bg,
+                  color: isSelected ? CmTheme.navy : CmTheme.background,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: isSelected ? CmColors.green : CmColors.line,
+                    color: isSelected ? CmTheme.navy : CmTheme.lineBorder,
                   ),
                 ),
                 child: Text(
@@ -7097,7 +7269,7 @@ Widget _buildMultipleChoiceKeyTiles({
                   style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w800,
-                    color: isSelected ? Colors.white : _Brand.ink,
+                    color: isSelected ? CmTheme.surfaceWhite : CmTheme.navy,
                   ),
                 ),
               ),
@@ -7132,10 +7304,10 @@ Widget _buildTrueFalseKeyButtons({
                   vertical: 7,
                 ),
                 decoration: BoxDecoration(
-                  color: isSelected ? CmColors.green : CmColors.bg,
+                  color: isSelected ? CmTheme.navy : CmTheme.background,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: isSelected ? CmColors.green : CmColors.line,
+                    color: isSelected ? CmTheme.navy : CmTheme.lineBorder,
                   ),
                 ),
                 child: Row(
@@ -7145,7 +7317,7 @@ Widget _buildTrueFalseKeyButtons({
                       const Icon(
                         Icons.check,
                         size: 14,
-                        color: Colors.white,
+                        color: CmTheme.surfaceWhite,
                       ),
                       const SizedBox(width: 5),
                     ],
@@ -7154,7 +7326,7 @@ Widget _buildTrueFalseKeyButtons({
                       style: TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w800,
-                        color: isSelected ? Colors.white : _Brand.ink,
+                        color: isSelected ? CmTheme.surfaceWhite : CmTheme.navy,
                       ),
                     ),
                   ],
@@ -7181,13 +7353,17 @@ class _ReadBox extends StatelessWidget {
       alignment: Alignment.centerLeft,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: highlight ? CmColors.green.withValues(alpha: 0.08) : CmColors.bg,
+        color: highlight
+            ? CmTheme.emeraldSuccess.withValues(alpha: 0.08)
+            : CmTheme.background,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: highlight ? CmColors.green : CmColors.line),
+        border: Border.all(
+          color: highlight ? CmTheme.emeraldSuccess : CmTheme.lineBorder,
+        ),
       ),
       child: Text(
         text.isEmpty ? '—' : text,
-        style: const TextStyle(fontSize: 13.5, color: _Brand.ink),
+        style: const TextStyle(fontSize: 13.5, color: CmTheme.navy),
       ),
     );
   }
@@ -7327,7 +7503,7 @@ class _DraftQuestionState extends State<_DraftQuestion> {
             height: 26,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: isSelected ? CmColors.green : CmColors.bg,
+              color: isSelected ? CmTheme.navy : CmTheme.background,
               borderRadius: BorderRadius.circular(7),
             ),
             child: Text(
@@ -7335,7 +7511,7 @@ class _DraftQuestionState extends State<_DraftQuestion> {
               style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w800,
-                color: isSelected ? Colors.white : _Brand.ink,
+                color: isSelected ? CmTheme.surfaceWhite : CmTheme.navy,
               ),
             ),
           ),
@@ -7348,9 +7524,9 @@ class _DraftQuestionState extends State<_DraftQuestion> {
             style: _inputText,
             decoration: _deco('Option $letter').copyWith(
               fillColor: isSelected
-                  ? CmColors.green.withValues(alpha: 0.08)
-                  : Colors.white,
-              enabledBorder: _ob(isSelected ? CmColors.green : _Brand.mist),
+                  ? CmTheme.navy.withValues(alpha: 0.08)
+                  : CmTheme.surfaceWhite,
+              enabledBorder: _ob(CmTheme.lineBorder),
             ),
           ),
         ),
@@ -7408,7 +7584,7 @@ class _DraftQuestionState extends State<_DraftQuestion> {
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w800,
-                  color: _Brand.ink,
+                  color: CmTheme.navy,
                 ),
               ),
               const Spacer(),
@@ -7418,7 +7594,7 @@ class _DraftQuestionState extends State<_DraftQuestion> {
                     : 'Cancel editing',
                 visualDensity: VisualDensity.compact,
                 iconSize: 17,
-                color: CmColors.slate,
+                color: CmTheme.slateText,
                 icon: Icon(
                   widget.initial == null ? Icons.delete_outline : Icons.close,
                 ),
@@ -7485,7 +7661,9 @@ class _DraftQuestionState extends State<_DraftQuestion> {
                   Icon(
                     hasKey ? Icons.check : Icons.key_outlined,
                     size: 16,
-                    color: hasKey ? CmColors.green : _Brand.amber,
+                    color: hasKey
+                        ? CmTheme.emeraldSuccess
+                        : CmTheme.amberWarning,
                   ),
                   const SizedBox(width: 6),
                   Text(
@@ -7493,7 +7671,7 @@ class _DraftQuestionState extends State<_DraftQuestion> {
                     style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w700,
-                      color: hasKey ? CmColors.green : _Brand.ink,
+                      color: CmTheme.navy,
                     ),
                   ),
                 ],
@@ -7572,23 +7750,27 @@ class _PaperPreviewDialogState extends State<_PaperPreviewDialog> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? Colors.white : Colors.transparent,
+          color: selected ? CmTheme.surfaceWhite : CmTheme.transparent,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: selected ? CmColors.line : Colors.transparent,
+            color: selected ? CmTheme.lineBorder : CmTheme.transparent,
           ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 15, color: selected ? _Brand.ink : CmColors.slate),
+            Icon(
+              icon,
+              size: 15,
+              color: selected ? CmTheme.navy : CmTheme.slateText,
+            ),
             const SizedBox(width: 6),
             Text(
               label,
               style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                color: selected ? _Brand.ink : CmColors.slate,
+                color: selected ? CmTheme.navy : CmTheme.slateText,
               ),
             ),
           ],
@@ -7606,8 +7788,8 @@ class _PaperPreviewDialogState extends State<_PaperPreviewDialog> {
         : (q == 1 ? 'question' : 'questions');
 
     return Dialog(
-      backgroundColor: Colors.white,
-      surfaceTintColor: Colors.transparent,
+      backgroundColor: CmTheme.surfaceWhite,
+      surfaceTintColor: CmTheme.transparent,
       insetPadding: const EdgeInsets.all(16),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: SizedBox(
@@ -7626,11 +7808,13 @@ class _PaperPreviewDialogState extends State<_PaperPreviewDialog> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          widget.answerKeyOnly ? 'Answer sheet preview' : 'Paper preview',
+                          widget.answerKeyOnly
+                              ? 'Answer sheet preview'
+                              : 'Paper preview',
                           style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w800,
-                            color: _Brand.ink,
+                            color: CmTheme.navy,
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -7640,7 +7824,7 @@ class _PaperPreviewDialogState extends State<_PaperPreviewDialog> {
                           '${widget.totalPoints == 1 ? 'point' : 'points'}',
                           style: const TextStyle(
                             fontSize: 12,
-                            color: CmColors.slate,
+                            color: CmTheme.slateText,
                           ),
                         ),
                       ],
@@ -7650,7 +7834,11 @@ class _PaperPreviewDialogState extends State<_PaperPreviewDialog> {
                     onTap: () => Navigator.maybePop(context),
                     child: const Padding(
                       padding: EdgeInsets.all(2),
-                      child: Icon(Icons.close, size: 18, color: CmColors.slate),
+                      child: Icon(
+                        Icons.close,
+                        size: 18,
+                        color: CmTheme.slateText,
+                      ),
                     ),
                   ),
                 ],
@@ -7664,7 +7852,7 @@ class _PaperPreviewDialogState extends State<_PaperPreviewDialog> {
                   Container(
                     padding: const EdgeInsets.all(3),
                     decoration: BoxDecoration(
-                      color: CmColors.bg,
+                      color: CmTheme.background,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Row(
@@ -7692,23 +7880,23 @@ class _PaperPreviewDialogState extends State<_PaperPreviewDialog> {
                       IconButton(
                         tooltip: 'Print',
                         style: IconButton.styleFrom(
-                          side: const BorderSide(color: CmColors.line),
+                          side: const BorderSide(color: CmTheme.lineBorder),
                         ),
                         icon: const Icon(Icons.print_outlined, size: 18),
-                        color: _Brand.ink,
+                        color: CmTheme.navy,
                         onPressed: () => widget.onPrint(_answerSheet),
                       ),
                       const SizedBox(width: 6),
                       IconButton(
                         tooltip: 'Download',
                         style: IconButton.styleFrom(
-                          side: const BorderSide(color: CmColors.line),
+                          side: const BorderSide(color: CmTheme.lineBorder),
                         ),
                         icon: const Icon(
                           Icons.file_download_outlined,
                           size: 18,
                         ),
-                        color: _Brand.ink,
+                        color: CmTheme.navy,
                         onPressed: () => widget.onDownload(_answerSheet),
                       ),
                     ],
@@ -7721,8 +7909,8 @@ class _PaperPreviewDialogState extends State<_PaperPreviewDialog> {
                   borderRadius: BorderRadius.circular(10),
                   child: Container(
                     decoration: BoxDecoration(
-                      color: CmColors.bg,
-                      border: Border.all(color: CmColors.line),
+                      color: CmTheme.background,
+                      border: Border.all(color: CmTheme.lineBorder),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: PdfPreview(
@@ -7739,7 +7927,7 @@ class _PaperPreviewDialogState extends State<_PaperPreviewDialog> {
                           child: Text(
                             _err(error),
                             textAlign: TextAlign.center,
-                            style: const TextStyle(color: _Brand.ink),
+                            style: const TextStyle(color: CmTheme.navy),
                           ),
                         ),
                       ),

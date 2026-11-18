@@ -1,3 +1,4 @@
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
@@ -36,13 +37,10 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
       final token = await AuthStorage.getToken();
 
       if (token == null || token.isEmpty) {
-        throw Exception(
-          'Authentication token not found.',
-        );
+        throw Exception('Authentication token not found.');
       }
 
-      final subjects =
-          await ApiService.getSubjects(token);
+      final subjects = await ApiService.getSubjects(token);
 
       if (!mounted) {
         return;
@@ -58,10 +56,7 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
       }
 
       setState(() {
-        _error = e.toString().replaceFirst(
-              'Exception: ',
-              '',
-            );
+        _error = e.toString().replaceFirst('Exception: ', '');
 
         _loading = false;
       });
@@ -83,21 +78,15 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
         String? dialogError;
 
         return StatefulBuilder(
-          builder: (
-            context,
-            setDialogState,
-          ) {
+          builder: (context, setDialogState) {
             Future<void> saveSubject() async {
-              final name =
-                  nameController.text.trim();
+              final name = nameController.text.trim();
 
-              final code =
-                  codeController.text.trim();
+              final code = codeController.text.trim();
 
               if (name.isEmpty) {
                 setDialogState(() {
-                  dialogError =
-                      'Subject name is required.';
+                  dialogError = 'Subject name is required.';
                 });
 
                 return;
@@ -109,111 +98,71 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
               });
 
               try {
-                final token =
-                    await AuthStorage.getToken();
+                final token = await AuthStorage.getToken();
 
-                if (token == null ||
-                    token.isEmpty) {
-                  throw Exception(
-                    'Authentication token not found.',
-                  );
+                if (token == null || token.isEmpty) {
+                  throw Exception('Authentication token not found.');
                 }
 
                 await ApiService.createSubject(
                   token: token,
                   name: name,
-                  code: code.isEmpty
-                      ? null
-                      : code,
+                  code: code.isEmpty ? null : code,
                 );
 
                 if (!context.mounted) {
                   return;
                 }
 
-                Navigator.pop(
-                  context,
-                  true,
-                );
+                Navigator.pop(context, true);
               } catch (e) {
                 setDialogState(() {
                   saving = false;
 
-                  dialogError =
-                      e.toString().replaceFirst(
-                            'Exception: ',
-                            '',
-                          );
+                  dialogError = e.toString().replaceFirst('Exception: ', '');
                 });
               }
             }
 
             return AlertDialog(
-              title: const Text(
-                'Add Subject',
-              ),
+              title: const Text('Add Subject'),
 
               content: Column(
-                mainAxisSize:
-                    MainAxisSize.min,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   TextField(
-                    controller:
-                        nameController,
+                    controller: nameController,
                     enabled: !saving,
-                    textCapitalization:
-                        TextCapitalization.words,
-                    decoration:
-                        const InputDecoration(
-                      labelText:
-                          'Subject Name',
-                      hintText:
-                          'e.g. Information Management',
-                      prefixIcon: Icon(
-                        Icons.menu_book_outlined,
-                      ),
-                      border:
-                          OutlineInputBorder(),
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      labelText: 'Subject Name',
+                      hintText: 'e.g. Information Management',
+                      prefixIcon: Icon(Icons.menu_book_outlined),
+                      border: OutlineInputBorder(),
                     ),
                   ),
 
-                  const SizedBox(
-                    height: 16,
-                  ),
+                  const SizedBox(height: 16),
 
                   TextField(
-                    controller:
-                        codeController,
+                    controller: codeController,
                     enabled: !saving,
-                    textCapitalization:
-                        TextCapitalization.characters,
-                    decoration:
-                        const InputDecoration(
-                      labelText:
-                          'Subject Code',
-                      hintText:
-                          'e.g. IT 301',
-                      prefixIcon: Icon(
-                        Icons.tag,
-                      ),
-                      border:
-                          OutlineInputBorder(),
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Subject Code',
+                      hintText: 'e.g. IT 301',
+                      prefixIcon: Icon(Icons.tag),
+                      border: OutlineInputBorder(),
                     ),
                   ),
 
                   if (dialogError != null) ...[
-                    const SizedBox(
-                      height: 12,
-                    ),
+                    const SizedBox(height: 12),
 
                     Text(
                       dialogError!,
                       style: TextStyle(
-                        color: Theme.of(
-                          context,
-                        )
-                            .colorScheme
-                            .error,
+                        color: Theme.of(context).colorScheme.error,
                       ),
                     ),
                   ],
@@ -225,28 +174,18 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
                   onPressed: saving
                       ? null
                       : () {
-                          Navigator.pop(
-                            context,
-                            false,
-                          );
+                          Navigator.pop(context, false);
                         },
-                  child:
-                      const Text('Cancel'),
+                  child: const Text('Cancel'),
                 ),
 
                 FilledButton(
-                  onPressed:
-                      saving
-                          ? null
-                          : saveSubject,
+                  onPressed: saving ? null : saveSubject,
                   child: saving
                       ? const SizedBox(
                           width: 20,
                           height: 20,
-                          child:
-                              CircularProgressIndicator(
-                            strokeWidth: 2,
-                          ),
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Text('Save'),
                 ),
@@ -267,12 +206,10 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
         return;
       }
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Subject added successfully.',
-          ),
+      ScaffoldMessenger.of(context).showSnackBar(
+        CmTheme.feedbackSnackBar(
+          'Subject added successfully.',
+          color: CmTheme.emeraldSuccess,
         ),
       );
     }
@@ -285,29 +222,15 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'Subjects',
-        ),
+      appBar: AppBar(title: const Text('Subjects')),
+
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _showAddSubjectDialog,
+        icon: const Icon(Icons.add),
+        label: const Text('Add Subject'),
       ),
 
-      floatingActionButton:
-          FloatingActionButton.extended(
-        onPressed:
-            _showAddSubjectDialog,
-        icon: const Icon(
-          Icons.add,
-        ),
-        label: const Text(
-          'Add Subject',
-        ),
-      ),
-
-      body: RefreshIndicator(
-        onRefresh:
-            _loadSubjects,
-        child: _buildBody(),
-      ),
+      body: RefreshIndicator(onRefresh: _loadSubjects, child: _buildBody()),
     );
   }
 
@@ -317,51 +240,30 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
 
   Widget _buildBody() {
     if (_loading) {
-      return const Center(
-        child:
-            CircularProgressIndicator(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
 
     if (_error != null) {
       return ListView(
         children: [
-          const SizedBox(
-            height: 120,
-          ),
+          const SizedBox(height: 120),
 
           Center(
             child: Padding(
-              padding:
-                  const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(24),
               child: Column(
                 children: [
-                  const Icon(
-                    Icons.error_outline,
-                    size: 48,
-                  ),
+                  const Icon(Icons.error_outline, size: 48),
 
-                  const SizedBox(
-                    height: 16,
-                  ),
+                  const SizedBox(height: 16),
 
-                  Text(
-                    _error!,
-                    textAlign:
-                        TextAlign.center,
-                  ),
+                  Text(_error!, textAlign: TextAlign.center),
 
-                  const SizedBox(
-                    height: 16,
-                  ),
+                  const SizedBox(height: 16),
 
                   FilledButton(
-                    onPressed:
-                        _loadSubjects,
-                    child:
-                        const Text(
-                      'Retry',
-                    ),
+                    onPressed: _loadSubjects,
+                    child: const Text('Retry'),
                   ),
                 ],
               ),
@@ -374,40 +276,23 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
     if (_subjects.isEmpty) {
       return ListView(
         children: const [
-          SizedBox(
-            height: 140,
-          ),
+          SizedBox(height: 140),
 
           Center(
             child: Column(
               children: [
-                Icon(
-                  Icons
-                      .menu_book_outlined,
-                  size: 56,
-                ),
+                Icon(Icons.menu_book_outlined, size: 56),
 
-                SizedBox(
-                  height: 16,
-                ),
+                SizedBox(height: 16),
 
                 Text(
                   'No subjects yet.',
-                  style:
-                      TextStyle(
-                    fontSize: 18,
-                    fontWeight:
-                        FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
 
-                SizedBox(
-                  height: 8,
-                ),
+                SizedBox(height: 8),
 
-                Text(
-                  'Tap "Add Subject" to create one.',
-                ),
+                Text('Tap "Add Subject" to create one.'),
               ],
             ),
           ),
@@ -416,64 +301,35 @@ class _SubjectsScreenState extends State<SubjectsScreen> {
     }
 
     return ListView.builder(
-      padding:
-          const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(16),
 
-      itemCount:
-          _subjects.length,
+      itemCount: _subjects.length,
 
-      itemBuilder:
-          (context, index) {
-        final subject =
-            _subjects[index];
+      itemBuilder: (context, index) {
+        final subject = _subjects[index];
 
-        final name =
-            subject['name']
-                    ?.toString() ??
-                'Unnamed Subject';
+        final name = subject['name']?.toString() ?? 'Unnamed Subject';
 
-        final code =
-            subject['code']
-                ?.toString();
+        final code = subject['code']?.toString();
 
         return Card(
-          margin:
-              const EdgeInsets.only(
-            bottom: 12,
-          ),
+          margin: const EdgeInsets.only(bottom: 12),
 
           child: ListTile(
-            leading:
-                CircleAvatar(
-              child: Text(
-                name.isNotEmpty
-                    ? name[0]
-                        .toUpperCase()
-                    : '?',
-              ),
+            leading: CircleAvatar(
+              child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?'),
             ),
 
             title: Text(
               name,
-              style:
-                  const TextStyle(
-                fontWeight:
-                    FontWeight.bold,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.bold),
             ),
 
-            subtitle:
-                code == null ||
-                        code.isEmpty
-                    ? const Text(
-                        'No subject code',
-                      )
-                    : Text(code),
+            subtitle: code == null || code.isEmpty
+                ? const Text('No subject code')
+                : Text(code),
 
-            trailing:
-                const Icon(
-              Icons.chevron_right,
-            ),
+            trailing: const Icon(Icons.chevron_right),
           ),
         );
       },

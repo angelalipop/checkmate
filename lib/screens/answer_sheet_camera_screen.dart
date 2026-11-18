@@ -1,8 +1,10 @@
 import 'dart:typed_data';
 import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:camera/camera.dart';
 import 'package:file_selector/file_selector.dart';
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
@@ -11,11 +13,6 @@ import 'package:checkmate/services/answer_sheet_processor.dart';
 
 import 'package:checkmate/screens/answer_sheet_upload_screen.dart';
 import 'package:checkmate/services/answer_sheet_processor.dart';
-
-const Color _kNavy = Color(0xFF1E293B);
-const Color _kNavyDark = Color(0xFF162137);
-const Color _kSlate = Color(0xFF64748B);
-const Color _kEmerald = Color(0xFF10B981);
 
 class AnswerSheetCameraScreen extends StatefulWidget {
   final int examId;
@@ -40,8 +37,7 @@ class AnswerSheetCameraScreen extends StatefulWidget {
 
 class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
   CameraController? _cameraController;
-  final TransformationController _zoomController =
-      TransformationController();
+  final TransformationController _zoomController = TransformationController();
 
   Size? _scannerViewportSize;
 
@@ -75,9 +71,7 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
     _initializeCamera();
   }
 
-  Future<void> _startLiveMarkerDetection(
-  CameraController controller,
-  ) async {
+  Future<void> _startLiveMarkerDetection(CameraController controller) async {
     if (defaultTargetPlatform != TargetPlatform.iOS ||
         !controller.value.isInitialized ||
         controller.value.isStreamingImages) {
@@ -101,7 +95,7 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
         _analyzeCameraFrame(image);
       });
 
-debugPrint('CHECKMATE: Live camera stream started');
+      debugPrint('CHECKMATE: Live camera stream started');
     } catch (e) {
       debugPrint('CHECKMATE LIVE DETECTION ERROR: $e');
 
@@ -113,252 +107,247 @@ debugPrint('CHECKMATE: Live camera stream started');
     }
   }
 
-
-img.Image? _convertBgraFrame(CameraImage cameraImage) {
-  if (cameraImage.format.group != ImageFormatGroup.bgra8888 ||
-      cameraImage.planes.isEmpty) {
-    return null;
-  }
-
-  final plane = cameraImage.planes.first;
-  final bytesPerPixel = plane.bytesPerPixel ?? 4;
-
-  if (bytesPerPixel < 4) return null;
-
-  const maxDimension = 640;
-
-  final scale = math.max(
-    cameraImage.width / maxDimension,
-    cameraImage.height / maxDimension,
-  );
-
-  final targetWidth =
-      (cameraImage.width / scale).round().clamp(1, maxDimension);
-
-  final targetHeight =
-      (cameraImage.height / scale).round().clamp(1, maxDimension);
-
-  final result = img.Image(
-    width: targetWidth,
-    height: targetHeight,
-    numChannels: 3,
-  );
-
-  for (int y = 0; y < targetHeight; y++) {
-    final sourceY = (y * cameraImage.height / targetHeight).floor();
-
-    for (int x = 0; x < targetWidth; x++) {
-      final sourceX = (x * cameraImage.width / targetWidth).floor();
-
-      final offset =
-          sourceY * plane.bytesPerRow + sourceX * bytesPerPixel;
-
-      if (offset + 2 >= plane.bytes.length) return null;
-
-      final blue = plane.bytes[offset];
-      final green = plane.bytes[offset + 1];
-      final red = plane.bytes[offset + 2];
-
-      result.setPixelRgb(x, y, red, green, blue);
+  img.Image? _convertBgraFrame(CameraImage cameraImage) {
+    if (cameraImage.format.group != ImageFormatGroup.bgra8888 ||
+        cameraImage.planes.isEmpty) {
+      return null;
     }
-  }
 
-  if (result.width > result.height) {
-    return img.copyRotate(result, angle: 90);
-  }
+    final plane = cameraImage.planes.first;
+    final bytesPerPixel = plane.bytesPerPixel ?? 4;
 
-  return result;
-}
+    if (bytesPerPixel < 4) return null;
 
+    const maxDimension = 640;
 
-Future<void> _analyzeCameraFrame(CameraImage cameraImage) async {
-  if (!mounted ||
-      _autoCaptureTriggered ||
-      _isTakingPicture ||
-      _isProcessing ||
-      _isAnalyzingFrame) {
-    return;
-  }
+    final scale = math.max(
+      cameraImage.width / maxDimension,
+      cameraImage.height / maxDimension,
+    );
 
-  final now = DateTime.now();
+    final targetWidth = (cameraImage.width / scale).round().clamp(
+      1,
+      maxDimension,
+    );
 
-  if (now.difference(_lastFrameCheck).inMilliseconds < 200) {
-    return;
-  }
+    final targetHeight = (cameraImage.height / scale).round().clamp(
+      1,
+      maxDimension,
+    );
 
-  _lastFrameCheck = now;
-  _isAnalyzingFrame = true;
+    final result = img.Image(
+      width: targetWidth,
+      height: targetHeight,
+      numChannels: 3,
+    );
 
-  try {
-    final frame = _convertBgraFrame(cameraImage);
+    for (int y = 0; y < targetHeight; y++) {
+      final sourceY = (y * cameraImage.height / targetHeight).floor();
 
-    if (frame == null) {
-      _stableFrameCount = 0;
-      _previousNormalizedMarkers = null;
-      _stableSince = null;
+      for (int x = 0; x < targetWidth; x++) {
+        final sourceX = (x * cameraImage.width / targetWidth).floor();
 
-      if (mounted) {
-        setState(() {
-          _markerStatus =
-              'Automatic detection unavailable. Use the shutter.';
-        });
+        final offset = sourceY * plane.bytesPerRow + sourceX * bytesPerPixel;
+
+        if (offset + 2 >= plane.bytes.length) return null;
+
+        final blue = plane.bytes[offset];
+        final green = plane.bytes[offset + 1];
+        final red = plane.bytes[offset + 2];
+
+        result.setPixelRgb(x, y, red, green, blue);
       }
+    }
+
+    if (result.width > result.height) {
+      return img.copyRotate(result, angle: 90);
+    }
+
+    return result;
+  }
+
+  Future<void> _analyzeCameraFrame(CameraImage cameraImage) async {
+    if (!mounted ||
+        _autoCaptureTriggered ||
+        _isTakingPicture ||
+        _isProcessing ||
+        _isAnalyzingFrame) {
       return;
     }
 
-    final markers = AnswerSheetProcessor.detectLiveMarkers(frame);
+    final now = DateTime.now();
 
-    if (markers == null || markers.length != 4) {
-      _stableFrameCount = 0;
-      _previousNormalizedMarkers = null;
-      _stableSince = null;
-
-      if (mounted) {
-        setState(() {
-          _markerStatus = 'Align all four corner markers';
-        });
-      }
+    if (now.difference(_lastFrameCheck).inMilliseconds < 200) {
       return;
     }
 
-    final currentMarkers = markers.map((marker) {
-      return Offset(
-        marker.x / frame.width,
-        marker.y / frame.height,
+    _lastFrameCheck = now;
+    _isAnalyzingFrame = true;
+
+    try {
+      final frame = _convertBgraFrame(cameraImage);
+
+      if (frame == null) {
+        _stableFrameCount = 0;
+        _previousNormalizedMarkers = null;
+        _stableSince = null;
+
+        if (mounted) {
+          setState(() {
+            _markerStatus = 'Automatic detection unavailable. Use the shutter.';
+          });
+        }
+        return;
+      }
+
+      final markers = AnswerSheetProcessor.detectLiveMarkers(frame);
+
+      if (markers == null || markers.length != 4) {
+        _stableFrameCount = 0;
+        _previousNormalizedMarkers = null;
+        _stableSince = null;
+
+        if (mounted) {
+          setState(() {
+            _markerStatus = 'Align all four corner markers';
+          });
+        }
+        return;
+      }
+
+      final currentMarkers = markers.map((marker) {
+        return Offset(marker.x / frame.width, marker.y / frame.height);
+      }).toList();
+
+      bool stable = true;
+
+      if (_previousNormalizedMarkers == null) {
+        stable = false;
+      } else {
+        for (int i = 0; i < 4; i++) {
+          final dx = (currentMarkers[i].dx - _previousNormalizedMarkers![i].dx)
+              .abs();
+
+          final dy = (currentMarkers[i].dy - _previousNormalizedMarkers![i].dy)
+              .abs();
+
+          if (dx > 0.015 || dy > 0.015) {
+            stable = false;
+            break;
+          }
+        }
+      }
+
+      if (!stable) {
+        _stableFrameCount = 1;
+        _stableSince = now;
+        _previousNormalizedMarkers = currentMarkers;
+      } else {
+        _stableFrameCount++;
+      }
+
+      final stableDuration = _stableSince == null
+          ? 0
+          : now.difference(_stableSince!).inMilliseconds;
+
+      debugPrint(
+        'CHECKMATE: Stable frames: $_stableFrameCount, '
+        'stable duration: ${stableDuration}ms',
       );
-    }).toList();
 
-    bool stable = true;
+      if (_stableFrameCount >= 4 && stableDuration >= 800) {
+        debugPrint('CHECKMATE: AUTO-CAPTURE TRIGGERED');
 
-    if (_previousNormalizedMarkers == null) {
-      stable = false;
-    } else {
-      for (int i = 0; i < 4; i++) {
-        final dx = (currentMarkers[i].dx -
-                _previousNormalizedMarkers![i].dx)
-            .abs();
+        _autoCaptureTriggered = true;
 
-        final dy = (currentMarkers[i].dy -
-                _previousNormalizedMarkers![i].dy)
-            .abs();
+        if (mounted) {
+          setState(() {
+            _markerStatus = 'Capturing automatically...';
+          });
+        }
 
-        if (dx > 0.015 || dy > 0.015) {
-          stable = false;
+        await _takePicture(automatic: true);
+        return;
+      }
+
+      if (mounted) {
+        setState(() {
+          _markerStatus = stable
+              ? 'Hold still... (${stableDuration}ms / 800ms)'
+              : 'Four markers detected. Hold still...';
+        });
+      }
+    } catch (e) {
+      debugPrint('CHECKMATE FRAME ANALYSIS ERROR: $e');
+    } finally {
+      _isAnalyzingFrame = false;
+    }
+  }
+
+  Future<void> _initializeCamera() async {
+    CameraController? controller;
+
+    try {
+      final cameras = await availableCameras();
+
+      if (cameras.isEmpty) {
+        throw Exception('No camera was found on this device.');
+      }
+
+      CameraDescription selectedCamera = cameras.first;
+
+      for (final camera in cameras) {
+        if (camera.lensDirection == CameraLensDirection.back) {
+          selectedCamera = camera;
           break;
         }
       }
-    }
 
-    if (!stable) {
-      _stableFrameCount = 1;
-      _stableSince = now;
-      _previousNormalizedMarkers = currentMarkers;
-    } else {
-      _stableFrameCount++;
-    }
+      controller = CameraController(
+        selectedCamera,
+        ResolutionPreset.high,
+        enableAudio: false,
+        imageFormatGroup: defaultTargetPlatform == TargetPlatform.iOS
+            ? ImageFormatGroup.bgra8888
+            : ImageFormatGroup.jpeg,
+      );
 
-    final stableDuration = _stableSince == null
-        ? 0
-        : now.difference(_stableSince!).inMilliseconds;
+      await controller.initialize();
+      await controller.setFlashMode(_flashMode);
 
-    debugPrint(
-      'CHECKMATE: Stable frames: $_stableFrameCount, '
-      'stable duration: ${stableDuration}ms',
-    );
-
-    if (_stableFrameCount >= 4 && stableDuration >= 800) {
-      debugPrint('CHECKMATE: AUTO-CAPTURE TRIGGERED');
-
-      _autoCaptureTriggered = true;
-
-      if (mounted) {
-        setState(() {
-          _markerStatus = 'Capturing automatically...';
-        });
+      if (!mounted) {
+        await controller.dispose();
+        return;
       }
 
-      await _takePicture(automatic: true);
-      return;
-    }
-
-    if (mounted) {
+      // Assign the controller BEFORE starting the image stream.
       setState(() {
-        _markerStatus = stable
-            ? 'Hold still... (${stableDuration}ms / 800ms)'
-            : 'Four markers detected. Hold still...';
+        _cameraController = controller;
+        _isInitializing = false;
+        _hasError = false;
+      });
+
+      debugPrint('CHECKMATE: Camera initialized successfully');
+
+      // Start automatic detection only after initialization.
+      await _startLiveMarkerDetection(controller);
+    } catch (e) {
+      debugPrint('CHECKMATE CAMERA INITIALIZATION ERROR: $e');
+
+      if (controller != null) {
+        await controller.dispose();
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _cameraController = null;
+        _isInitializing = false;
+        _hasError = true;
+        _errorMessage = e.toString();
       });
     }
-  } catch (e) {
-    debugPrint('CHECKMATE FRAME ANALYSIS ERROR: $e');
-  } finally {
-    _isAnalyzingFrame = false;
   }
-}
-
-  Future<void> _initializeCamera() async {
-  CameraController? controller;
-
-  try {
-    final cameras = await availableCameras();
-
-    if (cameras.isEmpty) {
-      throw Exception('No camera was found on this device.');
-    }
-
-    CameraDescription selectedCamera = cameras.first;
-
-    for (final camera in cameras) {
-      if (camera.lensDirection == CameraLensDirection.back) {
-        selectedCamera = camera;
-        break;
-      }
-    }
-
-    controller = CameraController(
-      selectedCamera,
-      ResolutionPreset.high,
-      enableAudio: false,
-      imageFormatGroup: defaultTargetPlatform == TargetPlatform.iOS
-          ? ImageFormatGroup.bgra8888
-          : ImageFormatGroup.jpeg,
-    );
-
-    await controller.initialize();
-    await controller.setFlashMode(_flashMode);
-
-    if (!mounted) {
-      await controller.dispose();
-      return;
-    }
-
-    // Assign the controller BEFORE starting the image stream.
-    setState(() {
-      _cameraController = controller;
-      _isInitializing = false;
-      _hasError = false;
-    });
-
-    debugPrint('CHECKMATE: Camera initialized successfully');
-
-    // Start automatic detection only after initialization.
-    await _startLiveMarkerDetection(controller);
-  } catch (e) {
-    debugPrint('CHECKMATE CAMERA INITIALIZATION ERROR: $e');
-
-    if (controller != null) {
-      await controller.dispose();
-    }
-
-    if (!mounted) return;
-
-    setState(() {
-      _cameraController = null;
-      _isInitializing = false;
-      _hasError = true;
-      _errorMessage = e.toString();
-    });
-  }
-}
 
   Future<void> _toggleFlash() async {
     final controller = _cameraController;
@@ -368,10 +357,9 @@ Future<void> _analyzeCameraFrame(CameraImage cameraImage) async {
     }
 
     try {
-      final FlashMode newFlashMode =
-          _flashMode == FlashMode.off
-              ? FlashMode.torch
-              : FlashMode.off;
+      final FlashMode newFlashMode = _flashMode == FlashMode.off
+          ? FlashMode.torch
+          : FlashMode.off;
 
       await controller.setFlashMode(newFlashMode);
 
@@ -382,60 +370,57 @@ Future<void> _analyzeCameraFrame(CameraImage cameraImage) async {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Unable to change flash: $e')),
+        CmTheme.feedbackSnackBar(
+          'Unable to change flash: $e',
+          color: CmTheme.redDanger,
+        ),
       );
     }
   }
 
-  
-Future<void> _chooseFromGallery() async {
-  try {
-    final ImagePicker picker = ImagePicker();
+  Future<void> _chooseFromGallery() async {
+    try {
+      final ImagePicker picker = ImagePicker();
 
-    final image = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 100,
-    );
+      final image = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 100,
+      );
 
-    if (image == null) return;
+      if (image == null) return;
 
-    final Uint8List imageBytes = await image.readAsBytes();
+      final Uint8List imageBytes = await image.readAsBytes();
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    _resetZoom();
+      _resetZoom();
 
-    setState(() {
-      // Gallery images remain uncropped.
-      _capturedImageBytes = imageBytes;
-      _capturedFileName =
-          image.name.isNotEmpty ? image.name : 'Gallery.jpg';
-      _isProcessing = false;
-    });
+      setState(() {
+        // Gallery images remain uncropped.
+        _capturedImageBytes = imageBytes;
+        _capturedFileName = image.name.isNotEmpty ? image.name : 'Gallery.jpg';
+        _isProcessing = false;
+      });
 
-    debugPrint(
-      '[CheckMate] Gallery image selected: ${image.name}',
-    );
-  } catch (e) {
-    if (!mounted) return;
+      debugPrint('[CheckMate] Gallery image selected: ${image.name}');
+    } catch (e) {
+      if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        duration: const Duration(seconds: 5),
-        content: Text('Unable to choose image:\n$e'),
-      ),
-    );
+      ScaffoldMessenger.of(context).showSnackBar(
+        CmTheme.feedbackSnackBar(
+          'Unable to choose image:\n$e',
+          color: CmTheme.redDanger,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    }
   }
-}
 
   // ============================================================
   // CROP IMAGE TO SCANNER FRAME
   // ============================================================
 
-  Uint8List? _cropImageToScannerFrame(
-    Uint8List imageBytes,
-    Size viewportSize,
-  ) {
+  Uint8List? _cropImageToScannerFrame(Uint8List imageBytes, Size viewportSize) {
     try {
       final decodedImage = img.decodeImage(imageBytes);
 
@@ -453,11 +438,9 @@ Future<void> _chooseFromGallery() async {
       final double frameWidth = viewportSize.width * 0.82;
       final double frameHeight = frameWidth / answerSheetRatio;
 
-      final double frameLeft =
-          (viewportSize.width - frameWidth) / 2;
+      final double frameLeft = (viewportSize.width - frameWidth) / 2;
 
-      final double frameTop =
-          (viewportSize.height - frameHeight) / 2;
+      final double frameTop = (viewportSize.height - frameHeight) / 2;
 
       // Add a small safety margin around the scanner frame.
       const double safetyMarginRatio = 0.03;
@@ -481,11 +464,9 @@ Future<void> _chooseFromGallery() async {
       final double renderedWidth = orientedImage.width * scale;
       final double renderedHeight = orientedImage.height * scale;
 
-      final double offsetX =
-          (renderedWidth - viewportSize.width) / 2;
+      final double offsetX = (renderedWidth - viewportSize.width) / 2;
 
-      final double offsetY =
-          (renderedHeight - viewportSize.height) / 2;
+      final double offsetY = (renderedHeight - viewportSize.height) / 2;
 
       final int cropX = ((cropLeft + offsetX) / scale)
           .floor()
@@ -497,17 +478,15 @@ Future<void> _chooseFromGallery() async {
           .clamp(0, orientedImage.height - 1)
           .toInt();
 
-      final int cropRight =
-          ((cropLeft + cropWidth + offsetX) / scale)
-              .ceil()
-              .clamp(cropX + 1, orientedImage.width)
-              .toInt();
+      final int cropRight = ((cropLeft + cropWidth + offsetX) / scale)
+          .ceil()
+          .clamp(cropX + 1, orientedImage.width)
+          .toInt();
 
-      final int cropBottom =
-          ((cropTop + cropHeight + offsetY) / scale)
-              .ceil()
-              .clamp(cropY + 1, orientedImage.height)
-              .toInt();
+      final int cropBottom = ((cropTop + cropHeight + offsetY) / scale)
+          .ceil()
+          .clamp(cropY + 1, orientedImage.height)
+          .toInt();
 
       final croppedImage = img.copyCrop(
         orientedImage,
@@ -523,9 +502,7 @@ Future<void> _chooseFromGallery() async {
         '${croppedImage.width}x${croppedImage.height}',
       );
 
-      return Uint8List.fromList(
-        img.encodeJpg(croppedImage, quality: 95),
-      );
+      return Uint8List.fromList(img.encodeJpg(croppedImage, quality: 95));
     } catch (e) {
       debugPrint('CHECKMATE FRAME CROP ERROR: $e');
       return null;
@@ -559,9 +536,7 @@ Future<void> _chooseFromGallery() async {
 
       final Uint8List imageBytes = await image.readAsBytes();
 
-      debugPrint(
-        'CHECKMATE: Image bytes loaded: ${imageBytes.length}',
-      );
+      debugPrint('CHECKMATE: Image bytes loaded: ${imageBytes.length}');
       final viewportSize = _scannerViewportSize;
 
       final Uint8List? croppedBytes = viewportSize == null
@@ -585,9 +560,7 @@ Future<void> _chooseFromGallery() async {
         );
       });
 
-      debugPrint(
-        'CHECKMATE ORIGINAL IMAGE: ${imageBytes.length} bytes',
-      );
+      debugPrint('CHECKMATE ORIGINAL IMAGE: ${imageBytes.length} bytes');
 
       debugPrint(
         'CHECKMATE CROPPED IMAGE: '
@@ -595,9 +568,7 @@ Future<void> _chooseFromGallery() async {
       );
 
       if (croppedBytes == null) {
-        debugPrint(
-          'CHECKMATE CROP: Using original image as fallback.',
-        );
+        debugPrint('CHECKMATE CROP: Using original image as fallback.');
       }
     } catch (e) {
       if (!mounted) return;
@@ -605,8 +576,9 @@ Future<void> _chooseFromGallery() async {
       setState(() => _isTakingPicture = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to capture answer sheet: $e'),
+        CmTheme.feedbackSnackBar(
+          'Failed to capture answer sheet: $e',
+          color: CmTheme.redDanger,
         ),
       );
     }
@@ -666,45 +638,45 @@ Future<void> _chooseFromGallery() async {
   }
 
   Future<void> _retakePicture() async {
-  final controller = _cameraController;
+    final controller = _cameraController;
 
-  if (!mounted || controller == null || !controller.value.isInitialized) {
-    return;
+    if (!mounted || controller == null || !controller.value.isInitialized) {
+      return;
+    }
+
+    setState(() {
+      _capturedImageBytes = null;
+      _isProcessing = false;
+      _isTakingPicture = false;
+      _markerStatus = 'Position the answer sheet';
+    });
+
+    _stableFrameCount = 0;
+    _previousNormalizedMarkers = null;
+    _autoCaptureTriggered = false;
+    _isAnalyzingFrame = false;
+
+    _resetZoom();
+
+    // Restart automatic detection after returning to the camera preview.
+    // Restart automatic detection after returning to camera preview.
+
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    if (!mounted) return;
+
+    debugPrint(
+      'CHECKMATE: Restart check - '
+      'initialized: ${controller.value.isInitialized}, '
+      'streaming: ${controller.value.isStreamingImages}',
+    );
+
+    if (!controller.value.isStreamingImages) {
+      await _startLiveMarkerDetection(controller);
+    } else {
+      debugPrint('CHECKMATE: Image stream is already active.');
+    }
   }
-
-  setState(() {
-    _capturedImageBytes = null;
-    _isProcessing = false;
-    _isTakingPicture = false;
-    _markerStatus = 'Position the answer sheet';
-  });
-
-  _stableFrameCount = 0;
-  _previousNormalizedMarkers = null;
-  _autoCaptureTriggered = false;
-  _isAnalyzingFrame = false;
-
-  _resetZoom();
-
-  // Restart automatic detection after returning to the camera preview.
-  // Restart automatic detection after returning to camera preview.
-
-await Future.delayed(const Duration(milliseconds: 500));
-
-if (!mounted) return;
-
-  debugPrint(
-    'CHECKMATE: Restart check - '
-    'initialized: ${controller.value.isInitialized}, '
-    'streaming: ${controller.value.isStreamingImages}',
-  );
-
-  if (!controller.value.isStreamingImages) {
-    await _startLiveMarkerDetection(controller);
-  } else {
-    debugPrint('CHECKMATE: Image stream is already active.');
-  }
-}
 
   @override
   void dispose() {
@@ -728,16 +700,13 @@ if (!mounted) return;
 
   Widget _buildCameraScreen() {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: CmTheme.navy,
       appBar: AppBar(
-        backgroundColor: _kNavyDark,
-        foregroundColor: Colors.white,
+        backgroundColor: CmTheme.navy,
+        foregroundColor: CmTheme.surfaceWhite,
         title: const Text(
           'Scan Answer Sheet',
-          style: TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 17,
-          ),
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17),
         ),
         actions: [
           if (!_isInitializing && !_hasError)
@@ -747,20 +716,18 @@ if (!mounted) return;
                   : 'Turn Flash Off',
               onPressed: _toggleFlash,
               icon: Icon(
-                _flashMode == FlashMode.off
-                    ? Icons.flash_off
-                    : Icons.flash_on,
+                _flashMode == FlashMode.off ? Icons.flash_off : Icons.flash_on,
               ),
             ),
         ],
       ),
       body: _isInitializing
           ? const Center(
-              child: CircularProgressIndicator(color: Colors.white),
+              child: CircularProgressIndicator(color: CmTheme.surfaceWhite),
             )
           : _hasError
-              ? _buildCameraError()
-              : _buildCameraPreview(),
+          ? _buildCameraError()
+          : _buildCameraPreview(),
     );
   }
 
@@ -788,9 +755,7 @@ if (!mounted) return;
           children: [
             CameraPreview(controller),
 
-            CustomPaint(
-              painter: ScannerOverlayPainter(),
-            ),
+            CustomPaint(painter: ScannerOverlayPainter()),
 
             Positioned(
               top: 20,
@@ -802,27 +767,27 @@ if (!mounted) return;
                   vertical: 12,
                 ),
                 decoration: BoxDecoration(
-                  color: _kNavyDark.withValues(alpha: 0.85),
+                  color: CmTheme.cameraInfoOverlay,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.white24),
+                  border: Border.all(color: CmTheme.translucentOnNavy),
                 ),
-                child: const Column(
+                child: Column(
                   children: [
-                    Text(
+                    const Text(
                       'Align sheet corners within the frame',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: Colors.white,
+                        color: CmTheme.surfaceWhite,
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    SizedBox(height: 4),
+                    const SizedBox(height: 4),
                     Text(
                       'Keep all four black corner registration markers visible',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: Colors.white70,
+                        color: CmTheme.mutedOnNavy,
                         fontSize: 12.5,
                       ),
                     ),
@@ -847,8 +812,8 @@ if (!mounted) return;
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: [
-                      Colors.transparent,
-                      _kNavyDark.withValues(alpha: 0.94),
+                      CmTheme.transparent,
+                      CmTheme.cameraControlsOverlay,
                     ],
                   ),
                 ),
@@ -857,10 +822,10 @@ if (!mounted) return;
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text(
+                      Text(
                         'Keep the sheet flat and well lit',
                         style: TextStyle(
-                          color: Colors.white70,
+                          color: CmTheme.mutedOnNavy,
                           fontSize: 13,
                         ),
                       ),
@@ -880,9 +845,9 @@ if (!mounted) return;
                             ),
                             label: const Text('Gallery'),
                             style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.white,
-                              side: const BorderSide(
-                                color: Colors.white38,
+                              foregroundColor: CmTheme.surfaceWhite,
+                              side: BorderSide(
+                                color: CmTheme.cameraActionBorder,
                               ),
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 16,
@@ -896,24 +861,20 @@ if (!mounted) return;
 
                           // Shutter button
                           GestureDetector(
-                            onTap: _isTakingPicture
-                                ? null
-                                : _takePicture,
+                            onTap: _isTakingPicture ? null : _takePicture,
                             child: Container(
                               width: 78,
                               height: 78,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                color: Colors.white,
+                                color: CmTheme.surfaceWhite,
                                 border: Border.all(
-                                  color: _kEmerald,
+                                  color: CmTheme.navy,
                                   width: 4,
                                 ),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: Colors.black.withValues(
-                                      alpha: 0.4,
-                                    ),
+                                    color: CmTheme.cameraShutterShadow,
                                     blurRadius: 10,
                                   ),
                                 ],
@@ -922,12 +883,12 @@ if (!mounted) return;
                                   ? const Padding(
                                       padding: EdgeInsets.all(20),
                                       child: CircularProgressIndicator(
-                                        color: _kNavy,
+                                        color: CmTheme.navy,
                                       ),
                                     )
                                   : const Icon(
                                       Icons.camera_alt_rounded,
-                                      color: _kNavyDark,
+                                      color: CmTheme.navy,
                                       size: 32,
                                     ),
                             ),
@@ -960,24 +921,23 @@ if (!mounted) return;
           children: [
             const Icon(
               Icons.no_photography_outlined,
-              color: Colors.white,
+              color: CmTheme.redDanger,
               size: 64,
             ),
             const SizedBox(height: 16),
             const Text(
               'Camera unavailable',
               style: TextStyle(
-                color: Colors.white,
+                color: CmTheme.surfaceWhite,
                 fontSize: 20,
                 fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 8),
             Text(
-              _errorMessage ??
-                  'Unable to access the camera. You can still pick a photo from your device gallery.',
+              _errorMessage ?? 'Unable to access the camera. You can still pick a photo from your device gallery.',
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white70),
+              style: TextStyle(color: CmTheme.mutedOnNavy),
             ),
             const SizedBox(height: 24),
 
@@ -997,8 +957,8 @@ if (!mounted) return;
                     _initializeCamera();
                   },
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: const BorderSide(color: Colors.white54),
+                    foregroundColor: CmTheme.surfaceWhite,
+                    side: BorderSide(color: CmTheme.cameraRetryBorder),
                   ),
                   icon: const Icon(Icons.refresh),
                   label: const Text('Try Camera Again'),
@@ -1007,8 +967,8 @@ if (!mounted) return;
                 FilledButton.icon(
                   onPressed: _chooseFromGallery,
                   style: FilledButton.styleFrom(
-                    backgroundColor: _kNavy,
-                    foregroundColor: Colors.white,
+                    backgroundColor: CmTheme.navy,
+                    foregroundColor: CmTheme.surfaceWhite,
                   ),
                   icon: const Icon(Icons.photo_library_outlined),
                   label: const Text('Pick from Gallery'),
@@ -1027,38 +987,33 @@ if (!mounted) return;
 
   Widget _buildReviewScreen() {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: CmTheme.navy,
       appBar: AppBar(
-        backgroundColor: _kNavyDark,
-        foregroundColor: Colors.white,
+        backgroundColor: CmTheme.navy,
+        foregroundColor: CmTheme.surfaceWhite,
         title: const Text(
           'Review Captured Sheet',
-          style: TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 17,
-          ),
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17),
         ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: ActionChip(
               avatar: Icon(
-                _zoomScale > 1.0
-                    ? Icons.zoom_out
-                    : Icons.zoom_in,
+                _zoomScale > 1.0 ? Icons.zoom_out : Icons.zoom_in,
                 size: 18,
-                color: Colors.white,
+                color: CmTheme.surfaceWhite,
               ),
               label: Text(
                 _zoomScale > 1.0 ? '2x Zoom' : '1x / 2x',
                 style: const TextStyle(
-                  color: Colors.white,
+                  color: CmTheme.surfaceWhite,
                   fontWeight: FontWeight.w700,
                   fontSize: 12.5,
                 ),
               ),
-              backgroundColor: _kNavy,
-              side: const BorderSide(color: Colors.white24),
+              backgroundColor: CmTheme.navy,
+              side: BorderSide(color: CmTheme.translucentOnNavy),
               onPressed: _toggleInspectZoom,
             ),
           ),
@@ -1092,18 +1047,16 @@ if (!mounted) return;
                         vertical: 8,
                       ),
                       decoration: BoxDecoration(
-                        color: _kNavyDark.withValues(alpha: 0.85),
+                        color: CmTheme.cameraInfoOverlay,
                         borderRadius: BorderRadius.circular(999),
-                        border: Border.all(color: Colors.white24),
+                        border: Border.all(color: CmTheme.translucentOnNavy),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            _zoomScale > 1.0
-                                ? Icons.zoom_out
-                                : Icons.zoom_in,
-                            color: Colors.white,
+                            _zoomScale > 1.0 ? Icons.zoom_out : Icons.zoom_in,
+                            color: CmTheme.surfaceWhite,
                             size: 18,
                           ),
                           const SizedBox(width: 6),
@@ -1112,7 +1065,7 @@ if (!mounted) return;
                                 ? 'Inspecting at 2x • Tap for 1x'
                                 : 'Tap to toggle 1x / 2x zoom',
                             style: const TextStyle(
-                              color: Colors.white,
+                              color: CmTheme.surfaceWhite,
                               fontSize: 12.5,
                               fontWeight: FontWeight.w600,
                             ),
@@ -1130,10 +1083,8 @@ if (!mounted) return;
           Container(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
             decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(
-                top: Radius.circular(24),
-              ),
+              color: CmTheme.surfaceWhite,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
             ),
             child: SafeArea(
               top: false,
@@ -1148,8 +1099,8 @@ if (!mounted) return;
                         style: TextStyle(fontWeight: FontWeight.w700),
                       ),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: _kNavy,
-                        side: const BorderSide(color: _kSlate),
+                        foregroundColor: CmTheme.navy,
+                        side: const BorderSide(color: CmTheme.slateText),
                         padding: const EdgeInsets.symmetric(vertical: 15),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
@@ -1163,17 +1114,15 @@ if (!mounted) return;
                   Expanded(
                     flex: 2,
                     child: FilledButton.icon(
-                      onPressed: _isProcessing
-                          ? null
-                          : _openUploadVerification,
+                      onPressed: _isProcessing ? null : _openUploadVerification,
                       icon: const Icon(Icons.arrow_forward),
                       label: const Text(
                         'Review & Process',
                         style: TextStyle(fontWeight: FontWeight.w700),
                       ),
                       style: FilledButton.styleFrom(
-                        backgroundColor: _kNavyDark,
-                        foregroundColor: Colors.white,
+                        backgroundColor: CmTheme.navy,
+                        foregroundColor: CmTheme.surfaceWhite,
                         padding: const EdgeInsets.symmetric(vertical: 15),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
@@ -1206,26 +1155,15 @@ class ScannerOverlayPainter extends CustomPainter {
     final double left = (size.width - frameWidth) / 2;
     final double top = (size.height - frameHeight) / 2;
 
-    final Rect frame = Rect.fromLTWH(
-      left,
-      top,
-      frameWidth,
-      frameHeight,
-    );
+    final Rect frame = Rect.fromLTWH(left, top, frameWidth, frameHeight);
 
-    final Paint overlayPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.55);
+    final Paint overlayPaint = Paint()..color = CmTheme.cameraFrameOverlay;
 
     final Path outsidePath = Path()
       ..addRect(Rect.fromLTWH(0, 0, size.width, size.height));
 
     final Path framePath = Path()
-      ..addRRect(
-        RRect.fromRectAndRadius(
-          frame,
-          const Radius.circular(12),
-        ),
-      );
+      ..addRRect(RRect.fromRectAndRadius(frame, const Radius.circular(12)));
 
     final Path overlayPath = Path.combine(
       PathOperation.difference,
@@ -1236,20 +1174,17 @@ class ScannerOverlayPainter extends CustomPainter {
     canvas.drawPath(overlayPath, overlayPaint);
 
     final Paint framePaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.8)
+      ..color = CmTheme.cameraFrameBorder
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
 
     canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        frame,
-        const Radius.circular(12),
-      ),
+      RRect.fromRectAndRadius(frame, const Radius.circular(12)),
       framePaint,
     );
 
     final Paint cornerPaint = Paint()
-      ..color = _kEmerald
+      ..color = CmTheme.surfaceWhite
       ..style = PaintingStyle.stroke
       ..strokeWidth = 5
       ..strokeCap = StrokeCap.round;

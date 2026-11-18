@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 
@@ -35,9 +36,7 @@ class _AnswerSheetPreviewScreenState extends State<AnswerSheetPreviewScreen> {
   Future<void> _loadAnswerSheet() async {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('LOAD ANSWER SHEET WAS CALLED'),
-        ),
+        const SnackBar(content: Text('LOAD ANSWER SHEET WAS CALLED')),
       );
     }
     setState(() {
@@ -64,20 +63,14 @@ class _AnswerSheetPreviewScreenState extends State<AnswerSheetPreviewScreen> {
 
       final examSummary = matchingExams.first;
 
-      final detailedExam = await ApiService.getExamById(
-        token,
-        widget.examId,
-      );
+      final detailedExam = await ApiService.getExamById(token, widget.examId);
 
       final exam = detailedExam ?? examSummary;
       print('EXAM DATA: $exam');
       // Load class and subject information for the PDF header.
       final classesFuture = ApiService.getClasses(token);
       final subjectsFuture = ApiService.getSubjects(token);
-      final sectionsFuture = ApiService.getExamSections(
-        token,
-        widget.examId,
-      );
+      final sectionsFuture = ApiService.getExamSections(token, widget.examId);
 
       final classes = await classesFuture;
       final subjects = await subjectsFuture;
@@ -175,20 +168,20 @@ class _AnswerSheetPreviewScreenState extends State<AnswerSheetPreviewScreen> {
   }
 
   Future<Uint8List> _generatePdf() async {
-  final exam = _exam;
+    final exam = _exam;
 
-  if (exam == null) throw Exception('Exam not loaded.');
+    if (exam == null) throw Exception('Exam not loaded.');
 
-  print('GENERATING PDF SUBJECTS: ${exam['header_subjects']}');
-  print('GENERATING PDF CLASSES: ${exam['header_classes']}');
+    print('GENERATING PDF SUBJECTS: ${exam['header_subjects']}');
+    print('GENERATING PDF CLASSES: ${exam['header_classes']}');
 
-  return AnswerSheetPdfService.generate(
-    exam: exam,
-    sections: _sections,
-    questions: _questions,
-    students: _students,
-  );
-}
+    return AnswerSheetPdfService.generate(
+      exam: exam,
+      sections: _sections,
+      questions: _questions,
+      students: _students,
+    );
+  }
 
   String _fileName() {
     final title = (_exam?['title']?.toString() ?? 'exam')
@@ -205,7 +198,10 @@ class _AnswerSheetPreviewScreenState extends State<AnswerSheetPreviewScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        CmTheme.feedbackSnackBar(
+          e.toString().replaceFirst('Exception: ', ''),
+          color: CmTheme.redDanger,
+        ),
       );
     }
   }
@@ -217,7 +213,10 @@ class _AnswerSheetPreviewScreenState extends State<AnswerSheetPreviewScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        CmTheme.feedbackSnackBar(
+          e.toString().replaceFirst('Exception: ', ''),
+          color: CmTheme.redDanger,
+        ),
       );
     }
   }
@@ -234,9 +233,17 @@ class _AnswerSheetPreviewScreenState extends State<AnswerSheetPreviewScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, size: 48),
+              const Icon(
+                Icons.error_outline,
+                size: 48,
+                color: CmTheme.redDanger,
+              ),
               const SizedBox(height: 16),
-              Text(_errorMessage!, textAlign: TextAlign.center),
+              Text(
+                _errorMessage!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: CmTheme.redDanger),
+              ),
               const SizedBox(height: 16),
               ElevatedButton(
                 onPressed: _loadAnswerSheet,

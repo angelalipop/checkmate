@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -11,12 +12,10 @@ import '../services/academic_api_service.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import '../services/student_import_service.dart';
-import 'login_screen.dart' show CmColors;
 
 enum _Stage { pick, reading, review, importing, done }
 
 /// Muted green for success states (not neon).
-const Color _ok = Color(0xFF2F8F72);
 
 /// Step-by-step Excel import:
 /// 1 Choose file -> 2 Review -> 3 Import -> 4 Done.
@@ -923,7 +922,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
             actions: [
               FilledButton(
                 onPressed: () => Navigator.pop(ctx),
-                style: FilledButton.styleFrom(backgroundColor: CmColors.navy),
+                style: FilledButton.styleFrom(backgroundColor: CmTheme.navy),
                 child: const Text('OK'),
               ),
             ],
@@ -1041,7 +1040,10 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
         shape: _dialogShape,
         title: Row(
           children: [
-            const Icon(Icons.warning_amber_rounded, color: CmColors.amber),
+            const Icon(
+              Icons.warning_amber_rounded,
+              color: CmTheme.amberWarning,
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -1073,7 +1075,10 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
               if (dupes.length > preview.length)
                 Text(
                   '…and ${dupes.length - preview.length} more',
-                  style: const TextStyle(fontSize: 13, color: CmColors.slate),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: CmTheme.slateText,
+                  ),
                 ),
             ],
           ),
@@ -1085,7 +1090,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: CmColors.navy),
+            style: FilledButton.styleFrom(backgroundColor: CmTheme.navy),
             child: const Text('Skip Existing'),
           ),
         ],
@@ -1101,8 +1106,8 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: _dialogShape,
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.transparent,
+        backgroundColor: CmTheme.surfaceWhite,
+        surfaceTintColor: CmTheme.transparent,
         title: const Text(
           'Confirm import',
           style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
@@ -1117,7 +1122,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                 Text(
                   'This will add ${plan.studentsToAdd} '
                   'student${plan.studentsToAdd == 1 ? '' : 's'}.',
-                  style: const TextStyle(color: CmColors.slate),
+                  style: const TextStyle(color: CmTheme.slateText),
                 ),
                 const SizedBox(height: 12),
                 for (final s in plan.sections.where((s) => s.toAdd.isNotEmpty))
@@ -1125,9 +1130,9 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: CmTheme.surfaceWhite,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: CmColors.line),
+                      border: Border.all(color: CmTheme.lineBorder),
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1135,7 +1140,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                         const Icon(
                           Icons.menu_book_outlined,
                           size: 18,
-                          color: CmColors.slate,
+                          color: CmTheme.slateText,
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -1147,7 +1152,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                                 style: const TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w600,
-                                  color: CmColors.navy,
+                                  color: CmTheme.navy,
                                 ),
                               ),
                               Text(
@@ -1155,7 +1160,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                                 '${s.toAdd.length == 1 ? '' : 's'}',
                                 style: const TextStyle(
                                   fontSize: 13,
-                                  color: CmColors.slate,
+                                  color: CmTheme.slateText,
                                 ),
                               ),
                             ],
@@ -1167,7 +1172,10 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                 Center(
                   child: Text(
                     '$_semester • $_schoolYear',
-                    style: const TextStyle(fontSize: 13, color: CmColors.slate),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: CmTheme.slateText,
+                    ),
                   ),
                 ),
                 if (skippedRows > 0) ...[
@@ -1175,7 +1183,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                   Text(
                     '$skippedRows row${skippedRows == 1 ? '' : 's'} with '
                     'problems will be skipped.',
-                    style: const TextStyle(fontSize: 13, color: CmColors.amber),
+                    style: const TextStyle(fontSize: 13, color: CmTheme.navy),
                   ),
                 ],
               ],
@@ -1185,13 +1193,13 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            style: TextButton.styleFrom(foregroundColor: CmColors.navy),
+            style: TextButton.styleFrom(foregroundColor: CmTheme.navy),
             child: const Text('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(
-              backgroundColor: CmColors.navy,
+              backgroundColor: CmTheme.navy,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
               ),
@@ -1241,7 +1249,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
     return PopScope(
       canPop: _stage != _Stage.importing,
       child: Scaffold(
-        backgroundColor: CmColors.bg,
+        backgroundColor: CmTheme.background,
         appBar: AppBar(
           title: const Text('Import Students'),
           automaticallyImplyLeading: _stage != _Stage.importing,
@@ -1336,20 +1344,23 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: CmTheme.surfaceWhite,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: CmColors.line),
+              border: Border.all(color: CmTheme.lineBorder),
             ),
             child: Row(
               children: [
-                const Icon(Icons.class_outlined, color: CmColors.slate),
+                const Icon(Icons.class_outlined, color: CmTheme.slateText),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     'Adding students to ${widget.initialSection}. Each '
                     'student goes to the section in the file’s Section '
                     'column, which must be assigned to you.',
-                    style: const TextStyle(color: CmColors.slate, fontSize: 13),
+                    style: const TextStyle(
+                      color: CmTheme.slateText,
+                      fontSize: 13,
+                    ),
                   ),
                 ),
               ],
@@ -1359,11 +1370,11 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
         ],
         Card(
           elevation: 1,
-          shadowColor: const Color(0x1A000000),
-          color: Colors.white,
+          shadowColor: CmTheme.importCardShadow,
+          color: CmTheme.surfaceWhite,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
-            side: const BorderSide(color: CmColors.line),
+            side: const BorderSide(color: CmTheme.lineBorder),
           ),
           child: Padding(
             padding: const EdgeInsets.all(20),
@@ -1375,13 +1386,13 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                     width: 58,
                     height: 58,
                     decoration: BoxDecoration(
-                      color: CmColors.bg,
+                      color: CmTheme.background,
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: const Icon(
                       Icons.upload_file_outlined,
                       size: 28,
-                      color: CmColors.navy,
+                      color: CmTheme.navy,
                     ),
                   ),
                 ),
@@ -1398,7 +1409,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                   'as an .xlsx file named "Section and Full Subject Name"—or '
                   'simply use the provided Excel template.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: CmColors.slate),
+                  style: TextStyle(color: CmTheme.slateText),
                 ),
                 const SizedBox(height: 14),
                 _formatPreview(),
@@ -1408,7 +1419,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                   child: FilledButton.icon(
                     onPressed: _busy ? null : _pickFile,
                     style: FilledButton.styleFrom(
-                      backgroundColor: CmColors.navy,
+                      backgroundColor: CmTheme.navy,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -1426,8 +1437,8 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                   child: OutlinedButton.icon(
                     onPressed: _busy ? null : _downloadTemplate,
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: CmColors.navy,
-                      side: const BorderSide(color: CmColors.line),
+                      foregroundColor: CmTheme.navy,
+                      side: const BorderSide(color: CmTheme.lineBorder),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -1459,18 +1470,18 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
         decoration: BoxDecoration(
           color: head
-              ? CmColors.navy
+              ? CmTheme.navy
               : fill
-              ? const Color(0xFFFEF9C3)
-              : Colors.white,
-          border: Border.all(color: CmColors.line),
+              ? CmTheme.lineBorder
+              : CmTheme.surfaceWhite,
+          border: Border.all(color: CmTheme.lineBorder),
         ),
         child: Text(
           t,
           style: TextStyle(
             fontSize: 12,
             fontWeight: head ? FontWeight.w700 : FontWeight.w400,
-            color: head ? Colors.white : CmColors.navy,
+            color: head ? CmTheme.surfaceWhite : CmTheme.navy,
           ),
         ),
       ),
@@ -1509,22 +1520,22 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFFFEF2F2),
+        color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFFECACA)),
+        border: Border.all(color: CmTheme.redDanger),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.error_outline, color: Color(0xFFDC2626)),
+              const Icon(Icons.error_outline, color: CmTheme.redDanger),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   _errorTitle ?? 'Unable to import students.',
                   style: const TextStyle(
-                    color: Color(0xFFDC2626),
+                    color: CmTheme.redDanger,
                     fontWeight: FontWeight.w700,
                     fontSize: 16,
                   ),
@@ -1536,7 +1547,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
             const SizedBox(height: 8),
             Text(
               _errorMessage!,
-              style: const TextStyle(color: Color(0xFF7F1D1D)),
+              style: const TextStyle(color: CmTheme.redDanger),
             ),
           ],
           for (final c in _missingColumns)
@@ -1545,7 +1556,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
               child: Text(
                 '• $c',
                 style: const TextStyle(
-                  color: Color(0xFF7F1D1D),
+                  color: CmTheme.redDanger,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -1569,11 +1580,11 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
       children: [
         Card(
           elevation: 1,
-          shadowColor: const Color(0x1A000000),
-          color: Colors.white,
+          shadowColor: CmTheme.importCardShadow,
+          color: CmTheme.surfaceWhite,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
-            side: const BorderSide(color: CmColors.line),
+            side: const BorderSide(color: CmTheme.lineBorder),
           ),
           child: Padding(
             padding: const EdgeInsets.all(20),
@@ -1584,7 +1595,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                   children: [
                     const Icon(
                       Icons.description_outlined,
-                      color: CmColors.slate,
+                      color: CmTheme.slateText,
                       size: 20,
                     ),
                     const SizedBox(width: 8),
@@ -1592,7 +1603,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                       child: Text(
                         _fileName ?? '',
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: CmColors.slate),
+                        style: const TextStyle(color: CmTheme.slateText),
                       ),
                     ),
                     TextButton(
@@ -1608,18 +1619,18 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.w700,
-                    color: CmColors.navy,
+                    color: CmTheme.navy,
                   ),
                 ),
                 Text(
                   '${sections.length} section'
                   '${sections.length == 1 ? '' : 's'} detected',
-                  style: const TextStyle(color: CmColors.slate),
+                  style: const TextStyle(color: CmTheme.slateText),
                 ),
                 const SizedBox(height: 10),
                 _fileSubjectRow(parsed.subject),
                 const SizedBox(height: 14),
-                const Divider(height: 1, color: CmColors.line),
+                const Divider(height: 1, color: CmTheme.lineBorder),
                 const SizedBox(height: 10),
                 for (final e in sections.entries)
                   Padding(
@@ -1628,7 +1639,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                       children: [
                         const Icon(
                           Icons.check_circle_outline,
-                          color: _ok,
+                          color: CmTheme.emeraldSuccess,
                           size: 20,
                         ),
                         const SizedBox(width: 10),
@@ -1644,7 +1655,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                         Text(
                           '${e.value.length} student'
                           '${e.value.length == 1 ? '' : 's'}',
-                          style: const TextStyle(color: CmColors.slate),
+                          style: const TextStyle(color: CmTheme.slateText),
                         ),
                       ],
                     ),
@@ -1673,22 +1684,22 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
       text = current == null
           ? 'No subject found in the file.'
           : 'Subject: ${_catalogLabel(current)}';
-      icon = Icons.check_circle_outline;
-      color = _ok;
+      icon = current == null ? Icons.info_outline : Icons.check_circle_outline;
+      color = current == null ? CmTheme.slateText : CmTheme.emeraldSuccess;
     } else if (_matchingSubject) {
       text = 'Subject: $fileSubject (checking Academic Management…)';
       icon = Icons.hourglass_empty;
-      color = CmColors.slate;
+      color = CmTheme.slateText;
     } else if (_subjectNotFound != null) {
       text = 'Subject "$fileSubject" was not found in Academic Management.';
       icon = Icons.warning_amber_rounded;
-      color = const Color(0xFF92400E);
+      color = CmTheme.amberWarning;
     } else {
       final matched = _selectedSubject;
       text =
           'Subject: ${matched == null ? fileSubject : _catalogLabel(matched)}';
       icon = Icons.check_circle_outline;
-      color = _ok;
+      color = CmTheme.emeraldSuccess;
     }
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1701,7 +1712,9 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
             style: TextStyle(
               fontWeight: FontWeight.w600,
               fontSize: 14,
-              color: color == CmColors.slate ? CmColors.slate : CmColors.navy,
+              color: color == CmTheme.slateText
+                  ? CmTheme.slateText
+                  : CmTheme.navy,
             ),
           ),
         ),
@@ -1714,16 +1727,19 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFFBEB),
+        color: CmTheme.background,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFFDE68A)),
+        border: Border.all(color: CmTheme.amberWarning),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.warning_amber_rounded, color: CmColors.amber),
+              const Icon(
+                Icons.warning_amber_rounded,
+                color: CmTheme.amberWarning,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -1731,7 +1747,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                   'will be skipped',
                   style: const TextStyle(
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF92400E),
+                    color: CmTheme.navy,
                   ),
                 ),
               ),
@@ -1743,19 +1759,19 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
                 'Row ${i.rowNumber}: ${i.message}',
-                style: const TextStyle(fontSize: 13, color: Color(0xFF78350F)),
+                style: const TextStyle(fontSize: 13, color: CmTheme.navy),
               ),
             ),
           if (issues.length > shown.length)
             Text(
               '…and ${issues.length - shown.length} more',
-              style: const TextStyle(fontSize: 13, color: Color(0xFF78350F)),
+              style: const TextStyle(fontSize: 13, color: CmTheme.navy),
             ),
           const SizedBox(height: 6),
           const Text(
             'Fix these rows in Excel and re-upload, or continue to import '
             'only the valid rows.',
-            style: TextStyle(fontSize: 12, color: Color(0xFF92400E)),
+            style: TextStyle(fontSize: 12, color: CmTheme.navy),
           ),
         ],
       ),
@@ -1764,24 +1780,24 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
 
   InputDecoration _dec(String label, IconData icon) => InputDecoration(
     labelText: label,
-    prefixIcon: Icon(icon, color: CmColors.slate),
+    prefixIcon: Icon(icon, color: CmTheme.slateText),
     filled: true,
-    fillColor: CmColors.bg,
+    fillColor: CmTheme.background,
     border: OutlineInputBorder(
       borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: CmColors.line),
+      borderSide: const BorderSide(color: CmTheme.lineBorder),
     ),
     enabledBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: CmColors.line),
+      borderSide: const BorderSide(color: CmTheme.lineBorder),
     ),
     disabledBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: CmColors.line),
+      borderSide: const BorderSide(color: CmTheme.lineBorder),
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: CmColors.navy, width: 1.5),
+      borderSide: const BorderSide(color: CmTheme.navy, width: 1.5),
     ),
   );
 
@@ -1795,7 +1811,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
       child: Text(
         value,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 16, color: CmColors.navy),
+        style: const TextStyle(fontSize: 16, color: CmTheme.navy),
       ),
     );
   }
@@ -1805,11 +1821,11 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
 
     return Card(
       elevation: 1,
-      shadowColor: const Color(0x1A000000),
-      color: Colors.white,
+      shadowColor: CmTheme.importCardShadow,
+      color: CmTheme.surfaceWhite,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
-        side: const BorderSide(color: CmColors.line),
+        side: const BorderSide(color: CmTheme.lineBorder),
       ),
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -1823,7 +1839,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
             const SizedBox(height: 4),
             const Text(
               'Review these details. They will apply to all imported students.',
-              style: TextStyle(color: CmColors.slate, fontSize: 13),
+              style: TextStyle(color: CmTheme.slateText, fontSize: 13),
             ),
             const SizedBox(height: 16),
             if (_lookupError != null) ...[
@@ -1834,7 +1850,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
               const SizedBox(height: 12),
             ],
             if (_loadingSubjects) ...[
-              const LinearProgressIndicator(color: CmColors.navy),
+              const LinearProgressIndicator(color: CmTheme.navy),
               const SizedBox(height: 12),
             ],
             if (options.length <= 1 && _selectedSubject != null)
@@ -1910,8 +1926,8 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
       decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: CmColors.line)),
+        color: CmTheme.surfaceWhite,
+        border: Border(top: BorderSide(color: CmTheme.lineBorder)),
       ),
       child: SafeArea(
         top: false,
@@ -1923,8 +1939,8 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                 child: OutlinedButton(
                   onPressed: _busy ? null : () => Navigator.pop(context),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: CmColors.navy,
-                    side: const BorderSide(color: CmColors.line),
+                    foregroundColor: CmTheme.navy,
+                    side: const BorderSide(color: CmTheme.lineBorder),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -1943,7 +1959,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                 child: FilledButton(
                   onPressed: _busy ? null : _startImport,
                   style: FilledButton.styleFrom(
-                    backgroundColor: CmColors.navy,
+                    backgroundColor: CmTheme.navy,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -1954,7 +1970,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                           height: 22,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: Colors.white,
+                            color: CmTheme.surfaceWhite,
                           ),
                         )
                       : const Text(
@@ -1981,11 +1997,11 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
       children: [
         Card(
           elevation: 1,
-          shadowColor: const Color(0x1A000000),
-          color: Colors.white,
+          shadowColor: CmTheme.importCardShadow,
+          color: CmTheme.surfaceWhite,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
-            side: const BorderSide(color: CmColors.line),
+            side: const BorderSide(color: CmTheme.lineBorder),
           ),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(32, 28, 32, 28),
@@ -1996,14 +2012,14 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
-                    color: CmColors.navy,
+                    color: CmTheme.navy,
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   'Adding $_total student${_total == 1 ? '' : 's'} '
                   'to $_classCount class${_classCount == 1 ? '' : 'es'}.',
-                  style: const TextStyle(color: CmColors.slate),
+                  style: const TextStyle(color: CmTheme.slateText),
                 ),
                 const SizedBox(height: 22),
                 ClipRRect(
@@ -2011,8 +2027,8 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                   child: LinearProgressIndicator(
                     value: value,
                     minHeight: 10,
-                    color: _ok,
-                    backgroundColor: CmColors.line,
+                    color: CmTheme.slateText,
+                    backgroundColor: CmTheme.lineBorder,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -2020,13 +2036,13 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                   '$percent%',
                   style: const TextStyle(
                     fontWeight: FontWeight.w600,
-                    color: CmColors.navy,
+                    color: CmTheme.navy,
                   ),
                 ),
                 const SizedBox(height: 8),
                 const Text(
                   'Please keep this screen open.',
-                  style: TextStyle(color: CmColors.slate, fontSize: 13),
+                  style: TextStyle(color: CmTheme.slateText, fontSize: 13),
                 ),
               ],
             ),
@@ -2042,18 +2058,22 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
     final r = _result!;
     final failed = r.failures;
     final allFailed = r.studentsAdded == 0;
-    final accent = allFailed ? const Color(0xFFDC2626) : _ok;
+    final accent = allFailed
+        ? CmTheme.redDanger
+        : failed.isEmpty
+        ? CmTheme.emeraldSuccess
+        : CmTheme.amberWarning;
 
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
         Card(
           elevation: 1,
-          shadowColor: const Color(0x1A000000),
-          color: Colors.white,
+          shadowColor: CmTheme.importCardShadow,
+          color: CmTheme.surfaceWhite,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
-            side: const BorderSide(color: CmColors.line),
+            side: const BorderSide(color: CmTheme.lineBorder),
           ),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(32, 32, 32, 32),
@@ -2064,12 +2084,16 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                   height: 70,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: accent.withValues(alpha: 0.14),
+                    color: allFailed
+                        ? CmTheme.surfaceWhite
+                        : accent.withValues(alpha: 0.14),
                   ),
                   child: Icon(
                     allFailed
                         ? Icons.error_outline
-                        : Icons.check_circle_outline,
+                        : failed.isEmpty
+                        ? Icons.check_circle_outline
+                        : Icons.warning_amber_rounded,
                     size: 36,
                     color: accent,
                   ),
@@ -2085,7 +2109,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.w700,
-                    color: CmColors.navy,
+                    color: CmTheme.navy,
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -2093,7 +2117,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                   '${r.studentsAdded} student${r.studentsAdded == 1 ? '' : 's'} '
                   'added across $_classCount class${_classCount == 1 ? '' : 'es'}.',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: CmColors.slate),
+                  style: const TextStyle(color: CmTheme.slateText),
                 ),
                 if (failed.isNotEmpty) ...[
                   const SizedBox(height: 20),
@@ -2101,9 +2125,9 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFEF2F2),
+                      color: CmTheme.surfaceWhite,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFFECACA)),
+                      border: Border.all(color: CmTheme.redDanger),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2112,7 +2136,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                           '${failed.length} student${failed.length == 1 ? '' : 's'} '
                           'could not be added:',
                           style: const TextStyle(
-                            color: Color(0xFFDC2626),
+                            color: CmTheme.redDanger,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -2124,7 +2148,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                               'Row ${f.rowNumber}: ${f.message}',
                               style: const TextStyle(
                                 fontSize: 13,
-                                color: Color(0xFF7F1D1D),
+                                color: CmTheme.redDanger,
                               ),
                             ),
                           ),
@@ -2133,7 +2157,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                             '…and ${failed.length - 10} more',
                             style: const TextStyle(
                               fontSize: 13,
-                              color: Color(0xFF7F1D1D),
+                              color: CmTheme.redDanger,
                             ),
                           ),
                       ],
@@ -2146,7 +2170,7 @@ class _ImportStudentsScreenState extends State<ImportStudentsScreen> {
                   child: FilledButton(
                     onPressed: () => Navigator.pop(context, true),
                     style: FilledButton.styleFrom(
-                      backgroundColor: CmColors.navy,
+                      backgroundColor: CmTheme.navy,
                       padding: const EdgeInsets.symmetric(horizontal: 32),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -2180,7 +2204,7 @@ class _StepIndicator extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: CmColors.line)),
+        border: Border(bottom: BorderSide(color: CmTheme.lineBorder)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Center(
@@ -2191,7 +2215,7 @@ class _StepIndicator extends StatelessWidget {
               IconButton(
                 tooltip: 'Back',
                 icon: const Icon(Icons.arrow_back, size: 20),
-                color: CmColors.navy,
+                color: CmTheme.navy,
                 onPressed: onBack,
               ),
               const SizedBox(width: 4),
@@ -2205,7 +2229,7 @@ class _StepIndicator extends StatelessWidget {
                     fontWeight: i == current
                         ? FontWeight.w700
                         : FontWeight.w500,
-                    color: i <= current ? CmColors.navy : CmColors.slate,
+                    color: i <= current ? CmTheme.navy : CmTheme.slateText,
                   ),
                 ),
                 if (i < _labels.length - 1)
@@ -2213,7 +2237,7 @@ class _StepIndicator extends StatelessWidget {
                     child: Container(
                       height: 1.5,
                       margin: const EdgeInsets.symmetric(horizontal: 10),
-                      color: i < current ? CmColors.navy : CmColors.line,
+                      color: i < current ? CmTheme.navy : CmTheme.lineBorder,
                     ),
                   ),
               ],
@@ -2233,20 +2257,20 @@ class _StepIndicator extends StatelessWidget {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: done || active ? CmColors.navy : Colors.white,
+        color: done || active ? CmTheme.navy : CmTheme.surfaceWhite,
         border: Border.all(
-          color: done || active ? CmColors.navy : CmColors.line,
+          color: done || active ? CmTheme.navy : CmTheme.lineBorder,
           width: 1.5,
         ),
       ),
       child: done
-          ? const Icon(Icons.check, size: 16, color: Colors.white)
+          ? const Icon(Icons.check, size: 16, color: CmTheme.surfaceWhite)
           : Text(
               '${i + 1}',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
-                color: active ? Colors.white : CmColors.slate,
+                color: active ? CmTheme.surfaceWhite : CmTheme.slateText,
               ),
             ),
     );

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:file_selector/file_selector.dart';
 import 'package:image_picker/image_picker.dart' as image_picker;
 import 'package:flutter/foundation.dart' show kIsWeb, TargetPlatform;
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
@@ -13,6 +14,7 @@ import 'package:flutter/foundation.dart'
     show kIsWeb, defaultTargetPlatform, TargetPlatform;
 
 import 'package:checkmate/services/answer_sheet_processor.dart';
+
 import '../services/answer_sheet_layout.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
@@ -26,16 +28,6 @@ import 'teacher_dashboard.dart' show TeacherPage, TeacherShell;
 // =============================================================
 // Brand Palette & Visual Tokens
 // =============================================================
-const Color _kNavy = Color(0xFF1E293B);
-const Color _kNavyDark = Color(0xFF162137);
-const Color _kSlate = Color(0xFF64748B);
-const Color _kBg = Color(0xFFF8FAFC);
-const Color _kLine = Color(0xFFE2E8F0);
-const Color _kEmerald = Color(0xFF10B981);
-const Color _kEmeraldDark = Color(0xFF047857);
-const Color _kAmber = Color(0xFFF59E0B);
-const Color _kAmberDark = Color(0xFF92400E);
-const Color _kRed = Color(0xFFB91C1C);
 
 class _UpperCaseFormatter extends TextInputFormatter {
   const _UpperCaseFormatter();
@@ -111,12 +103,15 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   @override
   void initState() {
     super.initState();
-    _exam = widget.exam != null ? Map<String, dynamic>.from(widget.exam!) : null;
+    _exam = widget.exam != null
+        ? Map<String, dynamic>.from(widget.exam!)
+        : null;
     _students = widget.students
         .map((s) => Map<String, dynamic>.from(s))
         .toList();
     _imageBytes = widget.initialImageBytes;
-    _fileName = widget.initialFileName ??
+    _fileName =
+        widget.initialFileName ??
         (widget.initialImageBytes != null ? 'Camera capture.jpg' : null);
 
     if (_imageBytes != null) {
@@ -216,13 +211,11 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
             ),
             actions: [
               TextButton(
-                onPressed: () =>
-                    Navigator.pop(dialogContext, false),
+                onPressed: () => Navigator.pop(dialogContext, false),
                 child: const Text('Cancel'),
               ),
               FilledButton(
-                onPressed: () =>
-                    Navigator.pop(dialogContext, true),
+                onPressed: () => Navigator.pop(dialogContext, true),
                 child: const Text('Continue'),
               ),
             ],
@@ -246,10 +239,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         const XTypeGroup imageTypeGroup = XTypeGroup(
           label: 'Images',
           extensions: ['jpg', 'jpeg', 'png'],
-          uniformTypeIdentifiers: [
-            'public.jpeg',
-            'public.png',
-          ],
+          uniformTypeIdentifiers: ['public.jpeg', 'public.png'],
         );
 
         final XFile? file = await openFile(
@@ -281,14 +271,13 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Unable to select image: $e'),
+        CmTheme.feedbackSnackBar(
+          'Unable to select image: $e',
+          color: CmTheme.redDanger,
         ),
       );
     }
   }
-
-
 
   Future<void> _openCameraCapture() async {
     final int? eid = int.tryParse('${widget.examId ?? _exam?['id'] ?? ''}');
@@ -347,11 +336,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: _kNavyDark,
-          content: Text(
-            'Answer sheet aligned, 4 corner markers detected, and 1-to-1 assessment verified.',
-          ),
+        CmTheme.feedbackSnackBar(
+          'Answer sheet aligned, 4 corner markers detected, and 1-to-1 assessment verified.',
+          color: CmTheme.emeraldSuccess,
         ),
       );
     } catch (e) {
@@ -362,11 +349,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: _kRed,
-          content: Text(
-            'Processing failed: ${e.toString().replaceFirst('Exception: ', '')}',
-          ),
+        CmTheme.feedbackSnackBar(
+          'Processing failed: ${e.toString().replaceFirst('Exception: ', '')}',
+          color: CmTheme.redDanger,
           duration: const Duration(seconds: 5),
         ),
       );
@@ -381,8 +366,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
     final alignedImageBytes = _processedImageBytes;
     if (alignedImageBytes == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please process the answer sheet first.'),
+        CmTheme.feedbackSnackBar(
+          'Please process the answer sheet first.',
+          color: CmTheme.amberWarning,
         ),
       );
       return;
@@ -390,8 +376,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
 
     if (widget.sections.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No exam sections were provided.'),
+        CmTheme.feedbackSnackBar(
+          'No exam sections were provided.',
+          color: CmTheme.amberWarning,
         ),
       );
       return;
@@ -404,7 +391,6 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         alignedImageBytes,
         sections: widget.sections,
       );
-
 
       if (!mounted || !identical(_processedImageBytes, alignedImageBytes)) {
         return;
@@ -430,16 +416,15 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       });
 
       await _verifyDetectedAnswers(result);
-
     } catch (e) {
       if (!mounted) return;
 
       setState(() => _isProcessing = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: _kRed,
-          content: Text('OMR processing failed: $e'),
+        CmTheme.feedbackSnackBar(
+          'OMR processing failed: $e',
+          color: CmTheme.redDanger,
           duration: const Duration(seconds: 5),
         ),
       );
@@ -458,14 +443,18 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
     // Match the PDF's single-sheet pagination budget. Later sheets restart
     // at firstSectionY, so their answer boxes need a known page index.
     const sectionHeightBudget =
-        AnswerSheetLayout.sheetHeight - 2 * AnswerSheetLayout.sheetPadding -
-            18 - 97;
+        AnswerSheetLayout.sheetHeight -
+        2 * AnswerSheetLayout.sheetPadding -
+        18 -
+        97;
     final sectionHeight = sections.fold<double>(
       0,
-      (height, section) => height + AnswerSheetLayout.calculateSectionHeight(
-        type: section.sectionType,
-        questionCount: section.questionCount,
-      ),
+      (height, section) =>
+          height +
+          AnswerSheetLayout.calculateSectionHeight(
+            type: section.sectionType,
+            questionCount: section.questionCount,
+          ),
     );
     if (sectionHeight > sectionHeightBudget ||
         sections.length != widget.sections.length) {
@@ -475,7 +464,8 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       );
     }
 
-    const fallback = 'Identification OCR is unavailable. '
+    const fallback =
+        'Identification OCR is unavailable. '
         'Enter the answers manually.';
     try {
       final token = await AuthStorage.getToken();
@@ -488,12 +478,18 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       final scaleY = image.height / AnswerSheetLayout.sheetHeight;
       // Stay inside the printed border and outside the question number.
       const inset = 1.5;
-      final left = ((AnswerSheetLayout.sheetPadding +
-                  AnswerSheetLayout.questionNumberWidth + inset) * scaleX)
-          .ceil();
-      final right = ((AnswerSheetLayout.sheetWidth -
-                  AnswerSheetLayout.sheetPadding - inset) * scaleX)
-          .floor();
+      final left =
+          ((AnswerSheetLayout.sheetPadding +
+                      AnswerSheetLayout.questionNumberWidth +
+                      inset) *
+                  scaleX)
+              .ceil();
+      final right =
+          ((AnswerSheetLayout.sheetWidth -
+                      AnswerSheetLayout.sheetPadding -
+                      inset) *
+                  scaleX)
+              .floor();
       final boxes = <(int, int, int, int)>[];
       var sectionY = AnswerSheetLayout.firstSectionY;
 
@@ -502,7 +498,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         if (section.questionCount == 0) continue;
 
         if (section.sectionType == 'identification') {
-          var rowY = sectionY + AnswerSheetLayout.sectionTitleHeight +
+          var rowY =
+              sectionY +
+              AnswerSheetLayout.sectionTitleHeight +
               AnswerSheetLayout.sectionTitleGap;
           for (final answer in section.answers) {
             final top = ((rowY + inset) * scaleY).ceil();
@@ -511,7 +509,8 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
                         scaleY)
                     .floor();
             boxes.add((i, answer.questionNumber, top, bottom));
-            rowY += AnswerSheetLayout.identificationBoxHeight +
+            rowY +=
+                AnswerSheetLayout.identificationBoxHeight +
                 AnswerSheetLayout.identificationRowSpacing;
           }
         }
@@ -528,7 +527,6 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       var nextBox = 0;
       var failed = 0;
 
-      
       Future<void> readBoxes() async {
         while (nextBox < boxes.length &&
             mounted &&
@@ -596,8 +594,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
             }
 
             if (text.trim().isNotEmpty) {
-              recognized[(sectionIndex, number)] =
-                  text.trim().toUpperCase();
+              recognized[(sectionIndex, number)] = text.trim().toUpperCase();
             } else {
               failed++;
             }
@@ -606,7 +603,6 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
           }
         }
       }
-
 
       // Limit parallel requests and keep a slow OCR service from blocking
       // manual verification indefinitely.
@@ -617,7 +613,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       final notice = missed == 0
           ? null
           : 'OCR could not process $missed Identification '
-              'field(s). Review the sheet and enter missing answers manually.';
+                'field(s). Review the sheet and enter missing answers manually.';
 
       return (
         OMRProcessingResult(
@@ -635,7 +631,8 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
                     for (final answer in sections[i].answers)
                       OMRAnswer(
                         questionNumber: answer.questionNumber,
-                        answer: recognized[(i, answer.questionNumber)] ??
+                        answer:
+                            recognized[(i, answer.questionNumber)] ??
                             answer.answer,
                         confidence: answer.confidence,
                       ),
@@ -664,7 +661,8 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       final String sectionType = _normalizeQuestionType(
         sourceSection['question_type'] ?? sourceSection['type'],
       );
-      final String sectionName = sourceSection['display_name']?.toString() ??
+      final String sectionName =
+          sourceSection['display_name']?.toString() ??
           sourceSection['section_name']?.toString() ??
           sourceSection['name']?.toString() ??
           'Section';
@@ -674,7 +672,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       final int questionCount = questions.isNotEmpty
           ? questions.length
           : int.tryParse(sourceSection['question_count']?.toString() ?? '0') ??
-              0;
+                0;
 
       if (sectionType == 'identification') {
         if (openCVSectionIndex < openCVResult.sections.length &&
@@ -687,22 +685,19 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
             sectionName: sectionName,
             sectionType: sectionType,
             questionCount: questionCount,
-            answers: List<OMRAnswer>.generate(
-              questionCount,
-              (int index) {
-                final question = index < questions.length
-                    ? questions[index]
-                    : null;
-                final number = question is Map
-                    ? int.tryParse('${question['question_number']}')
-                    : null;
-                return OMRAnswer(
-                  questionNumber: number ?? index + 1,
-                  answer: 'OCR Pending',
-                  confidence: 0,
-                );
-              },
-            ),
+            answers: List<OMRAnswer>.generate(questionCount, (int index) {
+              final question = index < questions.length
+                  ? questions[index]
+                  : null;
+              final number = question is Map
+                  ? int.tryParse('${question['question_number']}')
+                  : null;
+              return OMRAnswer(
+                questionNumber: number ?? index + 1,
+                answer: 'OCR Pending',
+                confidence: 0,
+              );
+            }),
           ),
         );
         continue;
@@ -760,8 +755,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         }
 
         final OpenCVBubbleMeasurement strongest = bubbles.first;
-        final OpenCVBubbleMeasurement? second =
-            bubbles.length > 1 ? bubbles[1] : null;
+        final OpenCVBubbleMeasurement? second = bubbles.length > 1
+            ? bubbles[1]
+            : null;
 
         if (strongest.fillRatio >= 0.46 &&
             strongest.fillRatio < markedThreshold) {
@@ -796,8 +792,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
           continue;
         }
 
-        final double gap =
-            second != null ? (strongest.fillRatio - second.fillRatio) : 1.0;
+        final double gap = second != null
+            ? (strongest.fillRatio - second.fillRatio)
+            : 1.0;
         if (second != null && gap < 0.12) {
           answers.add(
             OMRAnswer(
@@ -812,7 +809,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         // Convert fillRatio + separation gap into a realistic 80%–99% confidence
         // score for clear single-bubble marks.
         final double normalizedConfidence =
-            (0.80 + ((strongest.fillRatio - markedThreshold) * 0.35) + (gap * 0.25))
+            (0.80 +
+                    ((strongest.fillRatio - markedThreshold) * 0.35) +
+                    (gap * 0.25))
                 .clamp(0.82, 0.99);
 
         answers.add(
@@ -868,8 +867,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
 
   String _formatStudentFullName(Map<String, dynamic> student) {
     final last = (student['last_name']?.toString() ?? '').trim().toUpperCase();
-    final first =
-        (student['first_name']?.toString() ?? '').trim().toUpperCase();
+    final first = (student['first_name']?.toString() ?? '')
+        .trim()
+        .toUpperCase();
     if (last.isNotEmpty && first.isNotEmpty) return '$last, $first';
     if (last.isNotEmpty) return last;
     if (first.isNotEmpty) return first;
@@ -987,246 +987,223 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   /// 2. Explicit assessment title mismatch in uploaded answer sheet file name.
   /// 3. Top-right QR code (`CHECKMATE-EXAM-<id>-SHEET-<n>` at logical 345..384, 13..52)
   ///    against the selected assessment and all other assessments in [_allExams].
-  
-void _verifyAnswerSheetMatchesAssessment(
-  Uint8List alignedImageBytes, {
-  String? ocrText,
-}) {
-  final int? expectedExamId =
-      int.tryParse('${widget.examId ?? _exam?['id'] ?? ''}');
-  if (expectedExamId == null) return;
 
-  final expectedTitle = _examTitle();
-  _detectedQrSheetNumber = null;
+  void _verifyAnswerSheetMatchesAssessment(
+    Uint8List alignedImageBytes, {
+    String? ocrText,
+  }) {
+    final int? expectedExamId = int.tryParse(
+      '${widget.examId ?? _exam?['id'] ?? ''}',
+    );
+    if (expectedExamId == null) return;
 
-  // 1. Check OCR text and file name for explicit exam IDs.
-  final combinedText = <String>[
-    if (_fileName != null) _fileName!,
-    if (ocrText != null) ocrText,
-  ].join(' ');
+    final expectedTitle = _examTitle();
+    _detectedQrSheetNumber = null;
 
-  final checkmateIdMatches = RegExp(
-    r'CHECKMATE[-_\s]*EXAM[-_\s]*(\d+)',
-    caseSensitive: false,
-  ).allMatches(combinedText);
+    // 1. Check OCR text and file name for explicit exam IDs.
+    final combinedText = <String>[
+      if (_fileName != null) _fileName!,
+      if (ocrText != null) ocrText,
+    ].join(' ');
 
-  for (final m in checkmateIdMatches) {
-    final foundId = int.tryParse(m.group(1) ?? '');
-    if (foundId != null && foundId != expectedExamId) {
-      final otherLabel = _lookupExamLabel(foundId);
-      throw Exception(
-        'Invalid Answer Sheet: This answer sheet belongs to "$otherLabel" '
-        '(Exam ID: $foundId), not "$expectedTitle" '
-        '(Exam ID: $expectedExamId). '
-        'Only the 1-to-1 answer sheet for "$expectedTitle" is accepted.',
-      );
+    final checkmateIdMatches = RegExp(
+      r'CHECKMATE[-_\s]*EXAM[-_\s]*(\d+)',
+      caseSensitive: false,
+    ).allMatches(combinedText);
+
+    for (final m in checkmateIdMatches) {
+      final foundId = int.tryParse(m.group(1) ?? '');
+      if (foundId != null && foundId != expectedExamId) {
+        final otherLabel = _lookupExamLabel(foundId);
+        throw Exception(
+          'Invalid Answer Sheet: This answer sheet belongs to "$otherLabel" '
+          '(Exam ID: $foundId), not "$expectedTitle" '
+          '(Exam ID: $expectedExamId). '
+          'Only the 1-to-1 answer sheet for "$expectedTitle" is accepted.',
+        );
+      }
     }
-  }
 
-  final examIdMatches = RegExp(
-    r'Exam\s*ID\s*[:#-]?\s*(\d+)',
-    caseSensitive: false,
-  ).allMatches(combinedText);
+    final examIdMatches = RegExp(
+      r'Exam\s*ID\s*[:#-]?\s*(\d+)',
+      caseSensitive: false,
+    ).allMatches(combinedText);
 
-  for (final m in examIdMatches) {
-    final foundId = int.tryParse(m.group(1) ?? '');
-    if (foundId != null && foundId != expectedExamId) {
-      final otherLabel = _lookupExamLabel(foundId);
-      throw Exception(
-        'Invalid Answer Sheet: This answer sheet belongs to "$otherLabel" '
-        '(Exam ID: $foundId), not "$expectedTitle" '
-        '(Exam ID: $expectedExamId). '
-        'Only the 1-to-1 answer sheet for "$expectedTitle" is accepted.',
-      );
+    for (final m in examIdMatches) {
+      final foundId = int.tryParse(m.group(1) ?? '');
+      if (foundId != null && foundId != expectedExamId) {
+        final otherLabel = _lookupExamLabel(foundId);
+        throw Exception(
+          'Invalid Answer Sheet: This answer sheet belongs to "$otherLabel" '
+          '(Exam ID: $foundId), not "$expectedTitle" '
+          '(Exam ID: $expectedExamId). '
+          'Only the 1-to-1 answer sheet for "$expectedTitle" is accepted.',
+        );
+      }
     }
-  }
 
-  // 2. Check whether the uploaded filename names another assessment.
-  final rawFileName = (_fileName ?? '').trim();
+    // 2. Check whether the uploaded filename names another assessment.
+    final rawFileName = (_fileName ?? '').trim();
 
-  if (rawFileName.isNotEmpty &&
-      rawFileName.toLowerCase() != 'camera capture.jpg' &&
-      rawFileName.toLowerCase() != 'gallery.jpg') {
-    final normFile = rawFileName
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-        .trim();
+    if (rawFileName.isNotEmpty &&
+        rawFileName.toLowerCase() != 'camera capture.jpg' &&
+        rawFileName.toLowerCase() != 'gallery.jpg') {
+      final normFile = rawFileName
+          .toLowerCase()
+          .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+          .trim();
 
-    final normExpected = expectedTitle
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-        .trim();
+      final normExpected = expectedTitle
+          .toLowerCase()
+          .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+          .trim();
 
-    if (normExpected.length >= 4 && !normFile.contains(normExpected)) {
-      for (final other in _allExams) {
-        final oid = int.tryParse('${other['id']}');
-        if (oid == null || oid == expectedExamId) continue;
+      if (normExpected.length >= 4 && !normFile.contains(normExpected)) {
+        for (final other in _allExams) {
+          final oid = int.tryParse('${other['id']}');
+          if (oid == null || oid == expectedExamId) continue;
 
-        final otherTitle = (other['title']?.toString() ?? '').trim();
-        final normOther = otherTitle
-            .toLowerCase()
-            .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-            .trim();
+          final otherTitle = (other['title']?.toString() ?? '').trim();
+          final normOther = otherTitle
+              .toLowerCase()
+              .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+              .trim();
 
-        if (normOther.length >= 5 && normFile.contains(normOther)) {
-          throw Exception(
-            'Invalid Answer Sheet: The file "$rawFileName" is for '
-            '"$otherTitle", not "$expectedTitle". '
-            'Only the 1-to-1 answer sheet for "$expectedTitle" is accepted.',
-          );
+          if (normOther.length >= 5 && normFile.contains(normOther)) {
+            throw Exception(
+              'Invalid Answer Sheet: The file "$rawFileName" is for '
+              '"$otherTitle", not "$expectedTitle". '
+              'Only the 1-to-1 answer sheet for "$expectedTitle" is accepted.',
+            );
+          }
         }
       }
     }
-  }
 
-  // 3. Decode the actual QR code from the aligned answer sheet.
-  final decodedImage = img.decodeImage(alignedImageBytes);
-  if (decodedImage != null) {
-  debugPrint(
-    '[CheckMate] Corrected image size: '
-    '${decodedImage.width} x ${decodedImage.height}',
-  );
-
-  final qrX = (decodedImage.width * 0.80).round();
-  final qrY = (decodedImage.height * 0.015).round();
-  final qrW = (decodedImage.width * 0.18).round();
-  final qrH = (decodedImage.height * 0.12).round();
-
-  debugPrint(
-    '[CheckMate] Approximate QR crop: '
-    'x=$qrX, y=$qrY, width=$qrW, height=$qrH',
-  );
-}
-  if (decodedImage == null) {
-    throw Exception(
-      'Invalid Answer Sheet: The uploaded image could not be decoded. '
-      'Please upload or capture the answer sheet again.',
-    );
-  }
-
- 
-final hints = DecodeHints()
-  ..put(DecodeHintType.tryHarder);
-
-
-String? qrPayload;
-
-try {
-  final rgbaImage = decodedImage.convert(numChannels: 4);
-
-  final pixelBytes = rgbaImage.getBytes(
-    order: img.ChannelOrder.abgr,
-  );
-
-  final source = RGBLuminanceSource(
-    rgbaImage.width,
-    rgbaImage.height,
-    pixelBytes.buffer.asInt32List(),
-  );
-
-  final hints = DecodeHints()
-    ..put(DecodeHintType.tryHarder);
-
-  // Attempt 1: Hybrid binarization
-  try {
-    final bitmap = BinaryBitmap(
-      HybridBinarizer(source),
-    );
-
-    final result = QRCodeReader().decode(
-      bitmap,
-      hints: hints,
-    );
-
-    qrPayload = result.text.trim();
-  } catch (e) {
-    debugPrint('[CheckMate] Hybrid decode failed: $e');
-  }
-
-  // Attempt 2: Global histogram binarization
-  if (qrPayload == null || qrPayload!.isEmpty) {
-    try {
-      final bitmap = BinaryBitmap(
-        GlobalHistogramBinarizer(source),
+    // 3. Decode the actual QR code from the aligned answer sheet.
+    final decodedImage = img.decodeImage(alignedImageBytes);
+    if (decodedImage != null) {
+      debugPrint(
+        '[CheckMate] Corrected image size: '
+        '${decodedImage.width} x ${decodedImage.height}',
       );
 
-      final result = QRCodeReader().decode(
-        bitmap,
-        hints: hints,
-      );
+      final qrX = (decodedImage.width * 0.80).round();
+      final qrY = (decodedImage.height * 0.015).round();
+      final qrW = (decodedImage.width * 0.18).round();
+      final qrH = (decodedImage.height * 0.12).round();
 
-      qrPayload = result.text.trim();
-    } catch (e) {
-      debugPrint('[CheckMate] Global decode failed: $e');
+      debugPrint(
+        '[CheckMate] Approximate QR crop: '
+        'x=$qrX, y=$qrY, width=$qrW, height=$qrH',
+      );
     }
+    if (decodedImage == null) {
+      throw Exception(
+        'Invalid Answer Sheet: The uploaded image could not be decoded. '
+        'Please upload or capture the answer sheet again.',
+      );
+    }
+
+    final hints = DecodeHints()..put(DecodeHintType.tryHarder);
+
+    String? qrPayload;
+
+    try {
+      final rgbaImage = decodedImage.convert(numChannels: 4);
+
+      final pixelBytes = rgbaImage.getBytes(order: img.ChannelOrder.abgr);
+
+      final source = RGBLuminanceSource(
+        rgbaImage.width,
+        rgbaImage.height,
+        pixelBytes.buffer.asInt32List(),
+      );
+
+      final hints = DecodeHints()..put(DecodeHintType.tryHarder);
+
+      // Attempt 1: Hybrid binarization
+      try {
+        final bitmap = BinaryBitmap(HybridBinarizer(source));
+
+        final result = QRCodeReader().decode(bitmap, hints: hints);
+
+        qrPayload = result.text.trim();
+      } catch (e) {
+        debugPrint('[CheckMate] Hybrid decode failed: $e');
+      }
+
+      // Attempt 2: Global histogram binarization
+      if (qrPayload == null || qrPayload!.isEmpty) {
+        try {
+          final bitmap = BinaryBitmap(GlobalHistogramBinarizer(source));
+
+          final result = QRCodeReader().decode(bitmap, hints: hints);
+
+          qrPayload = result.text.trim();
+        } catch (e) {
+          debugPrint('[CheckMate] Global decode failed: $e');
+        }
+      }
+
+      debugPrint('[CheckMate] Final QR result: $qrPayload');
+    } catch (e) {
+      debugPrint('[CheckMate] QR processing error: $e');
+    }
+
+    // 4. Require a valid CheckMate QR payload.
+    if (qrPayload == null || qrPayload.isEmpty) {
+      throw Exception(
+        'Invalid Answer Sheet: The CheckMate QR code could not be read. '
+        'Please make sure the top-right QR code is visible, clear, and '
+        'not cropped.',
+      );
+    }
+
+    final qrMatch = RegExp(
+      r'^CHECKMATE-EXAM-(\d+)-SHEET-(\d+)$',
+      caseSensitive: false,
+    ).firstMatch(qrPayload);
+
+    if (qrMatch == null) {
+      throw Exception(
+        'Invalid Answer Sheet: The QR code is not a recognized CheckMate '
+        'answer sheet.',
+      );
+    }
+
+    final scannedExamId = int.tryParse(qrMatch.group(1) ?? '');
+    final scannedSheetNumber = int.tryParse(qrMatch.group(2) ?? '');
+
+    if (scannedExamId == null ||
+        scannedSheetNumber == null ||
+        scannedSheetNumber < 1) {
+      throw Exception(
+        'Invalid Answer Sheet: The QR code contains invalid exam or sheet '
+        'information.',
+      );
+    }
+
+    // 5. Enforce the exact assessment match.
+    if (scannedExamId != expectedExamId) {
+      final otherLabel = _lookupExamLabel(scannedExamId);
+
+      throw Exception(
+        'Invalid Answer Sheet: This answer sheet belongs to "$otherLabel" '
+        '(Exam ID: $scannedExamId), not "$expectedTitle" '
+        '(Exam ID: $expectedExamId). '
+        'Only the 1-to-1 answer sheet for "$expectedTitle" can be used.',
+      );
+    }
+
+    // 6. Save the decoded sheet number for student auto-matching.
+    _detectedQrSheetNumber = scannedSheetNumber;
   }
-
-  debugPrint('[CheckMate] Final QR result: $qrPayload');
-
-} catch (e) {
-  debugPrint('[CheckMate] QR processing error: $e');
-}
-
-
-
-
-  // 4. Require a valid CheckMate QR payload.
-  if (qrPayload == null || qrPayload.isEmpty) {
-    throw Exception(
-      'Invalid Answer Sheet: The CheckMate QR code could not be read. '
-      'Please make sure the top-right QR code is visible, clear, and '
-      'not cropped.',
-    );
-  }
-
-  final qrMatch = RegExp(
-    r'^CHECKMATE-EXAM-(\d+)-SHEET-(\d+)$',
-    caseSensitive: false,
-  ).firstMatch(qrPayload);
-
-  if (qrMatch == null) {
-    throw Exception(
-      'Invalid Answer Sheet: The QR code is not a recognized CheckMate '
-      'answer sheet.',
-    );
-  }
-
-  final scannedExamId = int.tryParse(qrMatch.group(1) ?? '');
-  final scannedSheetNumber = int.tryParse(qrMatch.group(2) ?? '');
-
-  if (scannedExamId == null ||
-      scannedSheetNumber == null ||
-      scannedSheetNumber < 1) {
-    throw Exception(
-      'Invalid Answer Sheet: The QR code contains invalid exam or sheet '
-      'information.',
-    );
-  }
-
-  // 5. Enforce the exact assessment match.
-  if (scannedExamId != expectedExamId) {
-    final otherLabel = _lookupExamLabel(scannedExamId);
-
-    throw Exception(
-      'Invalid Answer Sheet: This answer sheet belongs to "$otherLabel" '
-      '(Exam ID: $scannedExamId), not "$expectedTitle" '
-      '(Exam ID: $expectedExamId). '
-      'Only the 1-to-1 answer sheet for "$expectedTitle" can be used.',
-    );
-  }
-
-  // 6. Save the decoded sheet number for student auto-matching.
-  _detectedQrSheetNumber = scannedSheetNumber;
-}
-
 
   Map<String, dynamic>? _autoDetectStudent({String? ocrText}) {
     if (_students.isEmpty) return null;
 
-    final haystacks = <String>[
-      ?_fileName,
-      ?ocrText,
-    ];
+    final haystacks = <String>[?_fileName, ?ocrText];
     final combined = haystacks.join(' ').toUpperCase();
 
     // 1. Check for QR-verified sheet number or CHECKMATE-EXAM-<id>-SHEET-<n>
@@ -1236,8 +1213,10 @@ try {
         return _students[qrIdx];
       }
     }
-    final sheetMatch =
-        RegExp(r'SHEET[-_\s]*(\d+)', caseSensitive: false).firstMatch(combined);
+    final sheetMatch = RegExp(
+      r'SHEET[-_\s]*(\d+)',
+      caseSensitive: false,
+    ).firstMatch(combined);
     if (sheetMatch != null) {
       final sheetIdx = (int.tryParse(sheetMatch.group(1)!) ?? 0) - 1;
       if (sheetIdx >= 0 && sheetIdx < _students.length) {
@@ -1247,7 +1226,9 @@ try {
 
     // 2. Check for exact student_number match in filename or OCR text.
     for (final st in _students) {
-      final snum = (st['student_number']?.toString() ?? '').trim().toUpperCase();
+      final snum = (st['student_number']?.toString() ?? '')
+          .trim()
+          .toUpperCase();
       if (snum.length >= 4 && combined.contains(snum)) {
         return st;
       }
@@ -1289,20 +1270,26 @@ try {
 
     if (cleanNum.isNotEmpty) {
       for (final st in _students) {
-        final snum = (st['student_number']?.toString() ?? '').trim().toLowerCase();
+        final snum = (st['student_number']?.toString() ?? '')
+            .trim()
+            .toLowerCase();
         final ssec = _studentSectionName(st).toLowerCase();
         if (snum == cleanNum && (cleanSec.isEmpty || ssec == cleanSec)) {
           return st;
         }
       }
       for (final st in _students) {
-        final snum = (st['student_number']?.toString() ?? '').trim().toLowerCase();
+        final snum = (st['student_number']?.toString() ?? '')
+            .trim()
+            .toLowerCase();
         if (snum == cleanNum) return st;
       }
     }
 
-    final cleanName =
-        studentName.trim().toUpperCase().replaceAll(RegExp(r'\s+'), ' ');
+    final cleanName = studentName.trim().toUpperCase().replaceAll(
+      RegExp(r'\s+'),
+      ' ',
+    );
     if (cleanName.isNotEmpty) {
       for (final st in _students) {
         final formatted = _formatStudentFullName(st);
@@ -1319,10 +1306,9 @@ try {
     return null;
   }
 
-  String _examTitle() =>
-      _exam?['title']?.toString().trim().isNotEmpty == true
-          ? _exam!['title'].toString().trim()
-          : 'Examination';
+  String _examTitle() => _exam?['title']?.toString().trim().isNotEmpty == true
+      ? _exam!['title'].toString().trim()
+      : 'Examination';
 
   String _examSubjectCode() {
     final cls = _exam?['class'];
@@ -1362,15 +1348,17 @@ try {
     final edits = <String, String>{};
     final overriddenKeys = <String>{};
 
-    for (var sectionIndex = 0;
-        sectionIndex < rawResult.sections.length;
-        sectionIndex++) {
+    for (
+      var sectionIndex = 0;
+      sectionIndex < rawResult.sections.length;
+      sectionIndex++
+    ) {
       final section = rawResult.sections[sectionIndex];
       for (final answer in section.answers) {
         final key = '$sectionIndex:${answer.questionNumber}';
         if (section.sectionType == 'identification') {
-          edits[key] = (answer.answer == 'OCR Pending' ||
-                  answer.answer == 'Unanswered')
+          edits[key] =
+              (answer.answer == 'OCR Pending' || answer.answer == 'Unanswered')
               ? ''
               : answer.answer.toUpperCase();
         } else {
@@ -1380,20 +1368,22 @@ try {
     }
 
     final availableSections = _availableSections();
-    final autoMatched = _autoDetectStudent(ocrText: ocrText) ??
+    final autoMatched =
+        _autoDetectStudent(ocrText: ocrText) ??
         (_lastRecordedStudent == null && _students.length == 1
             ? _students.first
             : null);
 
-    int? selectedStudentId =
-        autoMatched != null ? int.tryParse('${autoMatched['id']}') : null;
+    int? selectedStudentId = autoMatched != null
+        ? int.tryParse('${autoMatched['id']}')
+        : null;
     final bool autoDetectedHighConfidence = autoMatched != null;
 
     String selectedSection = autoMatched != null
         ? _studentSectionName(autoMatched)
         : (availableSections.isNotEmpty
-            ? availableSections.first
-            : _defaultExamSection());
+              ? availableSections.first
+              : _defaultExamSection());
 
     final nameController = TextEditingController(
       text: autoMatched != null ? _formatStudentFullName(autoMatched) : '',
@@ -1406,9 +1396,11 @@ try {
     final sectionController = TextEditingController(text: selectedSection);
 
     final idControllers = <String, TextEditingController>{};
-    for (var sectionIndex = 0;
-        sectionIndex < rawResult.sections.length;
-        sectionIndex++) {
+    for (
+      var sectionIndex = 0;
+      sectionIndex < rawResult.sections.length;
+      sectionIndex++
+    ) {
       final section = rawResult.sections[sectionIndex];
       if (section.sectionType == 'identification') {
         for (final answer in section.answers) {
@@ -1442,7 +1434,8 @@ try {
                           ? val.toUpperCase()
                           : val;
                     }(),
-                    confidence: overriddenKeys.contains('$i:${a.questionNumber}')
+                    confidence:
+                        overriddenKeys.contains('$i:${a.questionNumber}')
                         ? 1.0
                         : a.confidence,
                   ),
@@ -1459,10 +1452,10 @@ try {
       void Function(void Function()) refresh,
     ) {
       final ocrNotice = _identificationOcrNotice;
-      final unresolvedCount = rawResult.sections
-          .asMap()
-          .entries
-          .fold<int>(0, (total, sectionEntry) {
+      final unresolvedCount = rawResult.sections.asMap().entries.fold<int>(0, (
+        total,
+        sectionEntry,
+      ) {
         final sectionIndex = sectionEntry.key;
         final section = sectionEntry.value;
 
@@ -1509,12 +1502,14 @@ try {
         sectionName: sectionController.text,
       );
 
-      final bool nameConfident = matchedStudent != null &&
-          nameController.text.trim().isNotEmpty;
-      final bool numberConfident = matchedStudent != null &&
-          numberController.text.trim().isNotEmpty;
-      final bool sectionConfident = sectionController.text.trim().isNotEmpty &&
-          (matchedStudent != null || availableSections.contains(sectionController.text.trim()));
+      final bool nameConfident =
+          matchedStudent != null && nameController.text.trim().isNotEmpty;
+      final bool numberConfident =
+          matchedStudent != null && numberController.text.trim().isNotEmpty;
+      final bool sectionConfident =
+          sectionController.text.trim().isNotEmpty &&
+          (matchedStudent != null ||
+              availableSections.contains(sectionController.text.trim()));
 
       final liveOmr = buildCurrentOmr();
       final liveScore = ScoringService.score(
@@ -1551,9 +1546,9 @@ try {
           Container(
             padding: const EdgeInsets.fromLTRB(24, 20, 20, 16),
             decoration: const BoxDecoration(
-              color: Colors.white,
+              color: CmTheme.surfaceWhite,
               borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-              border: Border(bottom: BorderSide(color: _kLine)),
+              border: Border(bottom: BorderSide(color: CmTheme.lineBorder)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1565,12 +1560,12 @@ try {
                       width: 42,
                       height: 42,
                       decoration: BoxDecoration(
-                        color: _kNavy.withValues(alpha: 0.08),
+                        color: CmTheme.navy.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: const Icon(
                         Icons.fact_check_outlined,
-                        color: _kNavy,
+                        color: CmTheme.navy,
                         size: 22,
                       ),
                     ),
@@ -1584,7 +1579,7 @@ try {
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.w700,
-                              color: _kNavy,
+                              color: CmTheme.navy,
                             ),
                           ),
                           const SizedBox(height: 2),
@@ -1593,7 +1588,7 @@ try {
                             style: const TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
-                              color: _kSlate,
+                              color: CmTheme.slateText,
                             ),
                           ),
                         ],
@@ -1601,7 +1596,7 @@ try {
                     ),
                     IconButton(
                       onPressed: () => Navigator.of(modalContext).pop(false),
-                      icon: const Icon(Icons.close, color: _kSlate),
+                      icon: const Icon(Icons.close, color: CmTheme.slateText),
                       tooltip: 'Close',
                     ),
                   ],
@@ -1634,7 +1629,7 @@ try {
                     style: const TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w600,
-                      color: _kAmberDark,
+                      color: CmTheme.navy,
                     ),
                   ),
                 ],
@@ -1646,16 +1641,18 @@ try {
                       vertical: 8,
                     ),
                     decoration: BoxDecoration(
-                      color: _kAmber.withValues(alpha: 0.14),
+                      color: CmTheme.amberWarning.withValues(alpha: 0.14),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: _kAmber.withValues(alpha: 0.5)),
+                      border: Border.all(
+                        color: CmTheme.amberWarning.withValues(alpha: 0.5),
+                      ),
                     ),
                     child: Row(
                       children: [
                         const Icon(
                           Icons.warning_amber_rounded,
                           size: 18,
-                          color: _kAmberDark,
+                          color: CmTheme.amberWarning,
                         ),
                         const SizedBox(width: 8),
                         Expanded(
@@ -1664,7 +1661,7 @@ try {
                             style: const TextStyle(
                               fontSize: 12.5,
                               fontWeight: FontWeight.w600,
-                              color: _kAmberDark,
+                              color: CmTheme.navy,
                             ),
                           ),
                         ),
@@ -1679,7 +1676,7 @@ try {
           // Scrollable Body: Student Details + Bubble Answer Verification
           Expanded(
             child: ColoredBox(
-              color: _kBg,
+              color: CmTheme.background,
               child: ListView(
                 padding: const EdgeInsets.all(20),
                 children: [
@@ -1687,9 +1684,9 @@ try {
                   Container(
                     padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: CmTheme.surfaceWhite,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: _kLine),
+                      border: Border.all(color: CmTheme.lineBorder),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1699,7 +1696,7 @@ try {
                             const Icon(
                               Icons.badge_outlined,
                               size: 20,
-                              color: _kNavy,
+                              color: CmTheme.navy,
                             ),
                             const SizedBox(width: 8),
                             const Expanded(
@@ -1708,13 +1705,14 @@ try {
                                 style: TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w700,
-                                  color: _kNavy,
+                                  color: CmTheme.navy,
                                 ),
                               ),
                             ),
                             _buildConfidencePill(
                               isConfident: matchedStudent != null,
-                              confidentText: autoDetectedHighConfidence &&
+                              confidentText:
+                                  autoDetectedHighConfidence &&
                                       matchedStudent != null
                                   ? '96% Confident • Matched'
                                   : 'Matched in Section',
@@ -1732,14 +1730,14 @@ try {
                             key: ValueKey(
                               'student-roster-dd-${seenStudentIds.contains(selectedStudentId) ? selectedStudentId : 0}-${dropdownStudents.length}',
                             ),
-                            initialValue: seenStudentIds.contains(selectedStudentId)
+                            initialValue:
+                                seenStudentIds.contains(selectedStudentId)
                                 ? selectedStudentId
                                 : null,
                             isExpanded: true,
                             decoration: _modalInputDeco(
                               label: 'Select Enrolled Student (Quick Fill)',
-                              hint:
-                                  'Choose student from section roster (LAST NAME, FIRST NAME)',
+                              hint: 'Choose student from section roster (LAST NAME, FIRST NAME)',
                               prefixIcon: Icons.person_search_outlined,
                             ),
                             items: dropdownStudents.map((st) {
@@ -1756,7 +1754,7 @@ try {
                                   style: const TextStyle(
                                     fontSize: 13.5,
                                     fontWeight: FontWeight.w600,
-                                    color: _kNavy,
+                                    color: CmTheme.navy,
                                   ),
                                 ),
                               );
@@ -1770,8 +1768,9 @@ try {
                               if (found.isEmpty) return;
                               refresh(() {
                                 selectedStudentId = sid;
-                                nameController.text =
-                                    _formatStudentFullName(found);
+                                nameController.text = _formatStudentFullName(
+                                  found,
+                                );
                                 numberController.text =
                                     found['student_number']?.toString() ?? '';
                                 final sec = _studentSectionName(found);
@@ -1799,7 +1798,7 @@ try {
                           style: const TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
-                            color: _kNavy,
+                            color: CmTheme.navy,
                           ),
                           decoration: _modalInputDeco(
                             hint: 'SURNAME, FIRST NAME',
@@ -1846,7 +1845,7 @@ try {
                                   style: const TextStyle(
                                     fontSize: 14,
                                     fontWeight: FontWeight.w600,
-                                    color: _kNavy,
+                                    color: CmTheme.navy,
                                   ),
                                   decoration: _modalInputDeco(
                                     hint: 'e.g. 02000416484',
@@ -1861,12 +1860,14 @@ try {
                                         sectionName: sectionController.text,
                                       );
                                       if (matched != null) {
-                                        selectedStudentId =
-                                            int.tryParse('${matched['id']}');
+                                        selectedStudentId = int.tryParse(
+                                          '${matched['id']}',
+                                        );
                                         nameController.text =
                                             _formatStudentFullName(matched);
-                                        final sec =
-                                            _studentSectionName(matched);
+                                        final sec = _studentSectionName(
+                                          matched,
+                                        );
                                         if (sec.isNotEmpty) {
                                           selectedSection = sec;
                                           sectionController.text = sec;
@@ -1895,8 +1896,10 @@ try {
                                     key: ValueKey(
                                       'section-dd-${availableSections.contains(selectedSection) ? selectedSection : availableSections.first}',
                                     ),
-                                    initialValue: availableSections
-                                            .contains(selectedSection)
+                                    initialValue:
+                                        availableSections.contains(
+                                          selectedSection,
+                                        )
                                         ? selectedSection
                                         : availableSections.first,
                                     isExpanded: true,
@@ -1913,7 +1916,7 @@ try {
                                               style: const TextStyle(
                                                 fontSize: 14,
                                                 fontWeight: FontWeight.w600,
-                                                color: _kNavy,
+                                                color: CmTheme.navy,
                                               ),
                                             ),
                                           ),
@@ -1931,12 +1934,12 @@ try {
                                   TextFormField(
                                     controller: sectionController,
                                     inputFormatters: const [
-                                      _UpperCaseFormatter()
+                                      _UpperCaseFormatter(),
                                     ],
                                     style: const TextStyle(
                                       fontSize: 14,
                                       fontWeight: FontWeight.w600,
-                                      color: _kNavy,
+                                      color: CmTheme.navy,
                                     ),
                                     decoration: _modalInputDeco(
                                       hint: 'e.g. BSIT31A',
@@ -1977,9 +1980,11 @@ try {
                   const SizedBox(height: 18),
 
                   // 2. PART-BY-PART BUBBLE & IDENTIFICATION VERIFICATION
-                  for (var sectionIndex = 0;
-                      sectionIndex < rawResult.sections.length;
-                      sectionIndex++) ...[
+                  for (
+                    var sectionIndex = 0;
+                    sectionIndex < rawResult.sections.length;
+                    sectionIndex++
+                  ) ...[
                     _buildSectionVerificationCard(
                       sectionIndex: sectionIndex,
                       section: rawResult.sections[sectionIndex],
@@ -2002,8 +2007,8 @@ try {
           Container(
             padding: const EdgeInsets.fromLTRB(24, 14, 24, 18),
             decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(top: BorderSide(color: _kLine)),
+              color: CmTheme.surfaceWhite,
+              border: Border(top: BorderSide(color: CmTheme.lineBorder)),
               borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
             ),
             child: SafeArea(
@@ -2020,7 +2025,7 @@ try {
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
-                            color: _kSlate,
+                            color: CmTheme.slateText,
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -2031,7 +2036,7 @@ try {
                               style: const TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.w800,
-                                color: _kNavy,
+                                color: CmTheme.navy,
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -2041,7 +2046,9 @@ try {
                                 vertical: 2,
                               ),
                               decoration: BoxDecoration(
-                                color: _kEmerald.withValues(alpha: 0.15),
+                                color: CmTheme.emeraldSuccess.withValues(
+                                  alpha: 0.15,
+                                ),
                                 borderRadius: BorderRadius.circular(999),
                               ),
                               child: Text(
@@ -2049,7 +2056,7 @@ try {
                                 style: const TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
-                                  color: _kEmeraldDark,
+                                  color: CmTheme.navy,
                                 ),
                               ),
                             ),
@@ -2061,7 +2068,7 @@ try {
                   TextButton(
                     onPressed: () => Navigator.of(modalContext).pop(false),
                     style: TextButton.styleFrom(
-                      foregroundColor: _kSlate,
+                      foregroundColor: CmTheme.slateText,
                       padding: const EdgeInsets.symmetric(
                         horizontal: 16,
                         vertical: 14,
@@ -2074,15 +2081,16 @@ try {
                   ),
                   const SizedBox(width: 8),
                   FilledButton.icon(
-                    onPressed: unresolvedCount > 0 ||
+                    onPressed:
+                        unresolvedCount > 0 ||
                             (_students.isNotEmpty && matchedStudent == null)
                         ? null
                         : () => Navigator.of(modalContext).pop(true),
                     style: FilledButton.styleFrom(
-                      backgroundColor: _kNavyDark,
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: _kLine,
-                      disabledForegroundColor: _kSlate,
+                      backgroundColor: CmTheme.navy,
+                      foregroundColor: CmTheme.surfaceWhite,
+                      disabledBackgroundColor: CmTheme.lineBorder,
+                      disabledForegroundColor: CmTheme.slateText,
                       padding: const EdgeInsets.symmetric(
                         horizontal: 20,
                         vertical: 15,
@@ -2114,12 +2122,12 @@ try {
             isScrollControlled: true,
             isDismissible: false,
             enableDrag: false,
-            backgroundColor: Colors.transparent,
+            backgroundColor: CmTheme.transparent,
             builder: (sheetContext) => FractionallySizedBox(
               heightFactor: 0.94,
               child: Container(
                 decoration: const BoxDecoration(
-                  color: Colors.white,
+                  color: CmTheme.surfaceWhite,
                   borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                 ),
                 child: StatefulBuilder(builder: buildModalBody),
@@ -2130,13 +2138,15 @@ try {
             context: context,
             barrierDismissible: false,
             builder: (dialogContext) => Dialog(
-              backgroundColor: Colors.white,
-              surfaceTintColor: Colors.transparent,
+              backgroundColor: CmTheme.surfaceWhite,
+              surfaceTintColor: CmTheme.transparent,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(24),
               ),
-              insetPadding:
-                  const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 24,
+              ),
               child: ConstrainedBox(
                 constraints: BoxConstraints(
                   maxWidth: 860,
@@ -2260,11 +2270,13 @@ try {
         recordedAttemptId = int.tryParse(
           '${attemptMap['attempt_id'] ?? attemptMap['id'] ?? ''}',
         );
-        resolvedStudentId = int.tryParse(
+        resolvedStudentId =
+            int.tryParse(
               '${attemptMap['student_id'] ?? resolvedStudentId ?? ''}',
             ) ??
             resolvedStudentId;
-        resolvedClassId = int.tryParse(
+        resolvedClassId =
+            int.tryParse(
               '${attemptMap['class_id'] ?? resolvedClassId ?? ''}',
             ) ??
             resolvedClassId;
@@ -2273,11 +2285,9 @@ try {
       if (!mounted) return;
       setState(() => _isSavingScore = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: _kRed,
-          content: Text(
-            'Failed to save score to scorebook: ${e.toString().replaceFirst('Exception: ', '')}',
-          ),
+        CmTheme.feedbackSnackBar(
+          'Failed to save score to scorebook: ${e.toString().replaceFirst('Exception: ', '')}',
+          color: CmTheme.redDanger,
           duration: const Duration(seconds: 6),
         ),
       );
@@ -2355,13 +2365,15 @@ try {
       barrierDismissible: false,
       builder: (dialogContext) {
         return Dialog(
-          backgroundColor: Colors.white,
-          surfaceTintColor: Colors.transparent,
+          backgroundColor: CmTheme.surfaceWhite,
+          surfaceTintColor: CmTheme.transparent,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(24),
           ),
-          insetPadding:
-              const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 24,
+          ),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 480),
             child: SingleChildScrollView(
@@ -2376,7 +2388,7 @@ try {
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: _kEmerald.withValues(alpha: 0.14),
+                      color: CmTheme.emeraldSuccess.withValues(alpha: 0.14),
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Row(
@@ -2385,7 +2397,7 @@ try {
                         const Icon(
                           Icons.check_circle,
                           size: 16,
-                          color: _kEmeraldDark,
+                          color: CmTheme.navy,
                         ),
                         const SizedBox(width: 6),
                         Text(
@@ -2395,7 +2407,7 @@ try {
                           style: const TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w700,
-                            color: _kEmeraldDark,
+                            color: CmTheme.navy,
                           ),
                         ),
                       ],
@@ -2410,7 +2422,7 @@ try {
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w800,
-                      color: _kNavy,
+                      color: CmTheme.navy,
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -2422,7 +2434,7 @@ try {
                     style: const TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w500,
-                      color: _kSlate,
+                      color: CmTheme.slateText,
                     ),
                   ),
                   const SizedBox(height: 22),
@@ -2442,8 +2454,8 @@ try {
                         child: CustomPaint(
                           painter: _ScoreRingPainter(
                             progress: progress,
-                            trackColor: _kLine,
-                            progressColor: _kEmerald,
+                            trackColor: CmTheme.lineBorder,
+                            progressColor: CmTheme.navy,
                           ),
                           child: Center(
                             child: Column(
@@ -2454,7 +2466,7 @@ try {
                                   style: const TextStyle(
                                     fontSize: 26,
                                     fontWeight: FontWeight.w800,
-                                    color: _kNavy,
+                                    color: CmTheme.navy,
                                   ),
                                 ),
                                 const SizedBox(height: 2),
@@ -2463,7 +2475,7 @@ try {
                                   style: const TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w700,
-                                    color: _kEmeraldDark,
+                                    color: CmTheme.navy,
                                   ),
                                 ),
                               ],
@@ -2480,20 +2492,20 @@ try {
                     width: double.infinity,
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: _kBg,
+                      color: CmTheme.background,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: _kLine),
+                      border: Border.all(color: CmTheme.lineBorder),
                     ),
                     child: Row(
                       children: [
                         CircleAvatar(
                           radius: 20,
-                          backgroundColor: _kNavy.withValues(alpha: 0.1),
+                          backgroundColor: CmTheme.navy.withValues(alpha: 0.1),
                           child: Text(
                             studentName.isNotEmpty ? studentName[0] : 'S',
                             style: const TextStyle(
                               fontWeight: FontWeight.w800,
-                              color: _kNavy,
+                              color: CmTheme.navy,
                             ),
                           ),
                         ),
@@ -2507,7 +2519,7 @@ try {
                                 style: const TextStyle(
                                   fontSize: 14.5,
                                   fontWeight: FontWeight.w700,
-                                  color: _kNavy,
+                                  color: CmTheme.navy,
                                 ),
                               ),
                               const SizedBox(height: 2),
@@ -2516,7 +2528,7 @@ try {
                                 style: const TextStyle(
                                   fontSize: 12.5,
                                   fontWeight: FontWeight.w500,
-                                  color: _kSlate,
+                                  color: CmTheme.slateText,
                                 ),
                               ),
                             ],
@@ -2532,9 +2544,9 @@ try {
                     width: double.infinity,
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: CmTheme.surfaceWhite,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: _kLine),
+                      border: Border.all(color: CmTheme.lineBorder),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2544,7 +2556,7 @@ try {
                           style: TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w700,
-                            color: _kSlate,
+                            color: CmTheme.slateText,
                           ),
                         ),
                         const SizedBox(height: 10),
@@ -2552,14 +2564,17 @@ try {
                           if (i > 0)
                             const Padding(
                               padding: EdgeInsets.symmetric(vertical: 6),
-                              child: Divider(height: 1, color: _kLine),
+                              child: Divider(
+                                height: 1,
+                                color: CmTheme.lineBorder,
+                              ),
                             ),
                           Row(
                             children: [
                               Icon(
                                 _sectionIcon(score.sections[i].sectionType),
                                 size: 17,
-                                color: _kNavy,
+                                color: CmTheme.navy,
                               ),
                               const SizedBox(width: 8),
                               Expanded(
@@ -2568,7 +2583,7 @@ try {
                                   style: const TextStyle(
                                     fontSize: 13.5,
                                     fontWeight: FontWeight.w600,
-                                    color: _kNavy,
+                                    color: CmTheme.navy,
                                   ),
                                 ),
                               ),
@@ -2578,7 +2593,9 @@ try {
                                   vertical: 3,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: _kEmerald.withValues(alpha: 0.12),
+                                  color: CmTheme.emeraldSuccess.withValues(
+                                    alpha: 0.12,
+                                  ),
                                   borderRadius: BorderRadius.circular(999),
                                 ),
                                 child: Text(
@@ -2586,7 +2603,7 @@ try {
                                   style: const TextStyle(
                                     fontSize: 12.5,
                                     fontWeight: FontWeight.w700,
-                                    color: _kEmeraldDark,
+                                    color: CmTheme.navy,
                                   ),
                                 ),
                               ),
@@ -2607,8 +2624,8 @@ try {
                       onPressed: () =>
                           Navigator.of(dialogContext).pop('view_subjects'),
                       style: FilledButton.styleFrom(
-                        backgroundColor: _kNavyDark,
-                        foregroundColor: Colors.white,
+                        backgroundColor: CmTheme.navy,
+                        foregroundColor: CmTheme.surfaceWhite,
                         padding: const EdgeInsets.symmetric(vertical: 15),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
@@ -2631,8 +2648,8 @@ try {
                       onPressed: () =>
                           Navigator.of(dialogContext).pop('scan_next'),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: _kNavyDark,
-                        side: const BorderSide(color: _kNavyDark, width: 1.3),
+                        foregroundColor: CmTheme.navy,
+                        side: const BorderSide(color: CmTheme.navy, width: 1.3),
                         padding: const EdgeInsets.symmetric(vertical: 15),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
@@ -2675,16 +2692,17 @@ try {
   }) {
     final bool isMc = section.sectionType == 'multiple_choice';
     final bool isTf = section.sectionType == 'true_false';
-    final List<String> options =
-        isMc ? const ['A', 'B', 'C', 'D'] : (isTf ? const ['T', 'F'] : const []);
+    final List<String> options = isMc
+        ? const ['A', 'B', 'C', 'D']
+        : (isTf ? const ['T', 'F'] : const []);
 
     final List<Map<String, dynamic>> sourceQuestions =
         sourceSection['questions'] is List
-            ? (sourceSection['questions'] as List)
-                .whereType<Map>()
-                .map((q) => Map<String, dynamic>.from(q))
-                .toList()
-            : const <Map<String, dynamic>>[];
+        ? (sourceSection['questions'] as List)
+              .whereType<Map>()
+              .map((q) => Map<String, dynamic>.from(q))
+              .toList()
+        : const <Map<String, dynamic>>[];
 
     Map<String, dynamic>? findQuestion(int qNum) {
       for (final q in sourceQuestions) {
@@ -2700,17 +2718,18 @@ try {
       final qMeta = findQuestion(answer.questionNumber);
       final expectedKey = (qMeta?['correct_answer']?.toString() ?? '').trim();
 
-      final bool isLowConfidence = !wasOverridden &&
+      final bool isLowConfidence =
+          !wasOverridden &&
           (currentVal == 'Ambiguous' ||
               currentVal == 'Multiple' ||
               currentVal == 'OCR Pending' ||
               (currentVal != 'Unanswered' &&
                   answer.confidence > 0 &&
                   answer.confidence < 0.80) ||
-              (section.sectionType == 'identification' &&
-                  currentVal.isEmpty));
+              (section.sectionType == 'identification' && currentVal.isEmpty));
 
-      final bool isHighConfidence = wasOverridden ||
+      final bool isHighConfidence =
+          wasOverridden ||
           (!isLowConfidence &&
               currentVal.isNotEmpty &&
               currentVal != 'Unanswered' &&
@@ -2725,16 +2744,16 @@ try {
         height: 28,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: CmTheme.surfaceWhite,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: _kLine),
+          border: Border.all(color: CmTheme.lineBorder),
         ),
         child: Text(
           'Q${answer.questionNumber}',
           style: const TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 12.5,
-            color: _kNavy,
+            color: CmTheme.navy,
           ),
         ),
       );
@@ -2747,14 +2766,17 @@ try {
           for (final opt in options)
             _BubbleOptionButton(
               label: isTf ? (opt == 'T' ? 'T (True)' : 'F (False)') : opt,
-              selected: currentVal.toUpperCase() == opt ||
+              selected:
+                  currentVal.toUpperCase() == opt ||
                   (isTf &&
                       ((opt == 'T' && currentVal.toUpperCase() == 'TRUE') ||
                           (opt == 'F' && currentVal.toUpperCase() == 'FALSE'))),
-              isCorrectKey: expectedKey.isNotEmpty &&
+              isCorrectKey:
+                  expectedKey.isNotEmpty &&
                   (expectedKey.toUpperCase() == opt ||
                       (isTf &&
-                          ((opt == 'T' && expectedKey.toUpperCase() == 'TRUE') ||
+                          ((opt == 'T' &&
+                                  expectedKey.toUpperCase() == 'TRUE') ||
                               (opt == 'F' &&
                                   expectedKey.toUpperCase() == 'FALSE')))),
               onTap: () {
@@ -2771,7 +2793,8 @@ try {
         ],
       );
 
-      final isOcrSuggestion = section.sectionType == 'identification' &&
+      final isOcrSuggestion =
+          section.sectionType == 'identification' &&
           !wasOverridden &&
           !isLowConfidence &&
           answer.confidence == 0 &&
@@ -2787,19 +2810,16 @@ try {
 
       return Container(
         margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 10,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           color: isLowConfidence
-              ? _kAmber.withValues(alpha: 0.06)
-              : _kBg,
+              ? CmTheme.amberWarning.withValues(alpha: 0.06)
+              : CmTheme.background,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isLowConfidence
-                ? _kAmber.withValues(alpha: 0.45)
-                : _kLine,
+                ? CmTheme.amberWarning.withValues(alpha: 0.45)
+                : CmTheme.lineBorder,
           ),
         ),
         child: Column(
@@ -2832,33 +2852,37 @@ try {
                         style: const TextStyle(
                           fontSize: 13.5,
                           fontWeight: FontWeight.w700,
-                          color: _kNavy,
+                          color: CmTheme.navy,
                         ),
                         decoration: InputDecoration(
                           hintText: 'TYPE ANSWER IN CAPITAL LETTERS',
                           hintStyle: const TextStyle(
                             fontSize: 12,
-                            color: _kSlate,
+                            color: CmTheme.slateText,
                           ),
                           isDense: true,
                           filled: true,
-                          fillColor: Colors.white,
+                          fillColor: CmTheme.surfaceWhite,
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 12,
                             vertical: 10,
                           ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(color: _kLine),
+                            borderSide: const BorderSide(
+                              color: CmTheme.lineBorder,
+                            ),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(color: _kLine),
+                            borderSide: const BorderSide(
+                              color: CmTheme.lineBorder,
+                            ),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(10),
                             borderSide: const BorderSide(
-                              color: _kNavy,
+                              color: CmTheme.navy,
                               width: 1.5,
                             ),
                           ),
@@ -2884,7 +2908,7 @@ try {
                   style: const TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w600,
-                    color: _kSlate,
+                    color: CmTheme.slateText,
                   ),
                 ),
               ),
@@ -2897,9 +2921,9 @@ try {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _kLine),
+        border: Border.all(color: CmTheme.lineBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2910,13 +2934,13 @@ try {
                 width: 34,
                 height: 34,
                 decoration: BoxDecoration(
-                  color: _kNavy.withValues(alpha: 0.08),
+                  color: CmTheme.navy.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
                   _sectionIcon(section.sectionType),
                   size: 18,
-                  color: _kNavy,
+                  color: CmTheme.navy,
                 ),
               ),
               const SizedBox(width: 10),
@@ -2929,33 +2953,35 @@ try {
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
-                        color: _kNavy,
+                        color: CmTheme.navy,
                       ),
                     ),
                     Text(
                       _displaySectionType(section.sectionType),
                       style: const TextStyle(
                         fontSize: 12.5,
-                        color: _kSlate,
+                        color: CmTheme.slateText,
                       ),
                     ),
                   ],
                 ),
               ),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
-                  color: _kBg,
+                  color: CmTheme.background,
                   borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: _kLine),
+                  border: Border.all(color: CmTheme.lineBorder),
                 ),
                 child: Text(
                   '${section.questionCount} items',
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: _kSlate,
+                    color: CmTheme.slateText,
                   ),
                 ),
               ),
@@ -2963,17 +2989,20 @@ try {
           ),
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 12),
-            child: Divider(height: 1, color: _kLine),
+            child: Divider(height: 1, color: CmTheme.lineBorder),
           ),
           if (isMc || isTf)
             LayoutBuilder(
               builder: (context, constraints) {
                 final answers = section.answers.toList()
-                  ..sort((a, b) => a.questionNumber.compareTo(b.questionNumber));
+                  ..sort(
+                    (a, b) => a.questionNumber.compareTo(b.questionNumber),
+                  );
                 if (answers.isEmpty) return const SizedBox.shrink();
 
                 final platform = Theme.of(context).platform;
-                final isMobileOrTablet = platform == TargetPlatform.android ||
+                final isMobileOrTablet =
+                    platform == TargetPlatform.android ||
                     platform == TargetPlatform.iOS ||
                     MediaQuery.sizeOf(context).width < 1024;
                 final int columnCount;
@@ -2988,7 +3017,7 @@ try {
                 const columnGap = 12.0;
                 final cardWidth =
                     (constraints.maxWidth - (columnCount - 1) * columnGap) /
-                        columnCount;
+                    columnCount;
                 final compact = cardWidth < 320;
                 final rowsPerColumn = answers.length ~/ columnCount;
                 final extraRows = answers.length % columnCount;
@@ -2998,21 +3027,26 @@ try {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        for (var column = 0; column < columnCount; column++) ...[
+                        for (
+                          var column = 0;
+                          column < columnCount;
+                          column++
+                        ) ...[
                           if (column > 0) const SizedBox(width: columnGap),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                for (final answer in answers
-                                    .skip(
-                                      column * rowsPerColumn +
-                                          math.min(column, extraRows),
-                                    )
-                                    .take(
-                                      rowsPerColumn +
-                                          (column < extraRows ? 1 : 0),
-                                    ))
+                                for (final answer
+                                    in answers
+                                        .skip(
+                                          column * rowsPerColumn +
+                                              math.min(column, extraRows),
+                                        )
+                                        .take(
+                                          rowsPerColumn +
+                                              (column < extraRows ? 1 : 0),
+                                        ))
                                   buildAnswerCard(answer, compact: compact),
                               ],
                             ),
@@ -3027,14 +3061,16 @@ try {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              for (var column = 0;
-                                  column < columnCount;
-                                  column++) ...[
+                              for (
+                                var column = 0;
+                                column < columnCount;
+                                column++
+                              ) ...[
                                 if (column > 0)
                                   const VerticalDivider(
                                     width: columnGap,
                                     thickness: 1,
-                                    color: _kLine,
+                                    color: CmTheme.lineBorder,
                                   ),
                                 const Expanded(child: SizedBox.shrink()),
                               ],
@@ -3064,20 +3100,24 @@ try {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: _kAmber.withValues(alpha: 0.18),
+          color: CmTheme.amberWarning.withValues(alpha: 0.18),
           borderRadius: BorderRadius.circular(999),
         ),
         child: const Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.warning_amber_rounded, size: 14, color: _kAmberDark),
+            Icon(
+              Icons.warning_amber_rounded,
+              size: 14,
+              color: CmTheme.amberWarning,
+            ),
             SizedBox(width: 4),
             Text(
               'Review Needed',
               style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w700,
-                color: _kAmberDark,
+                color: CmTheme.navy,
               ),
             ),
           ],
@@ -3089,20 +3129,24 @@ try {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: _kEmerald.withValues(alpha: 0.15),
+          color: CmTheme.emeraldSuccess.withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(999),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.check_circle, size: 14, color: _kEmeraldDark),
+            const Icon(
+              Icons.check_circle,
+              size: 14,
+              color: CmTheme.emeraldSuccess,
+            ),
             const SizedBox(width: 4),
             Text(
               wasOverridden ? 'Verified' : '$confPct% Confident',
               style: const TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w700,
-                color: _kEmeraldDark,
+                color: CmTheme.navy,
               ),
             ),
           ],
@@ -3113,7 +3157,7 @@ try {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: _kLine,
+        color: CmTheme.lineBorder,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
@@ -3123,7 +3167,7 @@ try {
         style: const TextStyle(
           fontSize: 11.5,
           fontWeight: FontWeight.w600,
-          color: _kSlate,
+          color: CmTheme.slateText,
         ),
       ),
     );
@@ -3143,7 +3187,7 @@ try {
             style: const TextStyle(
               fontSize: 12.5,
               fontWeight: FontWeight.w700,
-              color: _kNavy,
+              color: CmTheme.navy,
             ),
           ),
         ),
@@ -3165,8 +3209,8 @@ try {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: isConfident
-            ? _kEmerald.withValues(alpha: 0.14)
-            : _kAmber.withValues(alpha: 0.18),
+            ? CmTheme.emeraldSuccess.withValues(alpha: 0.14)
+            : CmTheme.amberWarning.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Row(
@@ -3175,7 +3219,7 @@ try {
           Icon(
             isConfident ? Icons.check_circle : Icons.warning_amber_rounded,
             size: 13,
-            color: isConfident ? _kEmeraldDark : _kAmberDark,
+            color: CmTheme.navy,
           ),
           const SizedBox(width: 4),
           Text(
@@ -3183,7 +3227,7 @@ try {
             style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w700,
-              color: isConfident ? _kEmeraldDark : _kAmberDark,
+              color: CmTheme.navy,
             ),
           ),
         ],
@@ -3195,21 +3239,21 @@ try {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: _kBg,
+        color: CmTheme.background,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: _kLine),
+        border: Border.all(color: CmTheme.lineBorder),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: _kSlate),
+          Icon(icon, size: 14, color: CmTheme.slateText),
           const SizedBox(width: 5),
           Text(
             text,
             style: const TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: _kSlate,
+              color: CmTheme.slateText,
             ),
           ),
         ],
@@ -3225,23 +3269,23 @@ try {
     return InputDecoration(
       labelText: label,
       hintText: hint,
-      hintStyle: const TextStyle(fontSize: 13, color: _kSlate),
-      prefixIcon: Icon(prefixIcon, size: 18, color: _kSlate),
+      hintStyle: const TextStyle(fontSize: 13, color: CmTheme.slateText),
+      prefixIcon: Icon(prefixIcon, size: 18, color: CmTheme.slateText),
       isDense: true,
       filled: true,
-      fillColor: _kBg,
+      fillColor: CmTheme.background,
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: _kLine),
+        borderSide: const BorderSide(color: CmTheme.lineBorder),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: _kLine),
+        borderSide: const BorderSide(color: CmTheme.lineBorder),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: _kNavy, width: 1.5),
+        borderSide: const BorderSide(color: CmTheme.navy, width: 1.5),
       ),
     );
   }
@@ -3303,19 +3347,19 @@ try {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _kBg,
+      backgroundColor: CmTheme.background,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        foregroundColor: _kNavy,
+        backgroundColor: CmTheme.surfaceWhite,
+        foregroundColor: CmTheme.navy,
         elevation: 0,
-        surfaceTintColor: Colors.transparent,
+        surfaceTintColor: CmTheme.transparent,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
               'Answer Sheet Scanner',
               style: TextStyle(
-                color: _kNavy,
+                color: CmTheme.navy,
                 fontWeight: FontWeight.w700,
                 fontSize: 17,
               ),
@@ -3324,7 +3368,7 @@ try {
               Text(
                 _examTitle(),
                 style: const TextStyle(
-                  color: _kSlate,
+                  color: CmTheme.slateText,
                   fontSize: 12,
                   fontWeight: FontWeight.w500,
                 ),
@@ -3333,7 +3377,7 @@ try {
         ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: _kLine),
+          child: Container(height: 1, color: CmTheme.lineBorder),
         ),
       ),
       body: LayoutBuilder(
@@ -3369,9 +3413,9 @@ try {
         Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: CmTheme.surfaceWhite,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _kLine),
+            border: Border.all(color: CmTheme.lineBorder),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -3382,12 +3426,12 @@ try {
                     width: 40,
                     height: 40,
                     decoration: BoxDecoration(
-                      color: _kNavy.withValues(alpha: 0.08),
+                      color: CmTheme.navy.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: const Icon(
                       Icons.image_outlined,
-                      color: _kNavy,
+                      color: CmTheme.navy,
                       size: 22,
                     ),
                   ),
@@ -3401,7 +3445,7 @@ try {
                           style: TextStyle(
                             fontSize: 17,
                             fontWeight: FontWeight.w700,
-                            color: _kNavy,
+                            color: CmTheme.navy,
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -3409,21 +3453,20 @@ try {
                           _fileName ?? 'Answer Sheet Image',
                           style: const TextStyle(
                             fontSize: 13,
-                            color: _kSlate,
+                            color: CmTheme.slateText,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  if (_detectedMarkers != null &&
-                      _detectedMarkers!.length == 4)
+                  if (_detectedMarkers != null && _detectedMarkers!.length == 4)
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 10,
                         vertical: 5,
                       ),
                       decoration: BoxDecoration(
-                        color: _kEmerald.withValues(alpha: 0.14),
+                        color: CmTheme.emeraldSuccess.withValues(alpha: 0.14),
                         borderRadius: BorderRadius.circular(999),
                       ),
                       child: const Row(
@@ -3432,7 +3475,7 @@ try {
                           Icon(
                             Icons.check_circle,
                             size: 15,
-                            color: _kEmeraldDark,
+                            color: CmTheme.navy,
                           ),
                           SizedBox(width: 5),
                           Text(
@@ -3440,7 +3483,7 @@ try {
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
-                              color: _kEmeraldDark,
+                              color: CmTheme.navy,
                             ),
                           ),
                         ],
@@ -3451,7 +3494,8 @@ try {
               const SizedBox(height: 16),
               _buildImagePreviewWithOverlay(
                 _processedImageBytes ?? _imageBytes!,
-                showMarkerOverlay: _detectedMarkers != null &&
+                showMarkerOverlay:
+                    _detectedMarkers != null &&
                     _processedImageBytes == null &&
                     _sourceImageWidth != null &&
                     _sourceImageHeight != null,
@@ -3485,12 +3529,12 @@ try {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 48),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _kLine, width: 1.5),
+        border: Border.all(color: CmTheme.lineBorder, width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: _kNavy.withValues(alpha: 0.04),
+            color: CmTheme.scanCardShadow,
             blurRadius: 18,
             offset: const Offset(0, 6),
           ),
@@ -3503,13 +3547,13 @@ try {
             width: 76,
             height: 76,
             decoration: BoxDecoration(
-              color: _kNavy.withValues(alpha: 0.08),
+              color: CmTheme.navy.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(20),
             ),
             child: const Icon(
               Icons.upload_file_outlined,
               size: 38,
-              color: _kNavy,
+              color: CmTheme.navy,
             ),
           ),
           const SizedBox(height: 20),
@@ -3519,7 +3563,7 @@ try {
             style: TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.w800,
-              color: _kNavy,
+              color: CmTheme.navy,
             ),
           ),
           const SizedBox(height: 8),
@@ -3528,7 +3572,7 @@ try {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 14,
-              color: _kSlate,
+              color: CmTheme.slateText,
               height: 1.45,
             ),
           ),
@@ -3541,8 +3585,8 @@ try {
               FilledButton.icon(
                 onPressed: _pickImage,
                 style: FilledButton.styleFrom(
-                  backgroundColor: _kNavyDark,
-                  foregroundColor: Colors.white,
+                  backgroundColor: CmTheme.navy,
+                  foregroundColor: CmTheme.surfaceWhite,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 24,
                     vertical: 16,
@@ -3554,18 +3598,15 @@ try {
                 icon: const Icon(Icons.upload_outlined),
                 label: const Text(
                   'Choose Answer Sheet Image',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14.5,
-                  ),
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
                 ),
               ),
               if (isMobileViewport && !kIsWeb)
                 OutlinedButton.icon(
                   onPressed: _openCameraCapture,
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: _kNavy,
-                    side: const BorderSide(color: _kNavy, width: 1.2),
+                    foregroundColor: CmTheme.navy,
+                    side: const BorderSide(color: CmTheme.navy, width: 1.2),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 20,
                       vertical: 16,
@@ -3598,8 +3639,8 @@ try {
       width: double.infinity,
       height: 460,
       decoration: BoxDecoration(
-        color: _kBg,
-        border: Border.all(color: _kLine),
+        color: CmTheme.background,
+        border: Border.all(color: CmTheme.lineBorder),
         borderRadius: BorderRadius.circular(14),
       ),
       child: ClipRRect(
@@ -3638,9 +3679,9 @@ try {
       margin: const EdgeInsets.only(bottom: 20),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _kLine),
+        border: Border.all(color: CmTheme.lineBorder),
       ),
       child: Row(
         children: [
@@ -3649,7 +3690,7 @@ try {
             height: 24,
             child: CircularProgressIndicator(
               strokeWidth: 2.5,
-              color: _kNavy,
+              color: CmTheme.navy,
             ),
           ),
           const SizedBox(width: 16),
@@ -3660,7 +3701,7 @@ try {
                   : 'Detecting registration markers, correcting perspective, and analyzing OMR bubbles...',
               style: const TextStyle(
                 fontWeight: FontWeight.w600,
-                color: _kNavy,
+                color: CmTheme.navy,
               ),
             ),
           ),
@@ -3690,9 +3731,9 @@ try {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _kLine),
+        border: Border.all(color: CmTheme.lineBorder),
       ),
       child: Row(
         children: [
@@ -3700,13 +3741,10 @@ try {
             width: 38,
             height: 38,
             decoration: BoxDecoration(
-              color: _kEmerald.withValues(alpha: 0.14),
+              color: CmTheme.emeraldSuccess.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(
-              Icons.check_circle_outline,
-              color: _kEmeraldDark,
-            ),
+            child: const Icon(Icons.check_circle_outline, color: CmTheme.navy),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -3714,7 +3752,7 @@ try {
               'OMR complete: ${result.answeredQuestions} of ${result.detectedQuestions} questions answered.',
               style: const TextStyle(
                 fontWeight: FontWeight.w600,
-                color: _kNavy,
+                color: CmTheme.navy,
               ),
             ),
           ),
@@ -3728,9 +3766,9 @@ try {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _kLine),
+        border: Border.all(color: CmTheme.lineBorder),
       ),
       child: Row(
         children: [
@@ -3738,7 +3776,7 @@ try {
             width: 64,
             height: 64,
             decoration: BoxDecoration(
-              color: _kEmerald.withValues(alpha: 0.14),
+              color: CmTheme.lineBorder,
               shape: BoxShape.circle,
             ),
             alignment: Alignment.center,
@@ -3747,7 +3785,7 @@ try {
               style: const TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w800,
-                color: _kEmeraldDark,
+                color: CmTheme.navy,
               ),
             ),
           ),
@@ -3763,7 +3801,7 @@ try {
                       style: const TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.w800,
-                        color: _kNavy,
+                        color: CmTheme.navy,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -3774,7 +3812,7 @@ try {
                           vertical: 3,
                         ),
                         decoration: BoxDecoration(
-                          color: _kEmerald.withValues(alpha: 0.14),
+                          color: CmTheme.emeraldSuccess.withValues(alpha: 0.14),
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Text(
@@ -3784,7 +3822,7 @@ try {
                           style: const TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
-                            color: _kEmeraldDark,
+                            color: CmTheme.navy,
                           ),
                         ),
                       ),
@@ -3793,7 +3831,10 @@ try {
                 const SizedBox(height: 4),
                 Text(
                   '${result.correctAnswers} correct • ${result.answeredQuestions} answered • ${result.totalQuestions} total',
-                  style: const TextStyle(fontSize: 13, color: _kSlate),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: CmTheme.slateText,
+                  ),
                 ),
                 if (rec != null) ...[
                   const SizedBox(height: 4),
@@ -3802,7 +3843,7 @@ try {
                     style: const TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w600,
-                      color: _kNavy,
+                      color: CmTheme.navy,
                     ),
                   ),
                 ],
@@ -3833,16 +3874,16 @@ try {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _kLine),
+        border: Border.all(color: CmTheme.lineBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.crop_free, size: 19, color: _kNavy),
+              const Icon(Icons.crop_free, size: 19, color: CmTheme.navy),
               const SizedBox(width: 8),
               const Expanded(
                 child: Text(
@@ -3850,7 +3891,7 @@ try {
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 15,
-                    color: _kNavy,
+                    color: CmTheme.navy,
                   ),
                 ),
               ),
@@ -3859,7 +3900,7 @@ try {
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: _kSlate,
+                  color: CmTheme.slateText,
                 ),
               ),
             ],
@@ -3877,9 +3918,9 @@ try {
                     vertical: 10,
                   ),
                   decoration: BoxDecoration(
-                    color: _kBg,
+                    color: CmTheme.background,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: _kLine),
+                    border: Border.all(color: CmTheme.lineBorder),
                   ),
                   child: Row(
                     children: [
@@ -3887,7 +3928,7 @@ try {
                         width: 10,
                         height: 10,
                         decoration: const BoxDecoration(
-                          color: _kEmerald,
+                          color: CmTheme.emeraldSuccess,
                           shape: BoxShape.circle,
                         ),
                       ),
@@ -3901,14 +3942,14 @@ try {
                               style: const TextStyle(
                                 fontSize: 12.5,
                                 fontWeight: FontWeight.w700,
-                                color: _kNavy,
+                                color: CmTheme.navy,
                               ),
                             ),
                             Text(
                               '(${markers[idx].x.toStringAsFixed(1)}, ${markers[idx].y.toStringAsFixed(1)}) • $estMarkerPx×${estMarkerPx}px',
                               style: const TextStyle(
                                 fontSize: 11.5,
-                                color: _kSlate,
+                                color: CmTheme.slateText,
                               ),
                             ),
                           ],
@@ -3951,9 +3992,9 @@ try {
         OutlinedButton.icon(
           onPressed: (_isProcessing || _isSavingScore) ? null : _chooseAnother,
           style: OutlinedButton.styleFrom(
-            foregroundColor: _kNavy,
-            side: const BorderSide(color: _kSlate),
-            backgroundColor: Colors.white,
+            foregroundColor: CmTheme.navy,
+            side: const BorderSide(color: CmTheme.slateText),
+            backgroundColor: CmTheme.surfaceWhite,
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14),
@@ -3969,8 +4010,8 @@ try {
           FilledButton.icon(
             onPressed: (_isProcessing || _isSavingScore) ? null : _processImage,
             style: FilledButton.styleFrom(
-              backgroundColor: _kNavyDark,
-              foregroundColor: Colors.white,
+              backgroundColor: CmTheme.navy,
+              foregroundColor: CmTheme.surfaceWhite,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
@@ -3987,11 +4028,11 @@ try {
             onPressed: (_isProcessing || _isSavingScore)
                 ? null
                 : (_omrResult == null
-                    ? _runOMR
-                    : () => _verifyDetectedAnswers(_omrResult!)),
+                      ? _runOMR
+                      : () => _verifyDetectedAnswers(_omrResult!)),
             style: FilledButton.styleFrom(
-              backgroundColor: _kNavyDark,
-              foregroundColor: Colors.white,
+              backgroundColor: CmTheme.navy,
+              foregroundColor: CmTheme.surfaceWhite,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
@@ -4007,8 +4048,8 @@ try {
               _omrResult == null
                   ? 'Confirm Processed Image & Detect Answers'
                   : (_answersVerified
-                      ? 'Review & Update Recorded Score'
-                      : 'Verify Student Answers & Record Score'),
+                        ? 'Review & Update Recorded Score'
+                        : 'Verify Student Answers & Record Score'),
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
@@ -4036,11 +4077,11 @@ class _BubbleOptionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color bg = selected ? _kNavyDark : Colors.white;
-    final Color fg = selected ? Colors.white : _kNavy;
-    final Color border = selected
-        ? _kNavyDark
-        : (isCorrectKey ? _kEmerald : _kLine);
+    final Color bg = selected ? CmTheme.navy : CmTheme.surfaceWhite;
+    final Color fg = selected ? CmTheme.surfaceWhite : CmTheme.navy;
+    final Color border = isCorrectKey
+        ? CmTheme.emeraldSuccess
+        : (selected ? CmTheme.navy : CmTheme.lineBorder);
 
     return Material(
       color: bg,
@@ -4064,7 +4105,7 @@ class _BubbleOptionButton extends StatelessWidget {
                     ? Icons.radio_button_checked
                     : Icons.radio_button_unchecked,
                 size: 15,
-                color: selected ? _kEmerald : _kSlate,
+                color: selected ? CmTheme.surfaceWhite : CmTheme.slateText,
               ),
               const SizedBox(width: 5),
               Flexible(
@@ -4180,7 +4221,7 @@ class _MarkerCoordinatesOverlayPainter extends CustomPainter {
       canvas.drawPath(
         poly,
         Paint()
-          ..color = _kEmerald.withValues(alpha: 0.85)
+          ..color = CmTheme.emeraldSuccess.withValues(alpha: 0.85)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2.0,
       );
@@ -4191,14 +4232,14 @@ class _MarkerCoordinatesOverlayPainter extends CustomPainter {
         pt,
         8,
         Paint()
-          ..color = _kEmerald
+          ..color = CmTheme.emeraldSuccess
           ..style = PaintingStyle.fill,
       );
       canvas.drawCircle(
         pt,
         12,
         Paint()
-          ..color = Colors.white
+          ..color = CmTheme.surfaceWhite
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2,
       );

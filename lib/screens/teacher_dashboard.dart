@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -9,7 +10,7 @@ import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import 'answer_sheet_input_screen.dart';
 import 'exams_tab.dart';
-import 'login_screen.dart' show CmColors, LoginScreen;
+import 'login_screen.dart' show LoginScreen;
 import 'my_subjects_screen.dart';
 import 'students_screen.dart';
 
@@ -22,11 +23,11 @@ const double _kSidebarRail = 80;
 
 class _Pal {
   _Pal._();
-  static const Color sidebar = Color(0xFF162137);
-  static const Color sidebarActive = Color(0xFF2D384D);
-  static const Color sidebarFg = Color(0xFFCFD8E5);
-  static const Color notifDot = Color(0xFFF7A224);
-  static final Color divider = Colors.white.withValues(alpha: 0.12);
+  static const Color sidebar = CmTheme.navy;
+  static final Color sidebarActive = CmTheme.sidebarActiveSurface;
+  static const Color sidebarFg = CmTheme.surfaceWhite;
+  static const Color notifDot = CmTheme.amberWarning;
+  static final Color divider = CmTheme.sidebarDivider;
 }
 
 final ValueNotifier<bool> _sidebarCollapsed = ValueNotifier<bool>(false);
@@ -61,8 +62,7 @@ String _prettyStatus(String? raw) {
       .join(' ');
 }
 
-bool _isDone(String status) =>
-    status == 'Completed' || status == 'Finalized';
+bool _isDone(String status) => status == 'Completed' || status == 'Finalized';
 
 String _classCode(JsonMap c) {
   final subject = c['subject'];
@@ -158,8 +158,8 @@ class _DashboardMetrics {
   }) {
     final targetAnalytics =
         selectedExamId != null && byExam.containsKey(selectedExamId)
-            ? [byExam[selectedExamId]!]
-            : byExam.values.toList();
+        ? [byExam[selectedExamId]!]
+        : byExam.values.toList();
 
     int idRev = 0;
     int omrRev = 0;
@@ -230,8 +230,7 @@ class _DashboardMetrics {
 
     String banner;
     if (count == 0) {
-      banner =
-          'No recorded exam attempts yet. Scan answer sheets to generate item difficulty analysis and smart recommendations.';
+      banner = 'No recorded exam attempts yet. Scan answer sheets to generate item difficulty analysis and smart recommendations.';
     } else if (lowItems > 0) {
       final sampleNums = missedQuestions.take(4).map((q) => '#$q').join(', ');
       final itemWord = lowItems == 1 ? 'item' : 'items';
@@ -378,9 +377,8 @@ Future<void> _performLogout(BuildContext context) async {
 }
 
 void _soon(BuildContext context, String what) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text('$what is coming soon.')),
-  );
+  ScaffoldMessenger.of(context)
+      .showSnackBar(SnackBar(content: Text('$what is coming soon.')));
 }
 
 class _ModuleShell extends StatelessWidget {
@@ -421,8 +419,9 @@ class _ModuleShell extends StatelessWidget {
               onSearchChanged: (v) => mySubjectsSearch.value = v,
             )
           : (hasHeader ? const _DesktopTopBar() : null),
-      mobileActions:
-          hasHeader ? const [_NotificationBell(onDark: true)] : const [],
+      mobileActions: hasHeader
+          ? const [_NotificationBell(onDark: true)]
+          : const [],
       child: child,
     );
   }
@@ -480,7 +479,7 @@ class _TeacherShellState extends State<TeacherShell> {
 
         if (w >= _kDesktop) {
           return Scaffold(
-            backgroundColor: CmColors.bg,
+            backgroundColor: CmTheme.background,
             body: Row(
               children: [
                 ValueListenableBuilder<bool>(
@@ -523,7 +522,7 @@ class _TeacherShellState extends State<TeacherShell> {
           children: [
             Positioned.fill(
               child: Scaffold(
-                backgroundColor: CmColors.bg,
+                backgroundColor: CmTheme.background,
                 body: Column(
                   children: [
                     _MobileTopBar(
@@ -535,9 +534,8 @@ class _TeacherShellState extends State<TeacherShell> {
                 ),
                 bottomNavigationBar: isMobile
                     ? NavigationBar(
-                        backgroundColor: Colors.white,
-                        indicatorColor:
-                            _Pal.sidebar.withValues(alpha: 0.10),
+                        backgroundColor: CmTheme.surfaceWhite,
+                        indicatorColor: _Pal.sidebar.withValues(alpha: 0.10),
                         selectedIndex: bottomIndex == -1 ? 4 : bottomIndex,
                         onDestinationSelected: (i) {
                           if (i == 4) {
@@ -549,16 +547,21 @@ class _TeacherShellState extends State<TeacherShell> {
                         destinations: [
                           for (final p in _bottomPages)
                             NavigationDestination(
-                              icon: Icon(p.icon, color: CmColors.slate),
+                              icon: Icon(p.icon, color: CmTheme.slateText),
                               selectedIcon: Icon(p.icon, color: _Pal.sidebar),
                               label: p == TeacherPage.dashboard
                                   ? 'Home'
                                   : p.label,
                             ),
                           const NavigationDestination(
-                            icon: Icon(Icons.more_horiz, color: CmColors.slate),
-                            selectedIcon:
-                                Icon(Icons.more_horiz, color: _Pal.sidebar),
+                            icon: Icon(
+                              Icons.more_horiz,
+                              color: CmTheme.slateText,
+                            ),
+                            selectedIcon: Icon(
+                              Icons.more_horiz,
+                              color: _Pal.sidebar,
+                            ),
                             label: 'More',
                           ),
                         ],
@@ -596,9 +599,7 @@ class _TeacherShellState extends State<TeacherShell> {
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onTap: _closeDrawer,
-                      child: ColoredBox(
-                        color: Colors.black.withValues(alpha: 0.5 * t),
-                      ),
+                      child: ColoredBox(color: CmTheme.navigationBackdrop(t)),
                     ),
                   ),
                 ),
@@ -789,8 +790,9 @@ class _Sidebar extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
         child: Row(
-          mainAxisAlignment:
-              showLabels ? MainAxisAlignment.start : MainAxisAlignment.center,
+          mainAxisAlignment: showLabels
+              ? MainAxisAlignment.start
+              : MainAxisAlignment.center,
           children: [
             avatar,
             if (showLabels) ...[
@@ -829,7 +831,7 @@ class _Sidebar extends StatelessWidget {
     );
 
     return Material(
-      color: Colors.transparent,
+      color: CmTheme.transparent,
       child: showLabels
           ? content
           : Tooltip(message: 'Profile — $userName', child: content),
@@ -954,7 +956,7 @@ class _SidebarItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final item = Material(
-      color: active ? _Pal.sidebarActive : Colors.transparent,
+      color: active ? _Pal.sidebarActive : CmTheme.transparent,
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
@@ -1061,7 +1063,9 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
           'Content-Type': 'application/json',
         },
       );
-      if (res.statusCode >= 200 && res.statusCode < 300 && res.body.isNotEmpty) {
+      if (res.statusCode >= 200 &&
+          res.statusCode < 300 &&
+          res.body.isNotEmpty) {
         return jsonDecode(res.body);
       }
     } catch (_) {}
@@ -1113,9 +1117,10 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
       final secType = (s['question_type'] ?? s['exam_type'] ?? s['type'] ?? '')
           .toString()
           .toLowerCase();
-      final secName =
-          (s['name'] ?? s['section_name'] ?? s['title'] ?? secType).toString();
-      final defaultPts = double.tryParse(
+      final secName = (s['name'] ?? s['section_name'] ?? s['title'] ?? secType)
+          .toString();
+      final defaultPts =
+          double.tryParse(
             (s['default_points'] ?? s['item_weight'] ?? 1).toString(),
           ) ??
           1.0;
@@ -1138,13 +1143,15 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
 
       for (final q in qList) {
         final qId = int.tryParse(q['id']?.toString() ?? '');
-        final qNo = int.tryParse(
+        final qNo =
+            int.tryParse(
               (q['question_number'] ?? q['question_no'] ?? q['number'] ?? '')
                   .toString(),
             ) ??
             0;
         final pts =
-            double.tryParse((q['points'] ?? defaultPts).toString()) ?? defaultPts;
+            double.tryParse((q['points'] ?? defaultPts).toString()) ??
+            defaultPts;
         final qType = (q['question_type'] ?? q['exam_type'] ?? secType)
             .toString()
             .toLowerCase();
@@ -1161,7 +1168,8 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     }
 
     if (maxPossiblePoints <= 0) {
-      maxPossiblePoints = double.tryParse(
+      maxPossiblePoints =
+          double.tryParse(
             (examMap['total_points'] ??
                     rawExam['total_points'] ??
                     rawExam['total_items'] ??
@@ -1175,7 +1183,8 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     if (attemptsData is List) {
       attemptsList = attemptsData;
     } else if (attemptsData is Map) {
-      final inner = attemptsData['attempts'] ??
+      final inner =
+          attemptsData['attempts'] ??
           attemptsData['data'] ??
           attemptsData['results'];
       if (inner is List) attemptsList = inner;
@@ -1195,11 +1204,13 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     for (final att in attemptsList) {
       if (att is! Map) continue;
 
-      final score = double.tryParse(
+      final score =
+          double.tryParse(
             (att['total_score'] ?? att['score'] ?? 0).toString(),
           ) ??
           0.0;
-      final attMax = double.tryParse(
+      final attMax =
+          double.tryParse(
             (att['max_score'] ?? att['total_points'] ?? maxPossiblePoints)
                 .toString(),
           ) ??
@@ -1214,15 +1225,18 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
 
         for (final ans in answers) {
           if (ans is! Map) continue;
-          final qId =
-              int.tryParse((ans['question_id'] ?? ans['id'] ?? '').toString());
-          final qNo = int.tryParse(
+          final qId = int.tryParse(
+            (ans['question_id'] ?? ans['id'] ?? '').toString(),
+          );
+          final qNo =
+              int.tryParse(
                 (ans['question_number'] ?? ans['question_no'] ?? '').toString(),
               ) ??
               (qId != null ? (questionNumberById[qId] ?? 0) : 0);
           final key = qNo > 0 ? qNo : (qId ?? 0);
 
-          final isCorrect = ans['is_correct'] == true ||
+          final isCorrect =
+              ans['is_correct'] == true ||
               ans['is_correct']?.toString() == 'true' ||
               ans['is_correct'] == 1;
 
@@ -1244,14 +1258,16 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
           final status = (ans['status'] ?? ans['verification_status'] ?? '')
               .toString()
               .toLowerCase();
-          final recognized =
-              (ans['recognized_text'] ?? ans['answer'] ?? '').toString().trim();
-          final qType = (ans['question_type'] ??
-                  ans['exam_type'] ??
-                  (qId != null ? questionTypeById[qId] : '') ??
-                  '')
+          final recognized = (ans['recognized_text'] ?? ans['answer'] ?? '')
               .toString()
-              .toLowerCase();
+              .trim();
+          final qType =
+              (ans['question_type'] ??
+                      ans['exam_type'] ??
+                      (qId != null ? questionTypeById[qId] : '') ??
+                      '')
+                  .toString()
+                  .toLowerCase();
 
           if (status.contains('review') ||
               status.contains('ambiguous') ||
@@ -1339,12 +1355,14 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
       final rawExams = results[1];
 
       final counts = <String, int>{};
-      await Future.wait(rawClasses.map((c) async {
-        final id = int.tryParse(c['id']?.toString() ?? '');
-        if (id == null) return;
-        final students = await ApiService.getStudents(token, classId: id);
-        counts[id.toString()] = students.length;
-      }));
+      await Future.wait(
+        rawClasses.map((c) async {
+          final id = int.tryParse(c['id']?.toString() ?? '');
+          if (id == null) return;
+          final students = await ApiService.getStudents(token, classId: id);
+          counts[id.toString()] = students.length;
+        }),
+      );
 
       String codeForExam(JsonMap e) {
         final cd = e['class'];
@@ -1487,8 +1505,8 @@ class _DesktopTopBar extends StatelessWidget {
       height: 64,
       padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: CmColors.line)),
+        color: CmTheme.surfaceWhite,
+        border: Border(bottom: BorderSide(color: CmTheme.lineBorder)),
       ),
       child: Row(
         children: [
@@ -1499,7 +1517,7 @@ class _DesktopTopBar extends StatelessWidget {
                 tooltip: collapsed ? 'Expand sidebar' : 'Collapse sidebar',
                 icon: Icon(
                   collapsed ? Icons.chevron_right : Icons.chevron_left,
-                  color: CmColors.slate,
+                  color: CmTheme.slateText,
                 ),
                 onPressed: () => _sidebarCollapsed.value = !collapsed,
               );
@@ -1513,28 +1531,34 @@ class _DesktopTopBar extends StatelessWidget {
                 constraints: const BoxConstraints(maxWidth: 480),
                 child: TextField(
                   onChanged: onSearchChanged,
-                  style: const TextStyle(color: CmColors.navy),
+                  style: const TextStyle(color: CmTheme.navy),
                   decoration: InputDecoration(
                     hintText: hint,
-                    hintStyle:
-                        const TextStyle(color: CmColors.slate, fontSize: 14),
-                    prefixIcon:
-                        const Icon(Icons.search, color: CmColors.slate),
+                    hintStyle: const TextStyle(
+                      color: CmTheme.slateText,
+                      fontSize: 14,
+                    ),
+                    prefixIcon: const Icon(
+                      Icons.search,
+                      color: CmTheme.slateText,
+                    ),
                     isDense: true,
                     filled: true,
-                    fillColor: CmColors.bg,
+                    fillColor: CmTheme.background,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: CmColors.line),
+                      borderSide: const BorderSide(color: CmTheme.lineBorder),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: CmColors.line),
+                      borderSide: const BorderSide(color: CmTheme.lineBorder),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide:
-                          const BorderSide(color: _Pal.sidebar, width: 1.5),
+                      borderSide: const BorderSide(
+                        color: _Pal.sidebar,
+                        width: 1.5,
+                      ),
                     ),
                   ),
                 ),
@@ -1563,7 +1587,7 @@ class _NotificationBell extends StatelessWidget {
         children: [
           Icon(
             Icons.notifications_none,
-            color: onDark ? _Pal.sidebarFg : CmColors.navy,
+            color: onDark ? _Pal.sidebarFg : CmTheme.navy,
           ),
           Positioned(
             right: -1,
@@ -1575,7 +1599,7 @@ class _NotificationBell extends StatelessWidget {
                 color: _Pal.notifDot,
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: onDark ? _Pal.sidebar : Colors.white,
+                  color: onDark ? _Pal.sidebar : CmTheme.surfaceWhite,
                   width: 1.5,
                 ),
               ),
@@ -1599,16 +1623,21 @@ class _PlaceholderPage extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(page.icon, size: 56, color: CmColors.slate),
+            Icon(page.icon, size: 56, color: CmTheme.slateText),
             const SizedBox(height: 16),
-            Text(page.label,
-                style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    color: CmColors.navy)),
+            Text(
+              page.label,
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+                color: CmTheme.navy,
+              ),
+            ),
             const SizedBox(height: 8),
-            const Text('This section is not built yet.',
-                style: TextStyle(color: CmColors.slate)),
+            const Text(
+              'This section is not built yet.',
+              style: TextStyle(color: CmTheme.slateText),
+            ),
           ],
         ),
       ),
@@ -1642,12 +1671,27 @@ class _DashboardContent extends StatelessWidget {
   final ValueChanged<int?> onSelectExamId;
 
   static const _months = [
-    'January', 'February', 'March', 'April', 'May', 'June', 'July',
-    'August', 'September', 'October', 'November', 'December'
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
   ];
   static const _days = [
-    'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
-    'Sunday'
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
   ];
 
   String _today() {
@@ -1657,61 +1701,70 @@ class _DashboardContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (context, constraints) {
-      final pad = constraints.maxWidth >= _kTablet ? 32.0 : 16.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final pad = constraints.maxWidth >= _kTablet ? 32.0 : 16.0;
 
-      return SingleChildScrollView(
-        padding: EdgeInsets.all(pad),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1200),
-            child: LayoutBuilder(builder: (context, inner) {
-              final w = inner.maxWidth;
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Welcome Back, $teacherName',
-                    style: const TextStyle(
-                      fontSize: 26,
-                      fontWeight: FontWeight.w700,
-                      color: CmColors.navy,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(_today(),
-                      style: const TextStyle(color: CmColors.slate)),
-                  const SizedBox(height: 24),
-                  if (loading)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 48),
-                      child: Center(child: CircularProgressIndicator()),
-                    )
-                  else if (error != null)
-                    _ErrorPanel(message: error!, onRetry: onRetry)
-                  else ...[
-                    _stats(w),
-                    const SizedBox(height: 24),
-                    _reviewAndAnalytics(context, w),
-                    const SizedBox(height: 32),
-                    _sectionHeader('Recent Examinations', 'View all',
-                        () => onNavigate(TeacherPage.exams)),
-                    const SizedBox(height: 12),
-                    if (exams.isEmpty)
-                      const _EmptyPanel('No examinations yet.')
-                    else if (w >= 720)
-                      _ExamTable(exams: exams, onOpenExam: onOpenExam)
-                    else
-                      _ExamCards(exams: exams, onOpenExam: onOpenExam),
-                    const SizedBox(height: 16),
-                  ],
-                ],
-              );
-            }),
+        return SingleChildScrollView(
+          padding: EdgeInsets.all(pad),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1200),
+              child: LayoutBuilder(
+                builder: (context, inner) {
+                  final w = inner.maxWidth;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Welcome Back, $teacherName',
+                        style: const TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w700,
+                          color: CmTheme.navy,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _today(),
+                        style: const TextStyle(color: CmTheme.slateText),
+                      ),
+                      const SizedBox(height: 24),
+                      if (loading)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 48),
+                          child: Center(child: CircularProgressIndicator()),
+                        )
+                      else if (error != null)
+                        _ErrorPanel(message: error!, onRetry: onRetry)
+                      else ...[
+                        _stats(w),
+                        const SizedBox(height: 24),
+                        _reviewAndAnalytics(context, w),
+                        const SizedBox(height: 32),
+                        _sectionHeader(
+                          'Recent Examinations',
+                          'View all',
+                          () => onNavigate(TeacherPage.exams),
+                        ),
+                        const SizedBox(height: 12),
+                        if (exams.isEmpty)
+                          const _EmptyPanel('No examinations yet.')
+                        else if (w >= 720)
+                          _ExamTable(exams: exams, onOpenExam: onOpenExam)
+                        else
+                          _ExamCards(exams: exams, onOpenExam: onOpenExam),
+                        const SizedBox(height: 16),
+                      ],
+                    ],
+                  );
+                },
+              ),
+            ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
   }
 
   Widget _stats(double w) {
@@ -1732,14 +1785,16 @@ class _DashboardContent extends StatelessWidget {
         note: metrics.totalForReview == 0
             ? 'All sheets verified'
             : 'Pending scan or verification',
-        color: CmColors.amber,
+        color: metrics.idReviewPapers > 0 || metrics.omrReviewPapers > 0
+            ? CmTheme.amberWarning
+            : CmTheme.slateText,
       ),
       _StatCard(
         icon: Icons.check_circle_outline,
         value: '$completed',
         label: 'Completed Exams',
         note: 'Finalized',
-        color: CmColors.green,
+        color: CmTheme.emeraldSuccess,
       ),
     ]);
   }
@@ -1773,27 +1828,32 @@ class _DashboardContent extends StatelessWidget {
         ],
       );
     }
-    return Column(
-      children: [review, const SizedBox(height: 16), analytics],
-    );
+    return Column(children: [review, const SizedBox(height: 16), analytics]);
   }
 
   Widget _sectionHeader(String title, String? action, VoidCallback? onTap) {
     return Row(
       children: [
         Expanded(
-          child: Text(title,
-              style: const TextStyle(
-                  fontSize: 19,
-                  fontWeight: FontWeight.w700,
-                  color: CmColors.navy)),
+          child: Text(
+            title,
+            style: const TextStyle(
+              fontSize: 19,
+              fontWeight: FontWeight.w700,
+              color: CmTheme.navy,
+            ),
+          ),
         ),
         if (action != null)
           TextButton(
             onPressed: onTap,
-            child: Text(action,
-                style: const TextStyle(
-                    color: CmColors.navy, fontWeight: FontWeight.w700)),
+            child: Text(
+              action,
+              style: const TextStyle(
+                color: CmTheme.navy,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
       ],
     );
@@ -1805,9 +1865,7 @@ class _DashboardContent extends StatelessWidget {
     return Wrap(
       spacing: gap,
       runSpacing: gap,
-      children: [
-        for (final c in children) SizedBox(width: itemW, child: c),
-      ],
+      children: [for (final c in children) SizedBox(width: itemW, child: c)],
     );
   }
 }
@@ -1824,9 +1882,9 @@ class _Panel extends StatelessWidget {
     return Container(
       padding: EdgeInsets.all(padding),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderColor ?? CmColors.line),
+        border: Border.all(color: borderColor ?? CmTheme.lineBorder),
       ),
       child: child,
     );
@@ -1839,7 +1897,7 @@ class _StatCard extends StatelessWidget {
     required this.value,
     required this.label,
     required this.note,
-    this.color = CmColors.navy,
+    this.color = CmTheme.navy,
   });
 
   final IconData icon;
@@ -1856,20 +1914,31 @@ class _StatCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(value,
-                    style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.w700,
-                        color: CmColors.navy,
-                        height: 1.1)),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.w700,
+                    color: CmTheme.navy,
+                    height: 1.1,
+                  ),
+                ),
                 const SizedBox(height: 4),
-                Text(label,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600, color: CmColors.navy)),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: CmTheme.navy,
+                  ),
+                ),
                 const SizedBox(height: 2),
-                Text(note,
-                    style: const TextStyle(
-                        fontSize: 12, color: CmColors.slate)),
+                Text(
+                  note,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: CmTheme.slateText,
+                  ),
+                ),
               ],
             ),
           ),
@@ -1889,10 +1958,7 @@ class _StatCard extends StatelessWidget {
 }
 
 class _ReviewQueueCard extends StatelessWidget {
-  const _ReviewQueueCard({
-    required this.metrics,
-    required this.onReview,
-  });
+  const _ReviewQueueCard({required this.metrics, required this.onReview});
 
   final _DashboardMetrics metrics;
   final VoidCallback onReview;
@@ -1900,35 +1966,46 @@ class _ReviewQueueCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final total = metrics.totalForReview;
+    final needsReview =
+        metrics.idReviewPapers > 0 || metrics.omrReviewPapers > 0;
+    final reviewColor = needsReview ? CmTheme.amberWarning : CmTheme.slateText;
     final headline = total == 1
         ? '1 answer sheet needs verification or scanning'
         : '$total answer sheets need verification or scanning';
 
     return _Panel(
-      borderColor: CmColors.amber.withValues(alpha: 0.6),
+      borderColor: needsReview ? reviewColor : CmTheme.lineBorder,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.rate_review_outlined, color: CmColors.amber),
-              SizedBox(width: 8),
-              Text('Review Queue',
-                  style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: CmColors.navy)),
+              Icon(Icons.rate_review_outlined, color: reviewColor),
+              const SizedBox(width: 8),
+              const Text(
+                'Review Queue',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: CmTheme.navy,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 4),
-          const Text('Live verification & scanning queue across active exams',
-              style: TextStyle(fontSize: 12, color: CmColors.slate)),
+          const Text(
+            'Live verification & scanning queue across active exams',
+            style: TextStyle(fontSize: 12, color: CmTheme.slateText),
+          ),
           const SizedBox(height: 12),
-          Text(headline,
-              style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: CmColors.navy)),
+          Text(
+            headline,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: CmTheme.navy,
+            ),
+          ),
           const SizedBox(height: 16),
           _ReviewRow(
             icon: Icons.edit_note,
@@ -1955,13 +2032,16 @@ class _ReviewQueueCard extends StatelessWidget {
             child: FilledButton(
               onPressed: onReview,
               style: FilledButton.styleFrom(
-                backgroundColor: CmColors.amber,
-                foregroundColor: CmColors.navy,
+                backgroundColor: CmTheme.navy,
+                foregroundColor: CmTheme.surfaceWhite,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
-              child: const Text('Review now',
-                  style: TextStyle(fontWeight: FontWeight.w700)),
+              child: const Text(
+                'Review now',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
           ),
         ],
@@ -1988,24 +2068,36 @@ class _ReviewRow extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         children: [
-          Icon(icon, size: 20, color: CmColors.slate),
+          Icon(icon, size: 20, color: CmTheme.slateText),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600, color: CmColors.navy)),
-                Text(engine,
-                    style: const TextStyle(
-                        fontSize: 12, color: CmColors.slate)),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: CmTheme.navy,
+                  ),
+                ),
+                Text(
+                  engine,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: CmTheme.slateText,
+                  ),
+                ),
               ],
             ),
           ),
-          Text('$count ${count == 1 ? 'paper' : 'papers'}',
-              style: const TextStyle(
-                  fontWeight: FontWeight.w700, color: CmColors.navy)),
+          Text(
+            '$count ${count == 1 ? 'paper' : 'papers'}',
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+              color: CmTheme.navy,
+            ),
+          ),
         ],
       ),
     );
@@ -2034,12 +2126,15 @@ class _AnalyticsCard extends StatelessWidget {
     final maxCount = rawMax > 0 ? rawMax : 1;
 
     final hasAttempts = metrics.totalAttempts > 0;
-    final avgText =
-        hasAttempts ? '${metrics.averagePercent.toStringAsFixed(1)}%' : '—';
-    final highText =
-        hasAttempts ? '${metrics.highestPercent.toStringAsFixed(0)}%' : '—';
-    final lowText =
-        hasAttempts ? '${metrics.lowestPercent.toStringAsFixed(0)}%' : '—';
+    final avgText = hasAttempts
+        ? '${metrics.averagePercent.toStringAsFixed(1)}%'
+        : '—';
+    final highText = hasAttempts
+        ? '${metrics.highestPercent.toStringAsFixed(0)}%'
+        : '—';
+    final lowText = hasAttempts
+        ? '${metrics.lowestPercent.toStringAsFixed(0)}%'
+        : '—';
 
     return _Panel(
       child: Column(
@@ -2051,14 +2146,19 @@ class _AnalyticsCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Score Distribution',
-                        style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                            color: CmColors.navy)),
+                    Text(
+                      'Score Distribution',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        color: CmTheme.navy,
+                      ),
+                    ),
                     SizedBox(height: 2),
-                    Text('Live class performance & item difficulty insights',
-                        style: TextStyle(fontSize: 12, color: CmColors.slate)),
+                    Text(
+                      'Live class performance & item difficulty insights',
+                      style: TextStyle(fontSize: 12, color: CmTheme.slateText),
+                    ),
                   ],
                 ),
               ),
@@ -2068,32 +2168,39 @@ class _AnalyticsCard extends StatelessWidget {
                   child: DropdownButtonHideUnderline(
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 2),
+                        horizontal: 10,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
-                        color: CmColors.bg,
+                        color: CmTheme.background,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: CmColors.line),
+                        border: Border.all(color: CmTheme.lineBorder),
                       ),
                       child: DropdownButton<int?>(
                         value: selectedExamId,
                         isDense: true,
                         isExpanded: true,
                         style: const TextStyle(
+                          fontFamily: CmTheme.fontFamily,
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: CmColors.navy,
+                          color: CmTheme.navy,
                         ),
                         items: [
                           const DropdownMenuItem<int?>(
                             value: null,
-                            child: Text('All Examinations',
-                                overflow: TextOverflow.ellipsis),
+                            child: Text(
+                              'All Examinations',
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                           for (final e in exams.where((x) => x.id != null))
                             DropdownMenuItem<int?>(
                               value: e.id,
-                              child: Text(e.title,
-                                  overflow: TextOverflow.ellipsis),
+                              child: Text(
+                                e.title,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                         ],
                         onChanged: onSelectExamId,
@@ -2127,26 +2234,34 @@ class _AnalyticsCard extends StatelessWidget {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          Text('${e.value}',
-                              style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: CmColors.navy)),
+                          Text(
+                            '${e.value}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: CmTheme.navy,
+                            ),
+                          ),
                           const SizedBox(height: 4),
                           Container(
-                            height:
-                                e.value == 0 ? 4 : (90 * e.value / maxCount),
+                            height: e.value == 0
+                                ? 4
+                                : (90 * e.value / maxCount),
                             decoration: BoxDecoration(
                               color: e.value == 0
-                                  ? CmColors.line
-                                  : CmColors.navy,
+                                  ? CmTheme.lineBorder
+                                  : CmTheme.navy,
                               borderRadius: BorderRadius.circular(6),
                             ),
                           ),
                           const SizedBox(height: 6),
-                          Text(e.key,
-                              style: const TextStyle(
-                                  fontSize: 11, color: CmColors.slate)),
+                          Text(
+                            e.key,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: CmTheme.slateText,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -2158,7 +2273,9 @@ class _AnalyticsCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: CmColors.amber.withValues(alpha: 0.10),
+              color: metrics.lowAccuracyItems > 0
+                  ? CmTheme.amberWarning.withValues(alpha: 0.10)
+                  : CmTheme.background,
               borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
@@ -2168,13 +2285,15 @@ class _AnalyticsCard extends StatelessWidget {
                       ? Icons.warning_amber_rounded
                       : Icons.lightbulb_outline_rounded,
                   size: 20,
-                  color: CmColors.amber,
+                  color: metrics.lowAccuracyItems > 0
+                      ? CmTheme.amberWarning
+                      : CmTheme.slateText,
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     metrics.insightBannerText,
-                    style: const TextStyle(fontSize: 13, color: CmColors.navy),
+                    style: const TextStyle(fontSize: 13, color: CmTheme.navy),
                   ),
                 ),
               ],
@@ -2195,13 +2314,18 @@ class _MiniStat extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(value,
-            style: const TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w700,
-                color: CmColors.navy)),
-        Text(label,
-            style: const TextStyle(fontSize: 12, color: CmColors.slate)),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            color: value == '—' ? CmTheme.slateText : CmTheme.navy,
+          ),
+        ),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 12, color: CmTheme.slateText),
+        ),
       ],
     );
   }
@@ -2215,12 +2339,11 @@ class _StatusChip extends StatelessWidget {
     switch (status) {
       case 'Completed':
       case 'Finalized':
-        return CmColors.green;
+        return CmTheme.emeraldSuccess;
       case 'Needs Review':
-      case 'Processing':
-        return CmColors.amber;
+        return CmTheme.amberWarning;
       default:
-        return CmColors.slate;
+        return CmTheme.slateText;
     }
   }
 
@@ -2230,7 +2353,9 @@ class _StatusChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: c.withValues(alpha: 0.12),
+        color: c == CmTheme.slateText
+            ? CmTheme.background
+            : c.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -2247,9 +2372,7 @@ class _StatusChip extends StatelessWidget {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w700,
-              color: c == CmColors.slate
-                  ? CmColors.navy
-                  : HSLColor.fromColor(c).withLightness(0.28).toColor(),
+              color: c == CmTheme.slateText ? CmTheme.slateText : CmTheme.navy,
             ),
           ),
         ],
@@ -2264,7 +2387,10 @@ class _ExamTable extends StatelessWidget {
   final ValueChanged<int?> onOpenExam;
 
   static const _head = TextStyle(
-      fontSize: 12, fontWeight: FontWeight.w700, color: CmColors.slate);
+    fontSize: 12,
+    fontWeight: FontWeight.w700,
+    color: CmTheme.slateText,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -2286,18 +2412,20 @@ class _ExamTable extends StatelessWidget {
             ),
           ),
           for (final e in exams) ...[
-            const Divider(height: 1, color: CmColors.line),
+            const Divider(height: 1, color: CmTheme.lineBorder),
             Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               child: Row(
                 children: [
                   Expanded(
                     flex: 4,
-                    child: Text(e.title,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: CmColors.navy)),
+                    child: Text(
+                      e.title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: CmTheme.navy,
+                      ),
+                    ),
                   ),
                   Expanded(flex: 2, child: Text(e.code)),
                   Expanded(flex: 2, child: Text(e.date)),
@@ -2316,8 +2444,9 @@ class _ExamTable extends StatelessWidget {
                       child: Text(
                         e.status == 'Needs Review' ? 'Review' : 'Open',
                         style: const TextStyle(
-                            color: CmColors.navy,
-                            fontWeight: FontWeight.w700),
+                          color: CmTheme.navy,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ),
@@ -2350,11 +2479,14 @@ class _ExamCards extends StatelessWidget {
                   Row(
                     children: [
                       Expanded(
-                        child: Text(e.title,
-                            style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                                color: CmColors.navy)),
+                        child: Text(
+                          e.title,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: CmTheme.navy,
+                          ),
+                        ),
                       ),
                       _StatusChip(e.status),
                     ],
@@ -2363,7 +2495,9 @@ class _ExamCards extends StatelessWidget {
                   Text(
                     '${e.code}  |  ${e.date}  |  ${e.students} students',
                     style: const TextStyle(
-                        fontSize: 13, color: CmColors.slate),
+                      fontSize: 13,
+                      color: CmTheme.slateText,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   SizedBox(
@@ -2372,15 +2506,15 @@ class _ExamCards extends StatelessWidget {
                     child: OutlinedButton(
                       onPressed: () => onOpenExam(e.id),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: CmColors.navy,
-                        side: const BorderSide(color: CmColors.line),
+                        foregroundColor: CmTheme.navy,
+                        side: const BorderSide(color: CmTheme.lineBorder),
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                       child: Text(
                         e.status == 'Needs Review' ? 'Review' : 'Open',
-                        style:
-                            const TextStyle(fontWeight: FontWeight.w700),
+                        style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
                     ),
                   ),
@@ -2403,15 +2537,17 @@ class _ErrorPanel extends StatelessWidget {
     return _Panel(
       child: Column(
         children: [
-          const Icon(Icons.error_outline, size: 40, color: CmColors.slate),
+          const Icon(Icons.error_outline, size: 40, color: CmTheme.redDanger),
           const SizedBox(height: 12),
-          Text(message,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: CmColors.navy)),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: CmTheme.navy),
+          ),
           const SizedBox(height: 12),
           FilledButton(
             onPressed: onRetry,
-            style: FilledButton.styleFrom(backgroundColor: CmColors.navy),
+            style: FilledButton.styleFrom(backgroundColor: CmTheme.navy),
             child: const Text('Try again'),
           ),
         ],
@@ -2429,9 +2565,11 @@ class _EmptyPanel extends StatelessWidget {
     return _Panel(
       child: SizedBox(
         width: double.infinity,
-        child: Text(message,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: CmColors.slate)),
+        child: Text(
+          message,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: CmTheme.slateText),
+        ),
       ),
     );
   }

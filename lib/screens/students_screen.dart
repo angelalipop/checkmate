@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:share_plus/share_plus.dart';
 
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -13,7 +14,6 @@ import '../services/section_api_service.dart';
 import '../services/student_import_service.dart' show StudentValidation;
 import '../services/student_email_excel_service.dart';
 import 'import_students_screen.dart';
-import 'login_screen.dart' show CmColors;
 
 class StudentsScreen extends StatefulWidget {
   const StudentsScreen({
@@ -159,15 +159,15 @@ class _StudentsScreenState extends State<StudentsScreen> {
     return InputDecoration(
       isDense: true,
       filled: true,
-      fillColor: fillColor ?? Colors.white,
+      fillColor: fillColor ?? CmTheme.surfaceWhite,
       errorText: errorText,
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      border: border(CmColors.line),
-      enabledBorder: border(CmColors.line),
-      disabledBorder: border(CmColors.line),
-      focusedBorder: border(CmColors.navy, 1.5),
-      errorBorder: border(const Color(0xFFDC2626)),
-      focusedErrorBorder: border(const Color(0xFFDC2626), 1.5),
+      border: border(CmTheme.lineBorder),
+      enabledBorder: border(CmTheme.lineBorder),
+      disabledBorder: border(CmTheme.lineBorder),
+      focusedBorder: border(CmTheme.navy, 1.5),
+      errorBorder: border(CmTheme.redDanger),
+      focusedErrorBorder: border(CmTheme.redDanger, 1.5),
     );
   }
 
@@ -181,7 +181,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
             label,
             style: const TextStyle(
               fontSize: 13,
-              color: CmColors.slate,
+              color: CmTheme.slateText,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -192,17 +192,17 @@ class _StudentsScreenState extends State<StudentsScreen> {
   }
 
   ButtonStyle get _primaryButtonStyle => FilledButton.styleFrom(
-    backgroundColor: CmColors.navy,
-    disabledBackgroundColor: const Color(0xFF9AA3B2),
-    disabledForegroundColor: Colors.white,
+    backgroundColor: CmTheme.navy,
+    disabledBackgroundColor: CmTheme.slateText,
+    disabledForegroundColor: CmTheme.surfaceWhite,
     minimumSize: const Size.fromHeight(50),
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
   );
 
   ButtonStyle get _secondaryButtonStyle => OutlinedButton.styleFrom(
-    foregroundColor: CmColors.navy,
-    backgroundColor: CmColors.bg,
-    side: const BorderSide(color: CmColors.line),
+    foregroundColor: CmTheme.navy,
+    backgroundColor: CmTheme.background,
+    side: const BorderSide(color: CmTheme.lineBorder),
     minimumSize: const Size.fromHeight(50),
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
   );
@@ -215,9 +215,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
   // ADD STUDENT MANUALLY
   // =========================
 
-  static const _studentDialogBackdrop = Color(0x8C121E39);
-  static const _studentDialogPanel = Color(0xFFFBFDFF);
-  static const _studentDialogShadow = Color(0x800B1C45);
+  static const _studentDialogPanel = CmTheme.surfaceWhite;
 
   Future<void> _showAddStudentDialog({
     required _AssignedSection section,
@@ -238,7 +236,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
     final result = await showDialog<bool>(
       context: context,
-      barrierColor: _studentDialogBackdrop,
+      barrierColor: CmTheme.studentDialogBackdrop,
       barrierDismissible: false,
       builder: (dialogContext) {
         var saving = false;
@@ -433,8 +431,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                       return PopScope(
                         canPop: !confirming,
                         child: Dialog(
-                          backgroundColor: Colors.white,
-                          surfaceTintColor: Colors.transparent,
+                          backgroundColor: CmTheme.surfaceWhite,
+                          surfaceTintColor: CmTheme.transparent,
                           insetPadding: const EdgeInsets.all(24),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(24),
@@ -457,7 +455,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                     style: TextStyle(
                                       fontSize: 19,
                                       fontWeight: FontWeight.w700,
-                                      color: CmColors.navy,
+                                      color: CmTheme.navy,
                                     ),
                                   ),
                                   const SizedBox(height: 14),
@@ -466,7 +464,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                       style: const TextStyle(
                                         fontSize: 14,
                                         height: 1.5,
-                                        color: CmColors.navy,
+                                        color: CmTheme.navy,
                                       ),
                                       children: [
                                         const TextSpan(text: 'You will add '),
@@ -526,7 +524,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                                   child:
                                                       CircularProgressIndicator(
                                                         strokeWidth: 2,
-                                                        color: Colors.white,
+                                                        color: CmTheme
+                                                            .surfaceWhite,
                                                       ),
                                                 )
                                               : const Text(
@@ -559,9 +558,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
               canPop: !saving,
               child: Dialog(
                 backgroundColor: _studentDialogPanel,
-                shadowColor: _studentDialogShadow,
+                shadowColor: CmTheme.studentDialogShadow,
                 elevation: 16,
-                surfaceTintColor: Colors.transparent,
+                surfaceTintColor: CmTheme.transparent,
                 insetPadding: const EdgeInsets.all(24),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(24),
@@ -582,7 +581,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                 style: TextStyle(
                                   fontSize: 19,
                                   fontWeight: FontWeight.w700,
-                                  color: CmColors.navy,
+                                  color: CmTheme.navy,
                                 ),
                               ),
                             ),
@@ -657,7 +656,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                           'Section',
                           InputDecorator(
                             decoration: _fieldDecoration(
-                              fillColor: CmColors.bg,
+                              fillColor: CmTheme.background,
                             ),
                             child: Text(
                               section.name,
@@ -665,7 +664,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                               style: const TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
-                                color: CmColors.navy,
+                                color: CmTheme.navy,
                               ),
                             ),
                           ),
@@ -705,7 +704,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                         height: 20,
                                         child: CircularProgressIndicator(
                                           strokeWidth: 2,
-                                          color: Colors.white,
+                                          color: CmTheme.surfaceWhite,
                                         ),
                                       )
                                     : const Text(
@@ -739,7 +738,10 @@ class _StudentsScreenState extends State<StudentsScreen> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Student added successfully.')),
+        CmTheme.feedbackSnackBar(
+          'Student added successfully.',
+          color: CmTheme.emeraldSuccess,
+        ),
       );
     }
   }
@@ -878,8 +880,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                 context: context,
                 barrierDismissible: false,
                 builder: (confirmContext) => AlertDialog(
-                  backgroundColor: Colors.white,
-                  surfaceTintColor: Colors.transparent,
+                  backgroundColor: CmTheme.surfaceWhite,
+                  surfaceTintColor: CmTheme.transparent,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(24),
                   ),
@@ -888,21 +890,21 @@ class _StudentsScreenState extends State<StudentsScreen> {
                     style: TextStyle(
                       fontSize: 19,
                       fontWeight: FontWeight.w700,
-                      color: CmColors.navy,
+                      color: CmTheme.navy,
                     ),
                   ),
                   content: const Text(
                     'A student’s details can be edited only once. After '
                     'saving, they can no longer be changed. Do you want to '
                     'proceed?',
-                    style: TextStyle(height: 1.5, color: CmColors.navy),
+                    style: TextStyle(height: 1.5, color: CmTheme.navy),
                   ),
                   actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
                   actions: [
                     OutlinedButton(
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: CmColors.navy,
-                        side: const BorderSide(color: CmColors.line),
+                        foregroundColor: CmTheme.navy,
+                        side: const BorderSide(color: CmTheme.lineBorder),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
@@ -912,7 +914,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                     ),
                     FilledButton(
                       style: FilledButton.styleFrom(
-                        backgroundColor: CmColors.navy,
+                        backgroundColor: CmTheme.navy,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
@@ -969,8 +971,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
             return PopScope(
               canPop: !saving,
               child: Dialog(
-                backgroundColor: Colors.white,
-                surfaceTintColor: Colors.transparent,
+                backgroundColor: CmTheme.surfaceWhite,
+                surfaceTintColor: CmTheme.transparent,
                 insetPadding: const EdgeInsets.all(24),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(24),
@@ -991,7 +993,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                 style: TextStyle(
                                   fontSize: 19,
                                   fontWeight: FontWeight.w700,
-                                  color: CmColors.navy,
+                                  color: CmTheme.navy,
                                 ),
                               ),
                             ),
@@ -1015,7 +1017,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                           style: const TextStyle(
                             fontSize: 12.5,
                             height: 1.4,
-                            color: CmColors.slate,
+                            color: CmTheme.slateText,
                           ),
                         ),
                         const SizedBox(height: 16),
@@ -1080,7 +1082,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                         height: 20,
                                         child: CircularProgressIndicator(
                                           strokeWidth: 2,
-                                          color: Colors.white,
+                                          color: CmTheme.surfaceWhite,
                                         ),
                                       )
                                     : const Text(
@@ -1114,9 +1116,12 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Student details updated.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        CmTheme.feedbackSnackBar(
+          'Student details updated.',
+          color: CmTheme.emeraldSuccess,
+        ),
+      );
     }
   }
 
@@ -1149,13 +1154,13 @@ class _StudentsScreenState extends State<StudentsScreen> {
                 style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w700,
-                  color: CmColors.navy,
+                  color: CmTheme.navy,
                 ),
               ),
               const SizedBox(height: 4),
               Text(
                 'Section ${section.name}',
-                style: const TextStyle(color: CmColors.slate),
+                style: const TextStyle(color: CmTheme.slateText),
               ),
               const SizedBox(height: 14),
               if (canImportExcel) ...[
@@ -1240,10 +1245,10 @@ class _StudentsScreenState extends State<StudentsScreen> {
     required VoidCallback onTap,
   }) {
     return Material(
-      color: Colors.white,
+      color: CmTheme.surfaceWhite,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: CmColors.line),
+        side: const BorderSide(color: CmTheme.lineBorder),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
@@ -1256,10 +1261,10 @@ class _StudentsScreenState extends State<StudentsScreen> {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: CmColors.bg,
+                  color: CmTheme.background,
                   borderRadius: BorderRadius.circular(14),
                 ),
-                child: Icon(icon, color: CmColors.navy),
+                child: Icon(icon, color: CmTheme.navy),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -1277,7 +1282,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                     Text(
                       subtitle,
                       style: const TextStyle(
-                        color: CmColors.slate,
+                        color: CmTheme.slateText,
                         fontSize: 13,
                       ),
                     ),
@@ -1772,7 +1777,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
     try {
       result = await showDialog<Map<String, dynamic>>(
         context: context,
-        barrierColor: _studentDialogBackdrop,
+        barrierColor: CmTheme.studentDialogBackdrop,
         barrierDismissible: false,
         builder: (dialogContext) {
           var saving = false;
@@ -1806,7 +1811,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                 return OutlinedButton(
                   onPressed: onPressed,
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: CmColors.navy,
+                    foregroundColor: CmTheme.navy,
                     backgroundColor: cardColor,
                     padding: const EdgeInsets.all(10),
                     side: BorderSide(color: borderColor),
@@ -1860,16 +1865,16 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
               return AlertDialog(
                 backgroundColor: _studentDialogPanel,
-                shadowColor: _studentDialogShadow,
+                shadowColor: CmTheme.studentDialogShadow,
                 elevation: 16,
-                surfaceTintColor: Colors.transparent,
+                surfaceTintColor: CmTheme.transparent,
                 title: Row(
                   children: [
                     Expanded(
                       child: Text(
                         'Student emails · ${section.name}',
                         style: const TextStyle(
-                          color: CmColors.navy,
+                          color: CmTheme.navy,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -1898,7 +1903,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                         '${entries.length} student${entries.length == 1 ? '' : 's'} · '
                         '$filledCount of ${entries.length} emails filled',
                         style: const TextStyle(
-                          color: CmColors.slate,
+                          color: CmTheme.slateText,
                           fontSize: 13,
                         ),
                       ),
@@ -1922,7 +1927,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                   icon: Icons.download_outlined,
                                   step: 'STEP 1',
                                   title: 'Download template',
-                                  subtitle: 'Excel-ready file with your class list',
+                                  subtitle:
+                                      'Excel-ready file with your class list',
                                   onPressed: saving
                                       ? null
                                       : () async {
@@ -1961,15 +1967,16 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                             if (kIsWeb) {
                                               await file.saveTo(fileName);
                                             } else if (isDesktop) {
-                                              final location = await getSaveLocation(
-                                                suggestedName: fileName,
-                                                acceptedTypeGroups: const [
-                                                  XTypeGroup(
-                                                    label: 'Excel',
-                                                    extensions: ['xlsx'],
-                                                  ),
-                                                ],
-                                              );
+                                              final location =
+                                                  await getSaveLocation(
+                                                    suggestedName: fileName,
+                                                    acceptedTypeGroups: const [
+                                                      XTypeGroup(
+                                                        label: 'Excel',
+                                                        extensions: ['xlsx'],
+                                                      ),
+                                                    ],
+                                                  );
 
                                               if (location == null) return;
 
@@ -1993,7 +2000,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                             if (!dialogContext.mounted) return;
 
                                             setDialogState(() {
-                                              importMessage = 'Download failed: $e';
+                                              importMessage =
+                                                  'Download failed: $e';
                                             });
                                           }
                                         },
@@ -2024,9 +2032,12 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
                                             if (file == null) return;
 
-                                            final bytes = await file.readAsBytes();
+                                            final bytes = await file
+                                                .readAsBytes();
                                             final imported =
-                                                StudentEmailExcelService.parse(bytes);
+                                                StudentEmailExcelService.parse(
+                                                  bytes,
+                                                );
 
                                             final entriesByNumber =
                                                 <String, Map<String, dynamic>>{
@@ -2040,8 +2051,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
                                             final matchedNumbers = imported
                                                 .where(
-                                                  (row) =>
-                                                      entriesByNumber.containsKey(
+                                                  (row) => entriesByNumber
+                                                      .containsKey(
                                                         row.studentNumber
                                                             .trim()
                                                             .toLowerCase(),
@@ -2060,7 +2071,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                               );
                                             }
 
-                                            final numberCounts = <String, int>{};
+                                            final numberCounts =
+                                                <String, int>{};
                                             final emailCounts = <String, int>{};
 
                                             for (final row in imported) {
@@ -2091,7 +2103,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
                                             for (final entry in entries) {
                                               final number =
-                                                  (entry['student_number'] as String)
+                                                  (entry['student_number']
+                                                          as String)
                                                       .trim()
                                                       .toLowerCase();
 
@@ -2104,12 +2117,16 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
                                               if (email.isNotEmpty) {
                                                 emailOwners
-                                                    .putIfAbsent(email, () => {})
+                                                    .putIfAbsent(
+                                                      email,
+                                                      () => {},
+                                                    )
                                                     .add(number);
                                               }
                                             }
 
-                                            final pending = <Map<String, dynamic>>[];
+                                            final pending =
+                                                <Map<String, dynamic>>[];
                                             final messages = <String>[];
 
                                             var unknownCount = 0;
@@ -2126,7 +2143,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                               final normalizedEmail = email
                                                   .toLowerCase();
 
-                                              final entry = entriesByNumber[number];
+                                              final entry =
+                                                  entriesByNumber[number];
 
                                               if (entry == null) {
                                                 unknownCount++;
@@ -2147,7 +2165,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                                   entry['controller']
                                                       as TextEditingController;
 
-                                              final currentEmail = controller.text
+                                              final currentEmail = controller
+                                                  .text
                                                   .trim();
 
                                               if (currentEmail.isNotEmpty &&
@@ -2177,7 +2196,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                               }
 
                                               final owners =
-                                                  emailOwners[normalizedEmail] ?? {};
+                                                  emailOwners[normalizedEmail] ??
+                                                  {};
 
                                               if (owners.any(
                                                 (owner) => owner != number,
@@ -2273,7 +2293,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                         Text(
                           importMessage!,
                           style: const TextStyle(
-                            color: CmColors.slate,
+                            color: CmTheme.slateText,
                             fontSize: 12,
                           ),
                         ),
@@ -2284,7 +2304,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                         Text(
                           saveError!,
                           style: const TextStyle(
-                            color: Color(0xFFDC2626),
+                            color: CmTheme.redDanger,
                             fontSize: 12,
                           ),
                         ),
@@ -2308,10 +2328,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                 child: ListView.separated(
                                   padding: EdgeInsets.zero,
                                   itemCount: entries.length,
-                                  separatorBuilder: (_, _) => Divider(
-                                    height: 1,
-                                    color: borderColor,
-                                  ),
+                                  separatorBuilder: (_, _) =>
+                                      Divider(height: 1, color: borderColor),
                                   itemBuilder: (context, index) {
                                     final entry = entries[index];
                                     final controller =
@@ -2327,7 +2345,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                           Text(
                                             entry['name'] as String,
                                             style: const TextStyle(
-                                              color: CmColors.navy,
+                                              color: CmTheme.navy,
                                               fontWeight: FontWeight.w700,
                                             ),
                                           ),
@@ -2335,7 +2353,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                           Text(
                                             entry['student_number'] as String,
                                             style: const TextStyle(
-                                              color: CmColors.slate,
+                                              color: CmTheme.slateText,
                                               fontSize: 12,
                                             ),
                                           ),
@@ -2356,21 +2374,31 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                             ],
                                             decoration:
                                                 _fieldDecoration(
-                                                  fillColor: CmColors.bg,
+                                                  fillColor: CmTheme.background,
                                                 ).copyWith(
                                                   isDense: true,
-                                                  enabledBorder: OutlineInputBorder(
-                                                    borderRadius: BorderRadius.circular(9),
-                                                    borderSide: BorderSide(color: borderColor),
-                                                  ),
-                                                  hintText: 'Enter email username',
+                                                  enabledBorder:
+                                                      OutlineInputBorder(
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              9,
+                                                            ),
+                                                        borderSide: BorderSide(
+                                                          color: borderColor,
+                                                        ),
+                                                      ),
+                                                  hintText:
+                                                      'Enter email username',
                                                   prefixIcon: const Icon(
                                                     Icons.email_outlined,
                                                     size: 19,
                                                   ),
-                                                  suffixText: studentEmailDomain,
+                                                  suffixText:
+                                                      studentEmailDomain,
                                                   errorText:
-                                                      controller.text.trim().isEmpty
+                                                      controller.text
+                                                          .trim()
+                                                          .isEmpty
                                                       ? null
                                                       : StudentValidation.studentEmailUsername(
                                                           controller.text,
@@ -2399,7 +2427,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                               ? 'No changes yet'
                               : '$changedCount unsaved change${changedCount == 1 ? '' : 's'}',
                           style: const TextStyle(
-                            color: CmColors.slate,
+                            color: CmTheme.slateText,
                             fontSize: 11,
                           ),
                         ),
@@ -2416,7 +2444,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                             : () async {
                                 final invalidEntries = entries.where((entry) {
                                   final controller =
-                                      entry['controller'] as TextEditingController;
+                                      entry['controller']
+                                          as TextEditingController;
 
                                   return StudentValidation.studentEmailUsername(
                                         controller.text,
@@ -2449,7 +2478,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                               .trim();
 
                                       return <String, dynamic>{
-                                        'student_number': entry['student_number'],
+                                        'student_number':
+                                            entry['student_number'],
                                         'email': username.isEmpty
                                             ? null
                                             : '$username$studentEmailDomain',
@@ -2491,10 +2521,10 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                 }
                               },
                         style: FilledButton.styleFrom(
-                          backgroundColor: CmColors.navy,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
+                          backgroundColor: CmTheme.navy,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
                         child: saving
                             ? const SizedBox(
@@ -2502,7 +2532,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                 height: 18,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  color: Colors.white,
+                                  color: CmTheme.surfaceWhite,
                                 ),
                               )
                             : Row(
@@ -2516,7 +2546,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                       vertical: 2,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: Colors.white24,
+                                      color: CmTheme.translucentOnNavy,
                                       borderRadius: BorderRadius.circular(10),
                                     ),
                                     child: Text('$changedCount'),
@@ -2574,11 +2604,14 @@ class _StudentsScreenState extends State<StudentsScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 20, color: CmColors.slate),
+          Icon(icon, size: 20, color: CmTheme.slateText),
           const SizedBox(width: 12),
           SizedBox(
             width: 96,
-            child: Text(label, style: const TextStyle(color: CmColors.slate)),
+            child: Text(
+              label,
+              style: const TextStyle(color: CmTheme.slateText),
+            ),
           ),
           Expanded(
             child: Text(
@@ -2608,7 +2641,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                 style: const TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w700,
-                  color: CmColors.navy,
+                  color: CmTheme.navy,
                 ),
               ),
               const SizedBox(height: 8),
@@ -2649,13 +2682,13 @@ class _StudentsScreenState extends State<StudentsScreen> {
                 const SizedBox(height: 6),
                 const Text(
                   'Fill in the email or fix a typo. This can be done only once.',
-                  style: TextStyle(fontSize: 12, color: CmColors.slate),
+                  style: TextStyle(fontSize: 12, color: CmTheme.slateText),
                 ),
               ] else
                 const Text(
                   'These details were already edited once and can no longer '
                   'be changed.',
-                  style: TextStyle(fontSize: 12, color: CmColors.slate),
+                  style: TextStyle(fontSize: 12, color: CmTheme.slateText),
                 ),
             ],
           ),
@@ -2675,7 +2708,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
       onChanged: (value) => setState(() => _query = value.trim().toLowerCase()),
       decoration: _fieldDecoration().copyWith(
         hintText: 'Search students...',
-        prefixIcon: const Icon(Icons.search, color: CmColors.slate),
+        prefixIcon: const Icon(Icons.search, color: CmTheme.slateText),
         suffixIcon: _query.isEmpty
             ? null
             : IconButton(
@@ -2705,14 +2738,14 @@ class _StudentsScreenState extends State<StudentsScreen> {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: CmTheme.surfaceWhite,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: CmColors.line),
+                border: Border.all(color: CmTheme.lineBorder),
               ),
               child: const Icon(
                 Icons.menu_book_outlined,
                 size: 22,
-                color: CmColors.navy,
+                color: CmTheme.navy,
               ),
             ),
             const SizedBox(width: 12),
@@ -2727,7 +2760,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
-                      color: CmColors.navy,
+                      color: CmTheme.navy,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -2735,7 +2768,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                     subtitle,
                     style: const TextStyle(
                       fontSize: 12.5,
-                      color: CmColors.slate,
+                      color: CmTheme.slateText,
                     ),
                   ),
                 ],
@@ -2744,7 +2777,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
           ],
         ),
         const SizedBox(height: 12),
-        const Divider(height: 1, thickness: 1, color: CmColors.line),
+        const Divider(height: 1, thickness: 1, color: CmTheme.lineBorder),
       ],
     );
   }
@@ -2758,7 +2791,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
         LayoutBuilder(
           builder: (context, constraints) {
             const gap = 16.0;
-            final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
+            final width =
+                (constraints.maxWidth - gap * (columns - 1)) / columns;
             return Wrap(
               spacing: gap,
               runSpacing: 24,
@@ -2786,12 +2820,12 @@ class _StudentsScreenState extends State<StudentsScreen> {
     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 64),
     child: Column(
       children: [
-        Icon(icon, size: 48, color: CmColors.slate),
+        Icon(icon, size: 48, color: CmTheme.slateText),
         const SizedBox(height: 16),
         Text(
           message,
           textAlign: TextAlign.center,
-          style: const TextStyle(color: CmColors.slate, fontSize: 16),
+          style: const TextStyle(color: CmTheme.slateText, fontSize: 16),
         ),
       ],
     ),
@@ -2799,7 +2833,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    backgroundColor: CmColors.bg,
+    backgroundColor: CmTheme.background,
     appBar: AppBar(title: const Text('Students')),
     body: RefreshIndicator(onRefresh: _loadData, child: _buildBody()),
   );
@@ -2813,7 +2847,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
       child: SizedBox(
         height: _studentTileHeight,
         child: Material(
-          color: CmColors.bg,
+          color: CmTheme.background,
           borderRadius: BorderRadius.circular(13),
           child: ListTile(
             onTap: () => _showStudentInfo(student),
@@ -2823,8 +2857,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
             ),
             leading: CircleAvatar(
               radius: 20,
-              backgroundColor: CmColors.navy.withValues(alpha: 0.05),
-              foregroundColor: CmColors.navy,
+              backgroundColor: CmTheme.navy.withValues(alpha: 0.05),
+              foregroundColor: CmTheme.navy,
               child: Text(
                 initialSource.isNotEmpty ? initialSource[0].toUpperCase() : '?',
                 style: const TextStyle(fontWeight: FontWeight.w700),
@@ -2837,14 +2871,14 @@ class _StudentsScreenState extends State<StudentsScreen> {
               style: const TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
-                color: CmColors.navy,
+                color: CmTheme.navy,
               ),
             ),
             subtitle: Text(
               student['student_number']?.toString() ?? '',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, color: CmColors.slate),
+              style: const TextStyle(fontSize: 12, color: CmTheme.slateText),
             ),
           ),
         ),
@@ -2878,7 +2912,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                       style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w800,
-                        color: CmColors.navy,
+                        color: CmTheme.navy,
                       ),
                     ),
                     if (header.subject.isNotEmpty)
@@ -2886,7 +2920,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                         header.subject,
                         style: const TextStyle(
                           fontSize: 12,
-                          color: CmColors.slate,
+                          color: CmTheme.slateText,
                         ),
                       ),
                   ],
@@ -2899,16 +2933,16 @@ class _StudentsScreenState extends State<StudentsScreen> {
                   vertical: 4,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: CmTheme.surfaceWhite,
                   borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: CmColors.line),
+                  border: Border.all(color: CmTheme.lineBorder),
                 ),
                 child: Text(
                   '${header.count} student${header.count == 1 ? '' : 's'}',
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: CmColors.slate,
+                    color: CmTheme.slateText,
                   ),
                 ),
               ),
@@ -2917,9 +2951,9 @@ class _StudentsScreenState extends State<StudentsScreen> {
         ),
         Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: CmTheme.surfaceWhite,
             borderRadius: BorderRadius.circular(17),
-            border: Border.all(color: CmColors.line),
+            border: Border.all(color: CmTheme.lineBorder),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2948,7 +2982,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                           collapsed ? 'Show students' : 'Hide students',
                           style: const TextStyle(
                             fontSize: 13,
-                            color: CmColors.slate,
+                            color: CmTheme.slateText,
                           ),
                         ),
                       ),
@@ -2956,7 +2990,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                         collapsed
                             ? Icons.keyboard_arrow_down
                             : Icons.keyboard_arrow_up,
-                        color: CmColors.slate,
+                        color: CmTheme.slateText,
                         size: 20,
                       ),
                     ],
@@ -2964,7 +2998,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
                 ),
               ),
               if (!collapsed) ...[
-                const Divider(height: 1, color: CmColors.line),
+                const Divider(height: 1, color: CmTheme.lineBorder),
                 Padding(
                   padding: const EdgeInsets.all(11),
                   child: isEmptySection
@@ -2975,14 +3009,14 @@ class _StudentsScreenState extends State<StudentsScreen> {
                               'No students listed in this section yet.',
                               textAlign: TextAlign.center,
                               style: TextStyle(
-                                color: CmColors.slate,
+                                color: CmTheme.slateText,
                                 fontSize: 13,
                               ),
                             ),
                             const SizedBox(height: 10),
                             FilledButton.icon(
                               style: FilledButton.styleFrom(
-                                backgroundColor: CmColors.navy,
+                                backgroundColor: CmTheme.navy,
                               ),
                               onPressed: section == null
                                   ? null
@@ -3006,7 +3040,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                     _maxVisibleStudents * _studentRowExtent -
                                     _studentTileSpacing,
                                 child: ScrollConfiguration(
-                                  behavior: ScrollConfiguration.of(context).copyWith(scrollbars: true),
+                                  behavior: ScrollConfiguration.of(context)
+                                      .copyWith(scrollbars: true),
                                   child: ListView.builder(
                                     primary: false,
                                     padding: EdgeInsets.zero,
@@ -3032,10 +3067,10 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                 children: [
                                   OutlinedButton(
                                     style: OutlinedButton.styleFrom(
-                                      foregroundColor: CmColors.navy,
-                                      backgroundColor: CmColors.bg,
+                                      foregroundColor: CmTheme.navy,
+                                      backgroundColor: CmTheme.background,
                                       side: const BorderSide(
-                                        color: CmColors.line,
+                                        color: CmTheme.lineBorder,
                                       ),
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 12,
@@ -3063,10 +3098,10 @@ class _StudentsScreenState extends State<StudentsScreen> {
                                   ),
                                   OutlinedButton.icon(
                                     style: OutlinedButton.styleFrom(
-                                      foregroundColor: CmColors.navy,
-                                      backgroundColor: Colors.white,
+                                      foregroundColor: CmTheme.navy,
+                                      backgroundColor: CmTheme.surfaceWhite,
                                       side: const BorderSide(
-                                        color: CmColors.line,
+                                        color: CmTheme.lineBorder,
                                       ),
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 12,

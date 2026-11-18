@@ -1,9 +1,9 @@
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
-import 'login_screen.dart' show CmColors;
 
 class _UpperCaseFormatter extends TextInputFormatter {
   const _UpperCaseFormatter();
@@ -65,15 +65,10 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
       final token = await AuthStorage.getToken();
 
       if (token == null || token.isEmpty) {
-        throw Exception(
-          'Your session has expired. Please log in again.',
-        );
+        throw Exception('Your session has expired. Please log in again.');
       }
 
-      final questions = await ApiService.getQuestions(
-        token,
-        widget.sectionId,
-      );
+      final questions = await ApiService.getQuestions(token, widget.sectionId);
       questions.sort((a, b) {
         final na = int.tryParse(a['question_number']?.toString() ?? '') ?? 0;
         final nb = int.tryParse(b['question_number']?.toString() ?? '') ?? 0;
@@ -88,12 +83,11 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
       if (widget.questionType == 'identification') {
         for (final question in questions) {
           if (question['correct_answer'] != null) {
-            question['correct_answer'] =
-                question['correct_answer'].toString().toUpperCase();
+            question['correct_answer'] = question['correct_answer']
+                .toString()
+                .toUpperCase();
           }
-          final questionId = int.tryParse(
-            question['id']?.toString() ?? '',
-          );
+          final questionId = int.tryParse(question['id']?.toString() ?? '');
 
           if (questionId == null) {
             continue;
@@ -126,10 +120,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
       if (!mounted) return;
 
       setState(() {
-        _errorMessage = e.toString().replaceFirst(
-          'Exception: ',
-          '',
-        );
+        _errorMessage = e.toString().replaceFirst('Exception: ', '');
         _isLoading = false;
       });
     }
@@ -151,9 +142,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
     }
   }
 
-  Future<void> _addAcceptableAnswer(
-    int questionId,
-  ) async {
+  Future<void> _addAcceptableAnswer(int questionId) async {
     final answerController = TextEditingController();
 
     String? dialogError;
@@ -163,10 +152,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
       context: context,
       builder: (dialogContext) {
         return StatefulBuilder(
-          builder: (
-            context,
-            setDialogState,
-          ) {
+          builder: (context, setDialogState) {
             Future<void> saveAnswer() async {
               final answer = answerController.text.trim().toUpperCase();
 
@@ -186,9 +172,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                 final token = await AuthStorage.getToken();
 
                 if (token == null || token.isEmpty) {
-                  throw Exception(
-                    'Authentication token not found.',
-                  );
+                  throw Exception('Authentication token not found.');
                 }
 
                 final newAnswer = await ApiService.createAcceptableAnswer(
@@ -208,25 +192,17 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                   _acceptableAnswers[questionId]!.add(newAnswer);
                 });
 
-                Navigator.pop(
-                  dialogContext,
-                  true,
-                );
+                Navigator.pop(dialogContext, true);
               } catch (e) {
                 setDialogState(() {
                   saving = false;
-                  dialogError = e.toString().replaceFirst(
-                    'Exception: ',
-                    '',
-                  );
+                  dialogError = e.toString().replaceFirst('Exception: ', '');
                 });
               }
             }
 
             return AlertDialog(
-              title: const Text(
-                'Add Acceptable Answer',
-              ),
+              title: const Text('Add Acceptable Answer'),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -259,10 +235,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                   onPressed: saving
                       ? null
                       : () {
-                          Navigator.pop(
-                            dialogContext,
-                            false,
-                          );
+                          Navigator.pop(dialogContext, false);
                         },
                   child: const Text('Cancel'),
                 ),
@@ -272,9 +245,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                       ? const SizedBox(
                           width: 20,
                           height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                          ),
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Text('Add'),
                 ),
@@ -289,10 +260,9 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
 
     if (result == true && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Acceptable answer added successfully.',
-          ),
+        CmTheme.feedbackSnackBar(
+          'Acceptable answer added successfully.',
+          color: CmTheme.emeraldSuccess,
         ),
       );
     }
@@ -312,6 +282,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: CmTheme.redDanger),
             onPressed: () => Navigator.pop(dialogContext, true),
             child: const Text('Delete'),
           ),
@@ -327,12 +298,18 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
       await _loadQuestions();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Question deleted.')),
+        CmTheme.feedbackSnackBar(
+          'Question deleted.',
+          color: CmTheme.emeraldSuccess,
+        ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        CmTheme.feedbackSnackBar(
+          e.toString().replaceFirst('Exception: ', ''),
+          color: CmTheme.redDanger,
+        ),
       );
     }
   }
@@ -354,10 +331,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
       context: context,
       builder: (dialogContext) {
         return StatefulBuilder(
-          builder: (
-            context,
-            setDialogState,
-          ) {
+          builder: (context, setDialogState) {
             Future<void> saveQuestion() async {
               final questionText = questionController.text.trim();
               final pointsText = pointsController.text.trim();
@@ -392,14 +366,10 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
 
               if (widget.questionType == 'multiple_choice') {
                 choices = choiceControllers
-                    .map(
-                      (controller) => controller.text.trim(),
-                    )
+                    .map((controller) => controller.text.trim())
                     .toList();
 
-                if (choices.any(
-                  (choice) => choice.isEmpty,
-                )) {
+                if (choices.any((choice) => choice.isEmpty)) {
                   setDialogState(() {
                     dialogError = 'Please fill in all four choices.';
                   });
@@ -416,9 +386,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                 final token = await AuthStorage.getToken();
 
                 if (token == null || token.isEmpty) {
-                  throw Exception(
-                    'Authentication token not found.',
-                  );
+                  throw Exception('Authentication token not found.');
                 }
 
                 await ApiService.createQuestion(
@@ -444,17 +412,11 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                   return;
                 }
 
-                Navigator.pop(
-                  dialogContext,
-                  true,
-                );
+                Navigator.pop(dialogContext, true);
               } catch (e) {
                 setDialogState(() {
                   saving = false;
-                  dialogError = e.toString().replaceFirst(
-                    'Exception: ',
-                    '',
-                  );
+                  dialogError = e.toString().replaceFirst('Exception: ', '');
                 });
               }
             }
@@ -478,13 +440,13 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                           ),
                           decoration: BoxDecoration(
                             color: pickedAnswer == letter
-                                ? CmColors.green
-                                : const Color(0xFFF1F5F9),
+                                ? CmTheme.navy
+                                : CmTheme.background,
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
                               color: pickedAnswer == letter
-                                  ? CmColors.green
-                                  : const Color(0xFFCFD8E5),
+                                  ? CmTheme.navy
+                                  : CmTheme.lineBorder,
                             ),
                           ),
                           child: Text(
@@ -492,8 +454,8 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               color: pickedAnswer == letter
-                                  ? Colors.white
-                                  : Colors.black87,
+                                  ? CmTheme.surfaceWhite
+                                  : CmTheme.navy,
                             ),
                           ),
                         ),
@@ -519,13 +481,13 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                           ),
                           decoration: BoxDecoration(
                             color: pickedAnswer == opt
-                                ? CmColors.green
-                                : const Color(0xFFF1F5F9),
+                                ? CmTheme.navy
+                                : CmTheme.background,
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
                               color: pickedAnswer == opt
-                                  ? CmColors.green
-                                  : const Color(0xFFCFD8E5),
+                                  ? CmTheme.navy
+                                  : CmTheme.lineBorder,
                             ),
                           ),
                           child: Row(
@@ -535,7 +497,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                                 const Icon(
                                   Icons.check,
                                   size: 16,
-                                  color: Colors.white,
+                                  color: CmTheme.surfaceWhite,
                                 ),
                                 const SizedBox(width: 4),
                               ],
@@ -544,8 +506,8 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   color: pickedAnswer == opt
-                                      ? Colors.white
-                                      : Colors.black87,
+                                      ? CmTheme.surfaceWhite
+                                      : CmTheme.navy,
                                 ),
                               ),
                             ],
@@ -569,9 +531,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
             }
 
             return AlertDialog(
-              title: const Text(
-                'Add Question',
-              ),
+              title: const Text('Add Question'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -614,8 +574,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                           controller: choiceControllers[i],
                           enabled: !saving,
                           decoration: InputDecoration(
-                            labelText:
-                                'Choice ${String.fromCharCode(65 + i)}',
+                            labelText: 'Choice ${String.fromCharCode(65 + i)}',
                             border: const OutlineInputBorder(),
                           ),
                         ),
@@ -650,10 +609,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                   onPressed: saving
                       ? null
                       : () {
-                          Navigator.pop(
-                            dialogContext,
-                            false,
-                          );
+                          Navigator.pop(dialogContext, false);
                         },
                   child: const Text('Cancel'),
                 ),
@@ -663,9 +619,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                       ? const SizedBox(
                           width: 20,
                           height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                          ),
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Text('Save'),
                 ),
@@ -690,10 +644,9 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Question added successfully.',
-          ),
+        CmTheme.feedbackSnackBar(
+          'Question added successfully.',
+          color: CmTheme.emeraldSuccess,
         ),
       );
     }
@@ -702,9 +655,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.sectionName),
-      ),
+      appBar: AppBar(title: Text(widget.sectionName)),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showAddQuestionDialog,
         icon: const Icon(Icons.add),
@@ -716,9 +667,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
 
   Widget _buildBody() {
     if (_isLoading) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
 
     if (_errorMessage != null) {
@@ -730,15 +679,9 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
               padding: const EdgeInsets.all(24),
               child: Column(
                 children: [
-                  const Icon(
-                    Icons.error_outline,
-                    size: 48,
-                  ),
+                  const Icon(Icons.error_outline, size: 48),
                   const SizedBox(height: 16),
-                  Text(
-                    _errorMessage!,
-                    textAlign: TextAlign.center,
-                  ),
+                  Text(_errorMessage!, textAlign: TextAlign.center),
                   const SizedBox(height: 16),
                   FilledButton(
                     onPressed: _loadQuestions,
@@ -759,31 +702,19 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
           Center(
             child: Column(
               children: [
-                const Icon(
-                  Icons.help_outline,
-                  size: 56,
-                ),
+                const Icon(Icons.help_outline, size: 56),
                 const SizedBox(height: 16),
                 const Text(
                   'No questions yet.',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
-                Text(
-                  _formatQuestionType(
-                    widget.questionType,
-                  ),
-                ),
+                Text(_formatQuestionType(widget.questionType)),
                 const SizedBox(height: 20),
                 FilledButton.icon(
                   onPressed: _showAddQuestionDialog,
                   icon: const Icon(Icons.add),
-                  label: const Text(
-                    'Add Question',
-                  ),
+                  label: const Text('Add Question'),
                 ),
               ],
             ),
@@ -796,8 +727,8 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
         widget.aggregateTypeQuestionCount ?? _questions.length;
     final isValidSection = effectiveTypeCount >= 5;
     final statusColor = isValidSection
-        ? Colors.green.shade700
-        : Colors.orange.shade800;
+        ? CmTheme.emeraldSuccess
+        : CmTheme.redDanger;
 
     return Column(
       children: [
@@ -806,7 +737,9 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
           margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: statusColor.withValues(alpha: 0.1),
+            color: isValidSection
+                ? CmTheme.emeraldSuccess.withValues(alpha: 0.10)
+                : CmTheme.surfaceWhite,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: statusColor.withValues(alpha: 0.4)),
           ),
@@ -815,7 +748,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
               Icon(
                 isValidSection
                     ? Icons.check_circle_outline
-                    : Icons.info_outline,
+                    : Icons.error_outline,
                 color: statusColor,
                 size: 20,
               ),
@@ -828,7 +761,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                       : '${_formatQuestionType(widget.questionType)} requires at least 5 questions '
                             'across sections of this type (currently $effectiveTypeCount/5; add ${5 - effectiveTypeCount} more).',
                   style: TextStyle(
-                    color: statusColor,
+                    color: isValidSection ? CmTheme.navy : CmTheme.redDanger,
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
                   ),
@@ -898,9 +831,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                         if (choices is List) ...[
                           const SizedBox(height: 12),
                           ...choices.asMap().entries.map((entry) {
-                            final letter = String.fromCharCode(
-                              65 + entry.key,
-                            );
+                            final letter = String.fromCharCode(65 + entry.key);
 
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 4),
@@ -913,7 +844,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                           'Correct Answer: $correctAnswer',
                           style: const TextStyle(
                             fontWeight: FontWeight.w600,
-                            color: Colors.green,
+                            color: CmTheme.emeraldSuccess,
                           ),
                         ),
                         if (widget.questionType == 'identification' &&
@@ -921,9 +852,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
                           const SizedBox(height: 12),
                           const Text(
                             'Acceptable Answers:',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                            ),
+                            style: TextStyle(fontWeight: FontWeight.bold),
                           ),
                           const SizedBox(height: 6),
                           if (acceptable.isEmpty)

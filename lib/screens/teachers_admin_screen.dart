@@ -1,21 +1,18 @@
 import 'dart:math';
 
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../services/academic_api_service.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
-import 'login_screen.dart' show CmColors;
 
 // =============================================================
 // Teachers — built on the same patterns as students_screen
 // (search field, cards, chips, popup actions, dialogs, empty states).
 // Every action calls the backend; nothing is mocked.
 // =============================================================
-
-const Color _activeGreen = Color(0xFF2F8F72);
-const Color _dangerRed = Color(0xFFDC2626);
 
 // ---------- Teacher record helpers (tolerant of API field names) ----------
 
@@ -104,8 +101,7 @@ class _SubjectAssignment {
   final String subjectName;
   final Map<String, _Sec> sections;
 
-  String get key =>
-      subjectId != null ? 's$subjectId' : 'a$academicSubjectId';
+  String get key => subjectId != null ? 's$subjectId' : 'a$academicSubjectId';
 }
 
 List<_SubjectAssignment> _tAssignments(Map<String, dynamic> t) {
@@ -121,8 +117,9 @@ List<_SubjectAssignment> _tAssignments(Map<String, dynamic> t) {
 
     final item = _SubjectAssignment(
       subjectId: subjectId,
-      academicSubjectId:
-          int.tryParse(a['academic_subject_id']?.toString() ?? ''),
+      academicSubjectId: int.tryParse(
+        a['academic_subject_id']?.toString() ?? '',
+      ),
       subjectName: (a['subject_name'] ?? 'Subject').toString(),
     );
 
@@ -150,9 +147,7 @@ List<_SubjectAssignment> _tAssignments(Map<String, dynamic> t) {
   return out;
 }
 
-List<Map<String, dynamic>> _assignmentPayload(
-  List<_SubjectAssignment> list,
-) =>
+List<Map<String, dynamic>> _assignmentPayload(List<_SubjectAssignment> list) =>
     [
       for (final a in list)
         for (final s in a.sections.values)
@@ -167,9 +162,9 @@ List<Map<String, dynamic>> _assignmentPayload(
     ];
 
 Set<String> _assignmentKeys(List<_SubjectAssignment> list) => {
-      for (final a in list)
-        for (final s in a.sections.values) '${a.key}|${s.key}',
-    };
+  for (final a in list)
+    for (final s in a.sections.values) '${a.key}|${s.key}',
+};
 
 bool _assignmentsChanged(
   List<_SubjectAssignment> before,
@@ -181,11 +176,11 @@ bool _assignmentsChanged(
 }
 
 String _assignmentSearchText(Map<String, dynamic> t) => [
-      for (final a in _tAssignments(t)) ...[
-        a.subjectName,
-        ...a.sections.values.map((s) => s.section),
-      ],
-    ].join(' ').toLowerCase();
+  for (final a in _tAssignments(t)) ...[
+    a.subjectName,
+    ...a.sections.values.map((s) => s.section),
+  ],
+].join(' ').toLowerCase();
 
 String _yearLabel(int? y, {bool shs = false}) {
   if (shs && y != null) return 'Grade ${y + 10}';
@@ -219,14 +214,62 @@ class _Identity {
   static final _teacherId = RegExp(r'^(?:CM-\d{4}-\d{4}|\d{3,20})$');
 
   static const _fold = <String, String>{
-    'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a', 'å': 'a', 'ā': 'a',
-    'ă': 'a', 'ą': 'a', 'æ': 'ae', 'ç': 'c', 'ć': 'c', 'č': 'c', 'ď': 'd',
-    'đ': 'd', 'è': 'e', 'é': 'e', 'ê': 'e', 'ë': 'e', 'ē': 'e', 'ę': 'e',
-    'ě': 'e', 'ì': 'i', 'í': 'i', 'î': 'i', 'ï': 'i', 'ī': 'i', 'ł': 'l',
-    'ñ': 'n', 'ń': 'n', 'ň': 'n', 'ò': 'o', 'ó': 'o', 'ô': 'o', 'õ': 'o',
-    'ö': 'o', 'ø': 'o', 'ō': 'o', 'œ': 'oe', 'ř': 'r', 'ś': 's', 'š': 's',
-    'ş': 's', 'ß': 'ss', 'ť': 't', 'ù': 'u', 'ú': 'u', 'û': 'u', 'ü': 'u',
-    'ū': 'u', 'ů': 'u', 'ý': 'y', 'ÿ': 'y', 'ź': 'z', 'ż': 'z', 'ž': 'z',
+    'à': 'a',
+    'á': 'a',
+    'â': 'a',
+    'ã': 'a',
+    'ä': 'a',
+    'å': 'a',
+    'ā': 'a',
+    'ă': 'a',
+    'ą': 'a',
+    'æ': 'ae',
+    'ç': 'c',
+    'ć': 'c',
+    'č': 'c',
+    'ď': 'd',
+    'đ': 'd',
+    'è': 'e',
+    'é': 'e',
+    'ê': 'e',
+    'ë': 'e',
+    'ē': 'e',
+    'ę': 'e',
+    'ě': 'e',
+    'ì': 'i',
+    'í': 'i',
+    'î': 'i',
+    'ï': 'i',
+    'ī': 'i',
+    'ł': 'l',
+    'ñ': 'n',
+    'ń': 'n',
+    'ň': 'n',
+    'ò': 'o',
+    'ó': 'o',
+    'ô': 'o',
+    'õ': 'o',
+    'ö': 'o',
+    'ø': 'o',
+    'ō': 'o',
+    'œ': 'oe',
+    'ř': 'r',
+    'ś': 's',
+    'š': 's',
+    'ş': 's',
+    'ß': 'ss',
+    'ť': 't',
+    'ù': 'u',
+    'ú': 'u',
+    'û': 'u',
+    'ü': 'u',
+    'ū': 'u',
+    'ů': 'u',
+    'ý': 'y',
+    'ÿ': 'y',
+    'ź': 'z',
+    'ż': 'z',
+    'ž': 'z',
   };
 
   // ------------------------------------------------------------------
@@ -334,47 +377,47 @@ class _Identity {
     return out.toString();
   }
 
-/// surname.numericid@sti.checkmate.com
-/// The first and middle names are not included in the email.
-/// Returns null if a usable email cannot be generated.
-static String? buildEmail({
-  required String firstName,
-  required String middleName,
-  required String lastName,
-  required String teacherIdNo,
-}) {
-  final surname = slug(lastName);
-  final rawId = teacherIdNo.trim();
+  /// surname.numericid@sti.checkmate.com
+  /// The first and middle names are not included in the email.
+  /// Returns null if a usable email cannot be generated.
+  static String? buildEmail({
+    required String firstName,
+    required String middleName,
+    required String lastName,
+    required String teacherIdNo,
+  }) {
+    final surname = slug(lastName);
+    final rawId = teacherIdNo.trim();
 
-  final numericId = rawId.startsWith('CM-')
-      ? rawId.substring(3).replaceAll('-', '')
-      : rawId;
+    final numericId = rawId.startsWith('CM-')
+        ? rawId.substring(3).replaceAll('-', '')
+        : rawId;
 
-  if (surname.isEmpty || numericId.isEmpty) return null;
+    if (surname.isEmpty || numericId.isEmpty) return null;
 
-  return '$surname.$numericId@$emailDomain';
-}
+    return '$surname.$numericId@$emailDomain';
+  }
 }
 
 // ---------- Shared form styling (same look as the Students dialogs) ----------
 
 InputDecoration _fieldDecoration({String? errorText}) {
   OutlineInputBorder border(Color c, [double w = 1]) => OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: c, width: w),
-      );
+    borderRadius: BorderRadius.circular(12),
+    borderSide: BorderSide(color: c, width: w),
+  );
 
   return InputDecoration(
     isDense: true,
     filled: true,
-    fillColor: Colors.white,
+    fillColor: CmTheme.surfaceWhite,
     errorText: errorText,
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-    border: border(CmColors.line),
-    enabledBorder: border(CmColors.line),
-    focusedBorder: border(CmColors.navy, 1.5),
-    errorBorder: border(_dangerRed),
-    focusedErrorBorder: border(_dangerRed, 1.5),
+    border: border(CmTheme.lineBorder),
+    enabledBorder: border(CmTheme.lineBorder),
+    focusedBorder: border(CmTheme.navy, 1.5),
+    errorBorder: border(CmTheme.redDanger),
+    focusedErrorBorder: border(CmTheme.redDanger, 1.5),
   );
 }
 
@@ -388,7 +431,7 @@ Widget _labeled(String label, Widget field) {
           label,
           style: const TextStyle(
             fontSize: 13,
-            color: CmColors.slate,
+            color: CmTheme.slateText,
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -399,25 +442,25 @@ Widget _labeled(String label, Widget field) {
 }
 
 ButtonStyle get _primaryButtonStyle => FilledButton.styleFrom(
-      backgroundColor: CmColors.navy,
-      disabledBackgroundColor: const Color(0xFF9AA3B2),
-      disabledForegroundColor: Colors.white,
-      minimumSize: const Size.fromHeight(50),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    );
+  backgroundColor: CmTheme.navy,
+  disabledBackgroundColor: CmTheme.slateText,
+  disabledForegroundColor: CmTheme.surfaceWhite,
+  minimumSize: const Size.fromHeight(50),
+  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+);
 
 ButtonStyle get _secondaryButtonStyle => OutlinedButton.styleFrom(
-      foregroundColor: CmColors.navy,
-      backgroundColor: CmColors.bg,
-      side: const BorderSide(color: CmColors.line),
-      minimumSize: const Size.fromHeight(50),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    );
+  foregroundColor: CmTheme.navy,
+  backgroundColor: CmTheme.background,
+  side: const BorderSide(color: CmTheme.lineBorder),
+  minimumSize: const Size.fromHeight(50),
+  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+);
 
 Widget _dialogShell({required Widget child}) {
   return Dialog(
-    backgroundColor: Colors.white,
-    surfaceTintColor: Colors.transparent,
+    backgroundColor: CmTheme.surfaceWhite,
+    surfaceTintColor: CmTheme.transparent,
     insetPadding: const EdgeInsets.all(24),
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
     child: ConstrainedBox(
@@ -439,7 +482,7 @@ Widget _dialogHeader(String title, VoidCallback? onClose) {
           style: const TextStyle(
             fontSize: 19,
             fontWeight: FontWeight.w700,
-            color: CmColors.navy,
+            color: CmTheme.navy,
           ),
         ),
       ),
@@ -453,10 +496,10 @@ Widget _dialogHeader(String title, VoidCallback? onClose) {
 }
 
 Widget _spinner() => const SizedBox(
-      width: 20,
-      height: 20,
-      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-    );
+  width: 20,
+  height: 20,
+  child: CircularProgressIndicator(strokeWidth: 2, color: CmTheme.surfaceWhite),
+);
 
 // =============================================================
 // SCREEN
@@ -533,7 +576,7 @@ class _TeachersScreenState extends State<TeachersScreen> {
       if (!mounted) return;
 
       if (silent && _teachers.isNotEmpty) {
-        _snack(_clean(e));
+        _snack(_clean(e), error: true);
         return;
       }
 
@@ -544,9 +587,13 @@ class _TeachersScreenState extends State<TeachersScreen> {
     }
   }
 
-  void _snack(String message) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+  void _snack(String message, {bool error = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      CmTheme.feedbackSnackBar(
+        message,
+        color: error ? CmTheme.redDanger : CmTheme.emeraldSuccess,
+      ),
+    );
   }
 
   // ---------- lookups ----------
@@ -595,8 +642,7 @@ class _TeachersScreenState extends State<TeachersScreen> {
           // The login is the institutional email the server generated.
           creds = _Credentials(
             name: _tName(created),
-            username:
-                _tEmail(created).isEmpty ? input.email : _tEmail(created),
+            username: _tEmail(created).isEmpty ? input.email : _tEmail(created),
             password: input.password!,
           );
         },
@@ -662,7 +708,8 @@ class _TeachersScreenState extends State<TeachersScreen> {
     await _load(silent: true);
     if (!mounted) return;
 
-    final changed = newEmail != null &&
+    final changed =
+        newEmail != null &&
         newEmail!.isNotEmpty &&
         newEmail!.toLowerCase() != oldEmail.toLowerCase();
 
@@ -717,7 +764,8 @@ class _TeachersScreenState extends State<TeachersScreen> {
 
     final confirmed = await _confirm(
       title: 'Reset password?',
-      message: 'A new temporary password will replace ${_tName(teacher)}\'s '
+      message:
+          'A new temporary password will replace ${_tName(teacher)}\'s '
           'current password. They must change it the next time they sign in.',
       confirmLabel: 'Reset Password',
     );
@@ -751,7 +799,7 @@ class _TeachersScreenState extends State<TeachersScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _busy.remove(id));
-      _snack(_clean(e));
+      _snack(_clean(e), error: true);
     }
   }
 
@@ -768,7 +816,8 @@ class _TeachersScreenState extends State<TeachersScreen> {
     if (!enable) {
       final confirmed = await _confirm(
         title: 'Disable ${_tName(teacher)}?',
-        message: 'They will no longer be able to sign in or use CheckMate '
+        message:
+            'They will no longer be able to sign in or use CheckMate '
             'until the account is enabled again.',
         confirmLabel: 'Disable',
       );
@@ -792,7 +841,7 @@ class _TeachersScreenState extends State<TeachersScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _busy.remove(id));
-      _snack(_clean(e));
+      _snack(_clean(e), error: true);
     }
   }
 
@@ -811,11 +860,11 @@ class _TeachersScreenState extends State<TeachersScreen> {
       title: 'Delete ${_tName(teacher)}?',
       message: released == 0
           ? 'This permanently deletes the teacher account. This cannot be '
-              'undone.'
+                'undone.'
           : 'This permanently deletes the teacher account. Its $released '
-              'section assignment${released == 1 ? '' : 's'} will be '
-              'released so another teacher can take them. The sections, '
-              'students and exams are kept. This cannot be undone.',
+                'section assignment${released == 1 ? '' : 's'} will be '
+                'released so another teacher can take them. The sections, '
+                'students and exams are kept. This cannot be undone.',
       confirmLabel: 'Delete',
       destructive: true,
     );
@@ -834,7 +883,7 @@ class _TeachersScreenState extends State<TeachersScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _busy.remove(id));
-      _snack(_clean(e));
+      _snack(_clean(e), error: true);
     }
   }
 
@@ -851,8 +900,8 @@ class _TeachersScreenState extends State<TeachersScreen> {
     return showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.transparent,
+        backgroundColor: CmTheme.surfaceWhite,
+        surfaceTintColor: CmTheme.transparent,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: Text(
           title,
@@ -860,18 +909,21 @@ class _TeachersScreenState extends State<TeachersScreen> {
         ),
         content: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
-          child: Text(message, style: const TextStyle(color: CmColors.slate)),
+          child: Text(
+            message,
+            style: const TextStyle(color: CmTheme.slateText),
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            style: TextButton.styleFrom(foregroundColor: CmColors.navy),
+            style: TextButton.styleFrom(foregroundColor: CmTheme.navy),
             child: const Text('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(
-              backgroundColor: destructive ? _dangerRed : CmColors.navy,
+              backgroundColor: destructive ? CmTheme.redDanger : CmTheme.navy,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
               ),
@@ -913,13 +965,11 @@ class _TeachersScreenState extends State<TeachersScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Teachers'),
-      ),
+      appBar: AppBar(title: const Text('Teachers')),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showAddDialog,
-        backgroundColor: CmColors.navy,
-        foregroundColor: Colors.white,
+        backgroundColor: CmTheme.navy,
+        foregroundColor: CmTheme.surfaceWhite,
         icon: const Icon(Icons.person_add_alt_1_outlined),
         label: const Text('Add Teacher'),
       ),
@@ -930,11 +980,11 @@ class _TeachersScreenState extends State<TeachersScreen> {
             child: Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(14),
-                boxShadow: const [
+                boxShadow: [
                   BoxShadow(
-                    color: Color(0x14000000),
+                    color: CmTheme.raisedPanelShadow,
                     blurRadius: 8,
-                    offset: Offset(0, 2),
+                    offset: const Offset(0, 2),
                   ),
                 ],
               ),
@@ -957,30 +1007,29 @@ class _TeachersScreenState extends State<TeachersScreen> {
                           },
                         ),
                   filled: true,
-                  fillColor: Colors.white,
+                  fillColor: CmTheme.surfaceWhite,
                   contentPadding: const EdgeInsets.symmetric(vertical: 16),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(color: CmColors.line),
+                    borderSide: const BorderSide(color: CmTheme.lineBorder),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(color: CmColors.line),
+                    borderSide: const BorderSide(color: CmTheme.lineBorder),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide:
-                        const BorderSide(color: CmColors.navy, width: 1.5),
+                    borderSide: const BorderSide(
+                      color: CmTheme.navy,
+                      width: 1.5,
+                    ),
                   ),
                 ),
               ),
             ),
           ),
           Expanded(
-            child: RefreshIndicator(
-              onRefresh: _load,
-              child: _buildBody(),
-            ),
+            child: RefreshIndicator(onRefresh: _load, child: _buildBody()),
           ),
         ],
       ),
@@ -1003,12 +1052,13 @@ class _TeachersScreenState extends State<TeachersScreen> {
                 children: [
                   const Icon(Icons.error_outline, size: 48),
                   const SizedBox(height: 16),
-                  Text(_error!, textAlign: TextAlign.center),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: _load,
-                    child: const Text('Retry'),
+                  Text(
+                    _error!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: CmTheme.redDanger),
                   ),
+                  const SizedBox(height: 16),
+                  FilledButton(onPressed: _load, child: const Text('Retry')),
                 ],
               ),
             ),
@@ -1031,7 +1081,7 @@ class _TeachersScreenState extends State<TeachersScreen> {
                   Icon(
                     _teachers.isEmpty ? Icons.people_outline : Icons.search_off,
                     size: 56,
-                    color: _teachers.isEmpty ? null : CmColors.slate,
+                    color: _teachers.isEmpty ? null : CmTheme.slateText,
                   ),
                   const SizedBox(height: 16),
                   const Text(
@@ -1067,20 +1117,16 @@ class _TeachersScreenState extends State<TeachersScreen> {
   }
 
   Widget _chip(String text, {Color? color, Color? background}) {
-    final fg = color ?? CmColors.slate;
+    final fg = color ?? CmTheme.slateText;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: background ?? CmColors.slate.withValues(alpha: 0.12),
+        color: background ?? CmTheme.slateText.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
         text,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: fg,
-        ),
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: fg),
       ),
     );
   }
@@ -1104,11 +1150,11 @@ class _TeachersScreenState extends State<TeachersScreen> {
 
     return Card(
       elevation: 0,
-      color: Colors.white,
+      color: CmTheme.surfaceWhite,
       margin: const EdgeInsets.only(bottom: 10),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        side: const BorderSide(color: CmColors.line),
+        side: const BorderSide(color: CmTheme.lineBorder),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
@@ -1120,8 +1166,8 @@ class _TeachersScreenState extends State<TeachersScreen> {
             children: [
               CircleAvatar(
                 radius: 24,
-                backgroundColor: CmColors.navy.withValues(alpha: 0.07),
-                foregroundColor: CmColors.navy,
+                backgroundColor: CmTheme.navy.withValues(alpha: 0.07),
+                foregroundColor: CmTheme.navy,
                 child: Text(
                   name.isNotEmpty ? name[0].toUpperCase() : '?',
                   style: const TextStyle(fontWeight: FontWeight.w700),
@@ -1142,22 +1188,25 @@ class _TeachersScreenState extends State<TeachersScreen> {
                           style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
-                            color: CmColors.navy,
+                            color: CmTheme.navy,
                           ),
                         ),
                         active
                             ? _chip(
                                 'Active',
-                                color: _activeGreen,
-                                background:
-                                    _activeGreen.withValues(alpha: 0.14),
+                                color: CmTheme.navy,
+                                background: CmTheme.emeraldSuccess.withValues(
+                                  alpha: 0.14,
+                                ),
                               )
                             : _chip('Disabled'),
                         if (incomplete)
                           _chip(
                             'Profile incomplete',
-                            color: const Color(0xFFB45309),
-                            background: const Color(0xFFFEF3C7),
+                            color: CmTheme.navy,
+                            background: CmTheme.amberWarning.withValues(
+                              alpha: 0.16,
+                            ),
                           ),
                       ],
                     ),
@@ -1166,7 +1215,7 @@ class _TeachersScreenState extends State<TeachersScreen> {
                         padding: const EdgeInsets.only(top: 2),
                         child: Text(
                           email,
-                          style: const TextStyle(color: CmColors.slate),
+                          style: const TextStyle(color: CmTheme.slateText),
                         ),
                       ),
                     if (meta.isNotEmpty)
@@ -1175,7 +1224,7 @@ class _TeachersScreenState extends State<TeachersScreen> {
                         child: Text(
                           meta,
                           style: const TextStyle(
-                            color: CmColors.slate,
+                            color: CmTheme.slateText,
                             fontSize: 13,
                           ),
                         ),
@@ -1184,7 +1233,10 @@ class _TeachersScreenState extends State<TeachersScreen> {
                     if (assignments.isEmpty)
                       const Text(
                         'No assignments yet',
-                        style: TextStyle(color: CmColors.slate, fontSize: 12),
+                        style: TextStyle(
+                          color: CmTheme.slateText,
+                          fontSize: 12,
+                        ),
                       )
                     else
                       for (final a in assignments)
@@ -1200,16 +1252,19 @@ class _TeachersScreenState extends State<TeachersScreen> {
                                 style: const TextStyle(
                                   fontSize: 12.5,
                                   fontWeight: FontWeight.w600,
-                                  color: CmColors.navy,
+                                  color: CmTheme.navy,
                                 ),
                               ),
-                              for (final sec in (a.sections.values.toList()
-                                ..sort((x, y) => x.section.compareTo(y.section))))
+                              for (final sec
+                                  in (a.sections.values.toList()..sort(
+                                    (x, y) => x.section.compareTo(y.section),
+                                  )))
                                 _chip(
                                   sec.section,
-                                  color: CmColors.navy,
-                                  background:
-                                      CmColors.navy.withValues(alpha: 0.07),
+                                  color: CmTheme.navy,
+                                  background: CmTheme.navy.withValues(
+                                    alpha: 0.07,
+                                  ),
                                 ),
                             ],
                           ),
@@ -1233,7 +1288,10 @@ class _TeachersScreenState extends State<TeachersScreen> {
                   itemBuilder: (_) => [
                     _menuItem('edit', Icons.edit_outlined, 'Edit'),
                     _menuItem(
-                        'sections', Icons.class_outlined, 'Assign Sections'),
+                      'sections',
+                      Icons.class_outlined,
+                      'Assign Sections',
+                    ),
                     _menuItem('reset', Icons.lock_reset, 'Reset Password'),
                     _menuItem(
                       'toggle',
@@ -1242,8 +1300,12 @@ class _TeachersScreenState extends State<TeachersScreen> {
                           : Icons.check_circle_outline,
                       active ? 'Disable Account' : 'Enable Account',
                     ),
-                    _menuItem('delete', Icons.delete_outline, 'Delete',
-                        danger: true),
+                    _menuItem(
+                      'delete',
+                      Icons.delete_outline,
+                      'Delete',
+                      danger: true,
+                    ),
                   ],
                 ),
             ],
@@ -1259,7 +1321,7 @@ class _TeachersScreenState extends State<TeachersScreen> {
     String label, {
     bool danger = false,
   }) {
-    final color = danger ? _dangerRed : CmColors.navy;
+    final color = danger ? CmTheme.redDanger : CmTheme.navy;
     return PopupMenuItem<String>(
       value: value,
       child: Row(
@@ -1337,7 +1399,8 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
 
   /// An account created before Teacher IDs / split names existed.
   bool get _legacy =>
-      _isEdit && (_tTeacherId(widget.teacher!).isEmpty ||
+      _isEdit &&
+      (_tTeacherId(widget.teacher!).isEmpty ||
           _tFirst(widget.teacher!).isEmpty);
 
   @override
@@ -1380,18 +1443,20 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
       (t) => _tId(t) != _editId && _tTeacherId(t).toLowerCase() == v,
     );
 
-    return taken ? 'This Teacher ID No. already belongs to another teacher.' : null;
+    return taken
+        ? 'This Teacher ID No. already belongs to another teacher.'
+        : null;
   }
 
   String? _firstError(String raw) =>
       _Identity.nameError(raw, label: 'First name', isRequired: true);
 
   String? _middleError(String raw) => _Identity.nameError(
-        raw,
-        label: 'Middle name',
-        isRequired: false,
-        minLetters: 1,
-      );
+    raw,
+    label: 'Middle name',
+    isRequired: false,
+    minLetters: 1,
+  );
 
   String? _lastError(String raw) =>
       _Identity.nameError(raw, label: 'Last name', isRequired: true);
@@ -1434,7 +1499,9 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
               _tUsername(t).toLowerCase() == email),
     );
 
-    return taken ? 'The generated email is already used by another account.' : null;
+    return taken
+        ? 'The generated email is already used by another account.'
+        : null;
   }
 
   // ---------- helpers ----------
@@ -1461,10 +1528,7 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
   }
 
   /// Name fields tidy themselves (capitalisation, spaces) when you leave them.
-  Widget _nameField(
-    TextEditingController controller,
-    String? error,
-  ) {
+  Widget _nameField(TextEditingController controller, String? error) {
     return Focus(
       onFocusChange: (hasFocus) {
         if (!hasFocus) {
@@ -1538,10 +1602,14 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
     final emailWillChange =
         _isEdit && email != null && oldEmail.isNotEmpty && email != oldEmail;
 
-    final valid = firstError == null &&
+    final valid =
+        firstError == null &&
         middleError == null &&
         lastError == null &&
-        (_isEdit ? (_teacherNo.text.trim().isEmpty || (email != null && emailError == null)) : true) &&
+        (_isEdit
+            ? (_teacherNo.text.trim().isEmpty ||
+                  (email != null && emailError == null))
+            : true) &&
         _department != null &&
         passwordError == null;
 
@@ -1559,7 +1627,7 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFFFEF3C7),
+                color: CmTheme.lineBorder,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
@@ -1567,23 +1635,25 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
                 'Teacher IDs and separate name fields existed. Enter the '
                 'details below to complete the profile. Saving will change '
                 'the login email to the generated institutional address.',
-                style: const TextStyle(fontSize: 12.5, color: Color(0xFF92400E)),
+                style: const TextStyle(fontSize: 12.5, color: CmTheme.navy),
               ),
             ),
           ],
           const SizedBox(height: 12),
-           _labeled(
-             'Teacher ID No. (automatic)',
-             InputDecorator(
-               decoration: _fieldDecoration(),
-               child: Text(
-                 _isEdit
-                     ? (_teacherNo.text.isEmpty ? 'Assigned when profile is saved' : _teacherNo.text)
-                     : 'Generated when the account is created',
-                 style: const TextStyle(color: CmColors.slate),
-               ),
-             ),
-           ),
+          _labeled(
+            'Teacher ID No. (automatic)',
+            InputDecorator(
+              decoration: _fieldDecoration(),
+              child: Text(
+                _isEdit
+                    ? (_teacherNo.text.isEmpty
+                          ? 'Assigned when profile is saved'
+                          : _teacherNo.text)
+                    : 'Generated when the account is created',
+                style: const TextStyle(color: CmTheme.slateText),
+              ),
+            ),
+          ),
           const SizedBox(height: 14),
           _labeled('First Name', _nameField(_first, firstError)),
           const SizedBox(height: 14),
@@ -1598,21 +1668,29 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
               children: [
                 Container(
                   width: double.infinity,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 14,
+                  ),
                   decoration: BoxDecoration(
-                    color: CmColors.bg,
+                    color: CmTheme.background,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: emailError == null ? CmColors.line : _dangerRed,
+                      color: emailError == null
+                          ? CmTheme.lineBorder
+                          : CmTheme.redDanger,
                     ),
                   ),
                   child: SelectableText(
-                    email ?? (_isEdit ? 'Complete the teacher profile to generate email' : 'Generated automatically when the account is created'),
+                    email ??
+                        (_isEdit
+                            ? 'Complete the teacher profile to generate email'
+                            : 'Generated automatically when the account is created'),
                     style: TextStyle(
-                      color: email == null ? CmColors.slate : CmColors.navy,
-                      fontWeight:
-                          email == null ? FontWeight.w400 : FontWeight.w600,
+                      color: email == null ? CmTheme.slateText : CmTheme.navy,
+                      fontWeight: email == null
+                          ? FontWeight.w400
+                          : FontWeight.w600,
                     ),
                   ),
                 ),
@@ -1621,7 +1699,10 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
                     padding: const EdgeInsets.only(top: 6, left: 4),
                     child: Text(
                       emailError,
-                      style: const TextStyle(color: _dangerRed, fontSize: 12),
+                      style: const TextStyle(
+                        color: CmTheme.redDanger,
+                        fontSize: 12,
+                      ),
                     ),
                   )
                 else if (emailWillChange)
@@ -1630,10 +1711,7 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
                     child: Text(
                       'The login email will change from '
                       '${_tEmail(widget.teacher!)}. Tell the teacher.',
-                      style: const TextStyle(
-                        color: Color(0xFFB45309),
-                        fontSize: 12,
-                      ),
+                      style: const TextStyle(color: CmTheme.navy, fontSize: 12),
                     ),
                   ),
               ],
@@ -1645,7 +1723,7 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
             widget.departments.isEmpty
                 ? const Text(
                     'No departments available.',
-                    style: TextStyle(color: CmColors.slate),
+                    style: TextStyle(color: CmTheme.slateText),
                   )
                 : DropdownButtonFormField<String>(
                     initialValue: _department,
@@ -1696,8 +1774,8 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
                     height: 48,
                     child: OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: CmColors.navy,
-                        side: const BorderSide(color: CmColors.line),
+                        foregroundColor: CmTheme.navy,
+                        side: const BorderSide(color: CmTheme.lineBorder),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
@@ -1705,8 +1783,8 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
                       onPressed: _saving
                           ? null
                           : () => setState(
-                                () => _password.text = _generatePassword(),
-                              ),
+                              () => _password.text = _generatePassword(),
+                            ),
                       icon: const Icon(Icons.autorenew, size: 18),
                       label: const Text('Generate'),
                     ),
@@ -1726,7 +1804,10 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
                 _active
                     ? 'The teacher can sign in.'
                     : 'Disabled: the teacher cannot sign in or use the app.',
-                style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  color: CmTheme.slateText,
+                ),
               ),
             ),
           ],
@@ -1735,7 +1816,7 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
             Text(
               _error!,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: _dangerRed),
+              style: const TextStyle(color: CmTheme.redDanger),
             ),
           ],
           const SizedBox(height: 20),
@@ -1744,8 +1825,9 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
               Expanded(
                 child: OutlinedButton(
                   style: _secondaryButtonStyle,
-                  onPressed:
-                      _saving ? null : () => Navigator.pop(context, false),
+                  onPressed: _saving
+                      ? null
+                      : () => Navigator.pop(context, false),
                   child: const Text('Cancel'),
                 ),
               ),
@@ -1886,21 +1968,21 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
     return d.isEmpty ? 'College' : d;
   }
 
-  List<String> get _departments => {
-        for (final p in _programs) _departmentOf(p),
-      }.toList()
-        ..sort((a, b) {
-          if (a == b) return 0;
-          if (a == 'Senior High School') return 1;
-          if (b == 'Senior High School') return -1;
-          return a.compareTo(b);
-        });
+  List<String> get _departments =>
+      {for (final p in _programs) _departmentOf(p)}.toList()..sort((a, b) {
+        if (a == b) return 0;
+        if (a == 'Senior High School') return 1;
+        if (b == 'Senior High School') return -1;
+        return a.compareTo(b);
+      });
 
-  List<Map<String, dynamic>> get _departmentPrograms => _programs
-      .where((p) => _departmentOf(p) == _filterDepartment)
-      .toList()
-    ..sort((a, b) =>
-        (a['code'] ?? '').toString().compareTo((b['code'] ?? '').toString()));
+  List<Map<String, dynamic>> get _departmentPrograms =>
+      _programs.where((p) => _departmentOf(p) == _filterDepartment).toList()
+        ..sort(
+          (a, b) => (a['code'] ?? '').toString().compareTo(
+            (b['code'] ?? '').toString(),
+          ),
+        );
 
   Map<String, dynamic>? get _program {
     for (final p in _programs) {
@@ -1913,10 +1995,9 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
 
   /// Year levels of the chosen program that have subjects.
   List<int> get _years => {
-        for (final s in _programSubjects)
-          if (_int(s['year_level']) != null) _int(s['year_level'])!,
-      }.toList()
-        ..sort();
+    for (final s in _programSubjects)
+      if (_int(s['year_level']) != null) _int(s['year_level'])!,
+  }.toList()..sort();
 
   /// Subjects taught in the chosen year level (one entry per subject).
   List<Map<String, dynamic>> get _yearSubjects {
@@ -1945,8 +2026,9 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
     return null;
   }
 
-  String _termLabel(int? term) =>
-      term == 1 ? '1st Sem' : (term == 2 ? '2nd Sem' : (term == null ? '' : 'Term $term'));
+  String _termLabel(int? term) => term == 1
+      ? '1st Sem'
+      : (term == 2 ? '2nd Sem' : (term == null ? '' : 'Term $term'));
 
   /// Draft key of the chosen subject: its subjects row when it has one (so it
   /// merges with what the teacher already teaches), else the academic id.
@@ -2061,7 +2143,7 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
         actions: [
           FilledButton(
             onPressed: () => Navigator.pop(ctx),
-            style: FilledButton.styleFrom(backgroundColor: CmColors.navy),
+            style: FilledButton.styleFrom(backgroundColor: CmTheme.navy),
             child: const Text('OK'),
           ),
         ],
@@ -2080,7 +2162,9 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
     // An elective slot with nothing finalized cannot be assigned yet.
     if (row != null && row['needs_finalization'] == true) {
       setState(() => _dropdownResets++);
-      await _showFinalizeElectiveDialog((row['name'] ?? 'This subject').toString());
+      await _showFinalizeElectiveDialog(
+        (row['name'] ?? 'This subject').toString(),
+      );
       return;
     }
 
@@ -2208,10 +2292,10 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
   }
 
   BoxDecoration get _cardDecoration => BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: CmColors.line),
-      );
+    color: CmTheme.surfaceWhite,
+    borderRadius: BorderRadius.circular(14),
+    border: Border.all(color: CmTheme.lineBorder),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -2238,7 +2322,7 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
-                    color: CmColors.navy,
+                    color: CmTheme.navy,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -2263,7 +2347,7 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
           const Text(
             'Choose a department and a program or strand to assign '
             'sections.',
-            style: TextStyle(fontSize: 12.5, color: CmColors.slate),
+            style: TextStyle(fontSize: 12.5, color: CmTheme.slateText),
           ),
       ],
     );
@@ -2285,7 +2369,10 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(_programsError!, style: const TextStyle(color: _dangerRed)),
+          Text(
+            _programsError!,
+            style: const TextStyle(color: CmTheme.redDanger),
+          ),
           TextButton(onPressed: _loadPrograms, child: const Text('Retry')),
         ],
       );
@@ -2348,7 +2435,10 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(_subjectsError!, style: const TextStyle(color: _dangerRed)),
+          Text(
+            _subjectsError!,
+            style: const TextStyle(color: CmTheme.redDanger),
+          ),
           TextButton(
             onPressed: () => _loadSubjects(_programId!),
             child: const Text('Retry'),
@@ -2361,7 +2451,7 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
       return const Text(
         'This program has no published curriculum subjects yet. Add them in '
         'Academic Management first.',
-        style: TextStyle(color: CmColors.slate),
+        style: TextStyle(color: CmTheme.slateText),
       );
     }
 
@@ -2445,11 +2535,11 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(_optionsError!, style: const TextStyle(color: _dangerRed)),
-          TextButton(
-            onPressed: _loadOptions,
-            child: const Text('Retry'),
+          Text(
+            _optionsError!,
+            style: const TextStyle(color: CmTheme.redDanger),
           ),
+          TextButton(onPressed: _loadOptions, child: const Text('Retry')),
         ],
       );
     }
@@ -2458,14 +2548,17 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
       return const Text(
         'No sections exist for this year level and semester yet. Add them '
         'in the Sections screen first.',
-        style: TextStyle(color: CmColors.slate),
+        style: TextStyle(color: CmTheme.slateText),
       );
     }
 
     final groups = <int?, List<Map<String, dynamic>>>{};
     for (final o in _options) {
       groups
-          .putIfAbsent(int.tryParse(o['year_level']?.toString() ?? ''), () => [])
+          .putIfAbsent(
+            int.tryParse(o['year_level']?.toString() ?? ''),
+            () => [],
+          )
           .add(o);
     }
 
@@ -2488,7 +2581,7 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: CmColors.navy,
+                color: CmTheme.navy,
               ),
             ),
             for (final y in years) ...[
@@ -2499,7 +2592,7 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: CmColors.slate,
+                    color: CmTheme.slateText,
                   ),
                 ),
               ),
@@ -2507,24 +2600,22 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
                 spacing: 8,
                 children: [
                   for (final o in groups[y]!)
-                    SizedBox(
-                      width: itemWidth,
-                      child: _sectionTile(o, enabled),
-                    ),
+                    SizedBox(width: itemWidth, child: _sectionTile(o, enabled)),
                 ],
               ),
             ],
             const SizedBox(height: 10),
             OutlinedButton.icon(
               style: OutlinedButton.styleFrom(
-                foregroundColor: CmColors.navy,
-                side: const BorderSide(color: CmColors.line),
+                foregroundColor: CmTheme.navy,
+                side: const BorderSide(color: CmTheme.lineBorder),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              onPressed:
-                  enabled && _stagedChanged ? () => setState(_commit) : null,
+              onPressed: enabled && _stagedChanged
+                  ? () => setState(_commit)
+                  : null,
               icon: const Icon(Icons.add, size: 18),
               label: Text(
                 _draft.containsKey(_subjectDraftKey)
@@ -2547,26 +2638,26 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
       dense: true,
       contentPadding: EdgeInsets.zero,
       controlAffinity: ListTileControlAffinity.leading,
-      activeColor: CmColors.navy,
+      activeColor: CmTheme.navy,
       value: !blocked && _staged.contains(key),
       onChanged: (!enabled || blocked)
           ? null
           : (on) => setState(() {
-                on == true ? _staged.add(key) : _staged.remove(key);
-              }),
+              on == true ? _staged.add(key) : _staged.remove(key);
+            }),
       title: Text(
         (o['section'] ?? '').toString(),
         style: TextStyle(
           fontSize: 14,
           color: blocked
-              ? CmColors.slate.withValues(alpha: 0.6)
-              : CmColors.navy,
+              ? CmTheme.slateText.withValues(alpha: 0.6)
+              : CmTheme.navy,
         ),
       ),
       subtitle: blocked
           ? Text(
               'Assigned to $owner',
-              style: const TextStyle(fontSize: 11.5, color: CmColors.slate),
+              style: const TextStyle(fontSize: 11.5, color: CmTheme.slateText),
             )
           : null,
     );
@@ -2579,7 +2670,7 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
       return const Text(
         'No assignments yet. Choose a subject, tick its sections, then '
         'press "Add assignment".',
-        style: TextStyle(fontSize: 12.5, color: CmColors.slate),
+        style: TextStyle(fontSize: 12.5, color: CmTheme.slateText),
       );
     }
 
@@ -2588,8 +2679,9 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
     for (final a in _draft.values) {
       final byProgram = <String, List<MapEntry<String, _Sec>>>{};
       for (final e in a.sections.entries) {
-        final label =
-            e.value.programCode.isEmpty ? 'Other' : e.value.programCode;
+        final label = e.value.programCode.isEmpty
+            ? 'Other'
+            : e.value.programCode;
         byProgram.putIfAbsent(label, () => []).add(e);
       }
       for (final p in byProgram.entries) {
@@ -2618,7 +2710,7 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
               style: const TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
-                color: CmColors.slate,
+                color: CmTheme.slateText,
               ),
             ),
           ),
@@ -2626,8 +2718,12 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
       }
 
       entries.sort((x, y) {
-        final byYear = (x.value.yearLevel ?? 99).compareTo(y.value.yearLevel ?? 99);
-        return byYear != 0 ? byYear : x.value.section.compareTo(y.value.section);
+        final byYear = (x.value.yearLevel ?? 99).compareTo(
+          y.value.yearLevel ?? 99,
+        );
+        return byYear != 0
+            ? byYear
+            : x.value.section.compareTo(y.value.section);
       });
 
       children.add(
@@ -2636,7 +2732,7 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
           margin: const EdgeInsets.only(bottom: 8),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: const Color(0xFFF1F5F9),
+            color: CmTheme.background,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Column(
@@ -2646,7 +2742,7 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
                 a.subjectName,
                 style: const TextStyle(
                   fontWeight: FontWeight.w700,
-                  color: CmColors.navy,
+                  color: CmTheme.navy,
                 ),
               ),
               const SizedBox(height: 6),
@@ -2658,12 +2754,11 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
                     InputChip(
                       label: Text(e.value.section),
                       labelStyle: const TextStyle(fontSize: 12.5),
-                      backgroundColor: Colors.white,
-                      side: const BorderSide(color: CmColors.line),
+                      backgroundColor: CmTheme.surfaceWhite,
+                      side: const BorderSide(color: CmTheme.lineBorder),
                       visualDensity: VisualDensity.compact,
                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      onDeleted:
-                          enabled ? () => _remove(a.key, e.key) : null,
+                      onDeleted: enabled ? () => _remove(a.key, e.key) : null,
                     ),
                 ],
               ),
@@ -2681,7 +2776,7 @@ class _AssignmentEditorState extends State<_AssignmentEditor> {
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,
-            color: CmColors.navy,
+            color: CmTheme.navy,
           ),
         ),
         const SizedBox(height: 8),
@@ -2753,7 +2848,7 @@ class _AssignSectionsDialogState extends State<_AssignSectionsDialog> {
           ),
           Text(
             widget.teacherName,
-            style: const TextStyle(color: CmColors.slate),
+            style: const TextStyle(color: CmTheme.slateText),
           ),
           const SizedBox(height: 12),
           _AssignmentEditor(
@@ -2768,7 +2863,7 @@ class _AssignSectionsDialogState extends State<_AssignSectionsDialog> {
             Text(
               _error!,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: _dangerRed),
+              style: const TextStyle(color: CmTheme.redDanger),
             ),
           ],
           const SizedBox(height: 20),
@@ -2777,8 +2872,9 @@ class _AssignSectionsDialogState extends State<_AssignSectionsDialog> {
               Expanded(
                 child: OutlinedButton(
                   style: _secondaryButtonStyle,
-                  onPressed:
-                      _saving ? null : () => Navigator.pop(context, false),
+                  onPressed: _saving
+                      ? null
+                      : () => Navigator.pop(context, false),
                   child: const Text('Cancel'),
                 ),
               ),
@@ -2843,7 +2939,7 @@ class _CredentialsDialogState extends State<_CredentialsDialog> {
     setState(() => _copied = true);
   }
 
-  Widget _row(String label, String value, {bool mono = false}) {
+  Widget _row(String label, String value) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(
@@ -2851,7 +2947,7 @@ class _CredentialsDialogState extends State<_CredentialsDialog> {
         children: [
           Text(
             label,
-            style: const TextStyle(fontSize: 12, color: CmColors.slate),
+            style: const TextStyle(fontSize: 12, color: CmTheme.slateText),
           ),
           const SizedBox(height: 4),
           SelectableText(
@@ -2859,8 +2955,7 @@ class _CredentialsDialogState extends State<_CredentialsDialog> {
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
-              color: CmColors.navy,
-              fontFamily: mono ? 'monospace' : null,
+              color: CmTheme.navy,
             ),
           ),
         ],
@@ -2882,23 +2977,23 @@ class _CredentialsDialogState extends State<_CredentialsDialog> {
             style: const TextStyle(
               fontSize: 19,
               fontWeight: FontWeight.w700,
-              color: CmColors.navy,
+              color: CmTheme.navy,
             ),
           ),
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: CmColors.bg,
+              color: CmTheme.background,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: CmColors.line),
+              border: Border.all(color: CmTheme.lineBorder),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _row('Teacher', c.name),
                 _row('Login (email)', c.username.isEmpty ? '—' : c.username),
-                _row('Temporary password', c.password, mono: true),
+                _row('Temporary password', c.password),
               ],
             ),
           ),
@@ -2906,7 +3001,7 @@ class _CredentialsDialogState extends State<_CredentialsDialog> {
           const Text(
             'Copy this now. The password will not be shown again, and the '
             'teacher must change it on first sign-in.',
-            style: TextStyle(fontSize: 13, color: CmColors.slate),
+            style: TextStyle(fontSize: 13, color: CmTheme.slateText),
           ),
           const SizedBox(height: 20),
           Row(

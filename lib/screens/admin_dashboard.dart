@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -8,7 +9,7 @@ import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import 'academic_management_screen.dart';
 import 'sections_screen.dart';
-import 'login_screen.dart' show CmColors, LoginScreen;
+import 'login_screen.dart' show LoginScreen;
 import 'teachers_admin_screen.dart';
 
 // =============================================================
@@ -115,19 +116,18 @@ class _Tk {
   factory _Tk.of(BuildContext context) =>
       _Tk._(Theme.of(context).brightness == Brightness.dark);
 
-  Color get bg => dark ? const Color(0xFF0B1220) : CmColors.bg;
-  Color get surface => dark ? const Color(0xFF111B2E) : Colors.white;
-  Color get border => dark ? const Color(0xFF24324A) : CmColors.line;
-  Color get text => dark ? const Color(0xFFF1F5F9) : CmColors.navy;
-  Color get muted => dark ? const Color(0xFF94A3B8) : CmColors.slate;
+  Color get bg => dark ? CmTheme.navy : CmTheme.background;
+  Color get surface => dark ? CmTheme.navy : CmTheme.surfaceWhite;
+  Color get border => CmTheme.lineBorder;
+  Color get text => dark ? CmTheme.background : CmTheme.navy;
+  Color get muted => dark ? CmTheme.lineBorder : CmTheme.slateText;
 
   /// Deep navy for the sidebar / top bar.
-  Color get navy => dark ? const Color(0xFF111C33) : const Color(0xFF1B2A4A);
+  Color get navy => CmTheme.navy;
 
-  /// Muted (non-neon) green used for accents.
-  Color get emerald => dark ? const Color(0xFF3FA886) : const Color(0xFF2F8F72);
-  Color get amber => CmColors.amber;
-  Color get shadow => Colors.black.withValues(alpha: dark ? 0.30 : 0.05);
+  Color get emerald => CmTheme.emeraldSuccess;
+  Color get amber => CmTheme.amberWarning;
+  Color get shadow => dark ? CmTheme.darkPanelShadow : CmTheme.panelShadow;
 }
 
 // =============================================================
@@ -377,9 +377,7 @@ class _AdminShellState extends State<AdminShell> {
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onTap: _closeDrawer,
-                      child: ColoredBox(
-                        color: Colors.black.withValues(alpha: 0.5 * t),
-                      ),
+                      child: ColoredBox(color: CmTheme.navigationBackdrop(t)),
                     ),
                   ),
                 ),
@@ -400,7 +398,7 @@ class _AdminShellState extends State<AdminShell> {
             label: 'Navigation drawer',
             child: Material(
               color: tk.navy,
-              elevation: 16,  
+              elevation: 16,
               child: SafeArea(
                 child: _Sidebar(
                   current: widget.current,
@@ -447,7 +445,7 @@ class _MobileTopBar extends StatelessWidget {
               const SizedBox(width: 4),
               IconButton(
                 tooltip: 'Open navigation menu',
-                icon: const Icon(Icons.menu, color: Colors.white),
+                icon: const Icon(Icons.menu, color: CmTheme.surfaceWhite),
                 onPressed: onMenu,
               ),
               const SizedBox(width: 4),
@@ -463,7 +461,7 @@ class _MobileTopBar extends StatelessWidget {
                     errorBuilder: (context, error, stackTrace) => const Text(
                       'CheckMate',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: CmTheme.surfaceWhite,
                         fontWeight: FontWeight.w700,
                         fontSize: 18,
                       ),
@@ -530,10 +528,7 @@ class _Sidebar extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _header(tk, showLabels),
-                Divider(
-                  color: Colors.white.withValues(alpha: 0.12),
-                  height: 24,
-                ),
+                Divider(color: CmTheme.sidebarDivider, height: 24),
                 Expanded(
                   child: ListView(
                     children: [
@@ -548,10 +543,7 @@ class _Sidebar extends StatelessWidget {
                     ],
                   ),
                 ),
-                Divider(
-                  color: Colors.white.withValues(alpha: 0.12),
-                  height: 20,
-                ),
+                Divider(color: CmTheme.sidebarDivider, height: 20),
                 _userCard(context, tk, showLabels),
                 const SizedBox(height: 4),
                 _SidebarItem(
@@ -572,11 +564,11 @@ class _Sidebar extends StatelessWidget {
   Widget _userCard(BuildContext context, _Tk tk, bool showLabels) {
     final avatar = CircleAvatar(
       radius: 16,
-      backgroundColor: tk.emerald,
+      backgroundColor: CmTheme.lineBorder,
       child: Text(
         _AdminIdentity.initials(userName),
         style: const TextStyle(
-          color: Colors.white,
+          color: CmTheme.navy,
           fontSize: 11,
           fontWeight: FontWeight.w800,
         ),
@@ -607,7 +599,7 @@ class _Sidebar extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        color: Colors.white,
+                        color: CmTheme.surfaceWhite,
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
                       ),
@@ -617,8 +609,8 @@ class _Sidebar extends StatelessWidget {
                         email,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white60,
+                        style: TextStyle(
+                          color: CmTheme.sidebarSecondaryText,
                           fontSize: 12,
                         ),
                       ),
@@ -632,7 +624,7 @@ class _Sidebar extends StatelessWidget {
     );
 
     return Material(
-      color: Colors.transparent,
+      color: CmTheme.transparent,
       child: showLabels ? content : Tooltip(message: userName, child: content),
     );
   }
@@ -645,7 +637,7 @@ class _Sidebar extends StatelessWidget {
               collapsed
                   ? Icons.keyboard_double_arrow_right
                   : Icons.keyboard_double_arrow_left,
-              color: Colors.white70,
+              color: CmTheme.mutedOnNavy,
             ),
             onPressed: onToggle,
           )
@@ -654,7 +646,7 @@ class _Sidebar extends StatelessWidget {
     final close = onClose != null
         ? IconButton(
             tooltip: 'Close navigation menu',
-            icon: const Icon(Icons.close, color: Colors.white70),
+            icon: Icon(Icons.close, color: CmTheme.mutedOnNavy),
             onPressed: onClose,
           )
         : null;
@@ -669,7 +661,7 @@ class _Sidebar extends StatelessWidget {
             height: 52,
             fit: BoxFit.contain,
             errorBuilder: (context, error, stackTrace) =>
-                Icon(Icons.fact_check_rounded, color: tk.emerald, size: 32),
+                Icon(Icons.fact_check_rounded, color: CmTheme.navy, size: 32),
           ),
           if (toggle != null) ...[const SizedBox(height: 8), toggle],
         ],
@@ -691,14 +683,14 @@ class _Sidebar extends StatelessWidget {
                   cacheWidth: 600,
                   errorBuilder: (context, error, stackTrace) => Row(
                     children: [
-                      Icon(Icons.fact_check_rounded, color: tk.emerald),
+                      Icon(Icons.fact_check_rounded, color: CmTheme.navy),
                       const SizedBox(width: 8),
                       const Flexible(
                         child: Text(
                           'CheckMate',
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: Colors.white,
+                            color: CmTheme.surfaceWhite,
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
                           ),
@@ -717,13 +709,13 @@ class _Sidebar extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.10),
+            color: CmTheme.sidebarSelectionOverlay,
             borderRadius: BorderRadius.circular(6),
           ),
           child: const Text(
             'ADMIN PORTAL',
             style: TextStyle(
-              color: Colors.white,
+              color: CmTheme.surfaceWhite,
               fontSize: 10,
               fontWeight: FontWeight.w700,
               letterSpacing: 0.2,
@@ -752,10 +744,10 @@ class _SidebarItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = active ? Colors.white : Colors.white70;
+    final fg = active ? CmTheme.surfaceWhite : CmTheme.mutedOnNavy;
 
     final item = Material(
-      color: active ? Colors.white.withValues(alpha: 0.10) : Colors.transparent,
+      color: active ? CmTheme.sidebarSelectionOverlay : CmTheme.transparent,
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
@@ -1012,7 +1004,7 @@ class _NotificationBell extends StatelessWidget {
         children: [
           Icon(
             Icons.notifications_none,
-            color: onDark ? Colors.white : tk.text,
+            color: onDark ? CmTheme.surfaceWhite : tk.text,
           ),
           Positioned(
             right: -1,
@@ -1189,11 +1181,7 @@ class _DashboardContent extends StatelessWidget {
   // ---------- Manage shortcuts ----------
 
   Widget _modules(double w) {
-    const modules = [
-      AdminPage.teachers,
-      AdminPage.classes,
-      AdminPage.academic,
-    ];
+    const modules = [AdminPage.teachers, AdminPage.classes, AdminPage.academic];
     final gridWidth = w;
     final cols = gridWidth >= 800 ? 3 : (gridWidth >= _kTablet ? 2 : 1);
     return SizedBox(
@@ -1350,13 +1338,13 @@ class _ModuleCard extends StatelessWidget {
       label: 'Open ${page.label}',
       excludeSemantics: true,
       child: Material(
-        color: Colors.white,
-        surfaceTintColor: Colors.transparent,
+        color: CmTheme.surfaceWhite,
+        surfaceTintColor: CmTheme.transparent,
         elevation: 2,
-        shadowColor: Colors.black.withValues(alpha: 0.12),
+        shadowColor: CmTheme.moduleCardShadow,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(10),
-          side: const BorderSide(color: Color(0xFFDFE6F0)),
+          side: const BorderSide(color: CmTheme.lineBorder),
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -1371,14 +1359,10 @@ class _ModuleCard extends StatelessWidget {
                     width: 40,
                     height: 40,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFEDF4FC),
+                      color: CmTheme.background,
                       borderRadius: BorderRadius.circular(11),
                     ),
-                    child: Icon(
-                      page.icon,
-                      color: const Color(0xFF1B2A4A),
-                      size: 22,
-                    ),
+                    child: Icon(page.icon, color: CmTheme.navy, size: 22),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -1390,7 +1374,7 @@ class _ModuleCard extends StatelessWidget {
                         fontSize: 16,
                         height: 1.2,
                         fontWeight: FontWeight.w400,
-                        color: Color(0xFF1B2A4A),
+                        color: CmTheme.navy,
                       ),
                     ),
                   ),

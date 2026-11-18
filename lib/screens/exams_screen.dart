@@ -1,12 +1,10 @@
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import 'exam_builder_screen.dart';
-import 'exams_tab.dart'
-    show
-        showExamDetailsModal,
-        showUploadQuestionnaireModal;
+import 'exams_tab.dart' show showExamDetailsModal, showUploadQuestionnaireModal;
 
 class ExamsScreen extends StatefulWidget {
   const ExamsScreen({super.key});
@@ -101,7 +99,7 @@ class _ExamsScreenState extends State<ExamsScreen> {
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
-      backgroundColor: Colors.white,
+      backgroundColor: CmTheme.surfaceWhite,
       constraints: const BoxConstraints(maxWidth: 560),
       builder: (sheetContext) => SafeArea(
         child: Padding(
@@ -112,9 +110,8 @@ class _ExamsScreenState extends State<ExamsScreen> {
             children: [
               Text(
                 'Create Exam',
-                style: Theme.of(sheetContext).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
+                style: Theme.of(sheetContext).textTheme.titleLarge
+                    ?.copyWith(fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 12),
               ListTile(
@@ -212,7 +209,10 @@ class _ExamsScreenState extends State<ExamsScreen> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Exam added successfully.')),
+        CmTheme.feedbackSnackBar(
+          'Exam added successfully.',
+          color: CmTheme.emeraldSuccess,
+        ),
       );
     }
   }
@@ -254,14 +254,14 @@ class _ExamsScreenState extends State<ExamsScreen> {
   Color _getStatusColor(BuildContext context, String status) {
     switch (status.toLowerCase()) {
       case 'published':
-        return Colors.green;
+        return CmTheme.emeraldSuccess;
 
       case 'archived':
-        return Colors.grey;
+        return CmTheme.slateText;
 
       case 'draft':
       default:
-        return Colors.orange;
+        return CmTheme.slateText;
     }
   }
 
@@ -328,7 +328,11 @@ class _ExamsScreenState extends State<ExamsScreen> {
                 children: [
                   const Icon(Icons.error_outline, size: 48),
                   const SizedBox(height: 16),
-                  Text(_error!, textAlign: TextAlign.center),
+                  Text(
+                    _error!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: CmTheme.redDanger),
+                  ),
                   const SizedBox(height: 16),
                   FilledButton(
                     onPressed: _loadData,
@@ -397,7 +401,10 @@ class _ExamsScreenState extends State<ExamsScreen> {
 
               if (examId == null) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Invalid exam ID.')),
+                  CmTheme.feedbackSnackBar(
+                    'Invalid exam ID.',
+                    color: CmTheme.redDanger,
+                  ),
                 );
                 return;
               }
@@ -448,7 +455,9 @@ class _ExamsScreenState extends State<ExamsScreen> {
                     child: Text(
                       _getStatusLabel(status),
                       style: TextStyle(
-                        color: _getStatusColor(context, status),
+                        color: status.toLowerCase() == 'published'
+                            ? CmTheme.navy
+                            : CmTheme.slateText,
                         fontWeight: FontWeight.w600,
                       ),
                     ),

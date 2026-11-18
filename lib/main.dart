@@ -1,3 +1,4 @@
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 
 import 'screens/admin_dashboard.dart';
@@ -18,12 +19,7 @@ class CheckmateApp extends StatelessWidget {
     return MaterialApp(
       title: 'Checkmate',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2563EB),
-        ),
-        useMaterial3: true,
-      ),
+      theme: CmTheme.light,
       home: const AuthCheck(),
     );
   }
@@ -79,7 +75,8 @@ class _AuthCheckState extends State<AuthCheck> {
       if (role == 'teacher') {
         _setNextScreen(
           TeacherDashboard(
-            teacherName: (user['name'] ?? user['email'] ?? 'Teacher').toString(),
+            teacherName: (user['name'] ?? user['email'] ?? 'Teacher')
+                .toString(),
           ),
         );
         return;
@@ -112,11 +109,7 @@ class _AuthCheckState extends State<AuthCheck> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return _nextScreen ?? const LoginScreen();

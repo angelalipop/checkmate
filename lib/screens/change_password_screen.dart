@@ -1,8 +1,8 @@
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
-import 'login_screen.dart' show CmColors;
 
 /// Shown after sign-in when the account still has a temporary password.
 /// [nextBuilder] builds the screen to open once the password is changed.
@@ -52,8 +52,11 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       return;
     }
     if (next == current) {
-      setState(() => _error = 'Choose a password different from the '
-          'temporary one.');
+      setState(
+        () => _error =
+            'Choose a password different from the '
+            'temporary one.',
+      );
       return;
     }
 
@@ -93,20 +96,20 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   InputDecoration _decoration(String label) {
     return InputDecoration(
       labelText: label,
-      prefixIcon: const Icon(Icons.lock_outline, color: CmColors.slate),
+      prefixIcon: const Icon(Icons.lock_outline, color: CmTheme.slateText),
       filled: true,
-      fillColor: CmColors.bg,
+      fillColor: CmTheme.background,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: CmColors.line),
+        borderSide: const BorderSide(color: CmTheme.lineBorder),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: CmColors.line),
+        borderSide: const BorderSide(color: CmTheme.lineBorder),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: CmColors.navy, width: 1.5),
+        borderSide: const BorderSide(color: CmTheme.navy, width: 1.5),
       ),
     );
   }
@@ -114,7 +117,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: CmColors.bg,
+      backgroundColor: CmTheme.background,
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Center(
@@ -122,18 +125,21 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
             constraints: const BoxConstraints(maxWidth: 420),
             child: Card(
               elevation: 0,
-              color: Colors.white,
+              color: CmTheme.surfaceWhite,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(24),
-                side: const BorderSide(color: CmColors.line),
+                side: const BorderSide(color: CmTheme.lineBorder),
               ),
               child: Padding(
                 padding: const EdgeInsets.all(32),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Icon(Icons.lock_reset_rounded,
-                        size: 56, color: CmColors.navy),
+                    const Icon(
+                      Icons.lock_reset_rounded,
+                      size: 56,
+                      color: CmTheme.navy,
+                    ),
                     const SizedBox(height: 16),
                     const Text(
                       'Set a new password',
@@ -141,7 +147,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                       style: TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.w700,
-                        color: CmColors.navy,
+                        color: CmTheme.navy,
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -149,7 +155,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                       'You signed in with a temporary password. '
                       'Choose your own to continue.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 14, color: CmColors.slate),
+                      style: TextStyle(fontSize: 14, color: CmTheme.slateText),
                     ),
                     const SizedBox(height: 24),
                     TextField(
@@ -169,10 +175,9 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                             _obscure
                                 ? Icons.visibility_outlined
                                 : Icons.visibility_off_outlined,
-                            color: CmColors.slate,
+                            color: CmTheme.slateText,
                           ),
-                          onPressed: () =>
-                              setState(() => _obscure = !_obscure),
+                          onPressed: () => setState(() => _obscure = !_obscure),
                         ),
                       ),
                     ),
@@ -192,15 +197,14 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFEF2F2),
+                          color: CmTheme.surfaceWhite,
                           borderRadius: BorderRadius.circular(10),
-                          border:
-                              Border.all(color: const Color(0xFFFECACA)),
+                          border: Border.all(color: CmTheme.redDanger),
                         ),
                         child: Text(
                           _error!,
                           style: const TextStyle(
-                            color: Color(0xFFDC2626),
+                            color: CmTheme.redDanger,
                             fontSize: 13,
                           ),
                         ),
@@ -212,7 +216,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                       child: FilledButton(
                         onPressed: _loading ? null : _submit,
                         style: FilledButton.styleFrom(
-                          backgroundColor: CmColors.navy,
+                          backgroundColor: CmTheme.navy,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
@@ -223,13 +227,12 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                                 height: 22,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  color: Colors.white,
+                                  color: CmTheme.surfaceWhite,
                                 ),
                               )
                             : const Text(
                                 'Change password',
-                                style:
-                                    TextStyle(fontWeight: FontWeight.w700),
+                                style: TextStyle(fontWeight: FontWeight.w700),
                               ),
                       ),
                     ),

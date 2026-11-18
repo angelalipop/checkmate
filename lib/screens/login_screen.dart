@@ -1,3 +1,4 @@
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
@@ -6,15 +7,6 @@ import 'admin_login_screen.dart';
 import 'change_password_screen.dart';
 import 'teacher_dashboard.dart';
 
-class CmColors {
-  static const navy = Color(0xFF1E293B); 
-  static const slate = Color(0xFF64748B); 
-  static const bg = Color(0xFFF8FAFC); 
-  static const green = Color(0xFF10B981); 
-  static const amber = Color(0xFFF59E0B); 
-  static const line = Color(0xFFE2E8F0);
-}
-
 const double kDesktopBreakpoint = 900;
 
 class CmBrandPanel extends StatelessWidget {
@@ -22,7 +14,7 @@ class CmBrandPanel extends StatelessWidget {
     super.key,
     required this.heading,
     required this.subheading,
-    this.backgroundColor = CmColors.navy,
+    this.backgroundColor = CmTheme.navy,
     this.illustrationAsset = 'assets/login_illustration.png',
   });
 
@@ -41,7 +33,6 @@ class CmBrandPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-
           Expanded(
             child: Center(
               child: Image.asset(
@@ -50,7 +41,7 @@ class CmBrandPanel extends StatelessWidget {
                 errorBuilder: (context, error, stackTrace) => Icon(
                   Icons.laptop_mac_rounded,
                   size: 140,
-                  color: Colors.white.withValues(alpha: 0.18),
+                  color: CmTheme.surfaceWhite.withValues(alpha: 0.18),
                 ),
               ),
             ),
@@ -59,7 +50,7 @@ class CmBrandPanel extends StatelessWidget {
           Text(
             heading,
             style: const TextStyle(
-              color: Colors.white,
+              color: CmTheme.surfaceWhite,
               fontSize: 28,
               fontWeight: FontWeight.w700,
             ),
@@ -67,8 +58,8 @@ class CmBrandPanel extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             subheading,
-            style: const TextStyle(
-              color: Colors.white70,
+            style: TextStyle(
+              color: CmTheme.mutedOnNavy,
               fontSize: 14,
               height: 1.4,
             ),
@@ -120,10 +111,7 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      final result = await ApiService.login(
-        email: email,
-        password: password,
-      );
+      final result = await ApiService.login(email: email, password: password);
 
       if (!mounted) {
         return;
@@ -138,14 +126,11 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
 
-
       // Get user information.
       final user = result['user'];
 
       if (user is! Map) {
-        throw Exception(
-          'Invalid user information received.',
-        );
+        throw Exception('Invalid user information received.');
       }
 
       final role = user['role']?.toString().toLowerCase();
@@ -157,13 +142,13 @@ class _LoginScreenState extends State<LoginScreen> {
       if (role != 'teacher') {
         throw Exception(
           role == 'admin'
-            ? 'Please use “Sign in as Admin” to access your account.'
-            : 'This account cannot use the teacher sign-in screen.',
+              ? 'Please use “Sign in as Admin” to access your account.'
+              : 'This account cannot use the teacher sign-in screen.',
         );
-    }
+      }
 
       await AuthStorage.saveToken(token);
-      
+
       if (!mounted) return;
 
       // TEACHER
@@ -177,8 +162,7 @@ class _LoginScreenState extends State<LoginScreen> {
             context,
             MaterialPageRoute(
               builder: (context) => ChangePasswordScreen(
-                nextBuilder: (_) =>
-                    TeacherDashboard(teacherName: teacherName),
+                nextBuilder: (_) => TeacherDashboard(teacherName: teacherName),
               ),
             ),
           );
@@ -189,17 +173,14 @@ class _LoginScreenState extends State<LoginScreen> {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (context) =>
-                TeacherDashboard(teacherName: teacherName),
+            builder: (context) => TeacherDashboard(teacherName: teacherName),
           ),
         );
 
         return;
       }
 
-      throw Exception(
-        'Unknown user role: ${user['role']}',
-      );
+      throw Exception('Unknown user role: ${user['role']}');
     } catch (e) {
       if (!mounted) {
         return;
@@ -208,10 +189,7 @@ class _LoginScreenState extends State<LoginScreen> {
       debugPrint('LOGIN ERROR: $e');
 
       setState(() {
-        _error = e.toString().replaceFirst(
-              'Exception: ',
-              '',
-            );
+        _error = e.toString().replaceFirst('Exception: ', '');
       });
     } finally {
       if (mounted) {
@@ -230,9 +208,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => const AdminLoginScreen(),
-      ),
+      MaterialPageRoute(builder: (context) => const AdminLoginScreen()),
     );
 
     // Belt-and-suspenders: also clear on return, in case an error was set
@@ -249,21 +225,21 @@ class _LoginScreenState extends State<LoginScreen> {
   }) {
     return InputDecoration(
       labelText: label,
-      prefixIcon: Icon(icon, color: CmColors.slate),
+      prefixIcon: Icon(icon, color: CmTheme.slateText),
       suffixIcon: suffixIcon,
       filled: true,
-      fillColor: CmColors.bg,
+      fillColor: CmTheme.background,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: CmColors.line),
+        borderSide: BorderSide(color: CmTheme.lineBorder),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: CmColors.line),
+        borderSide: BorderSide(color: CmTheme.lineBorder),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: CmColors.navy, width: 1.5),
+        borderSide: const BorderSide(color: CmTheme.navy, width: 1.5),
       ),
     );
   }
@@ -273,10 +249,10 @@ class _LoginScreenState extends State<LoginScreen> {
       constraints: const BoxConstraints(maxWidth: 420),
       child: Card(
         elevation: 0,
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(24),
-          side: BorderSide(color: CmColors.line),
+          side: BorderSide(color: CmTheme.lineBorder),
         ),
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -292,10 +268,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   errorBuilder: (context, error, stackTrace) => const Icon(
                     Icons.fact_check_rounded,
                     size: 72,
-                    color: CmColors.navy,
-                  
+                    color: CmTheme.navy,
+                  ),
                 ),
-              ),
               ),
 
               const SizedBox(height: 20),
@@ -306,7 +281,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.w700,
-                  color: CmColors.navy,
+                  color: CmTheme.navy,
                 ),
               ),
 
@@ -315,10 +290,7 @@ class _LoginScreenState extends State<LoginScreen> {
               Text(
                 'Sign in to continue.',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: CmColors.slate,
-                ),
+                style: TextStyle(fontSize: 14, color: CmTheme.slateText),
               ),
 
               const SizedBox(height: 28),
@@ -352,7 +324,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       _obscure
                           ? Icons.visibility_outlined
                           : Icons.visibility_off_outlined,
-                      color: CmColors.slate,
+                      color: CmTheme.slateText,
                     ),
                     onPressed: () => setState(() => _obscure = !_obscure),
                   ),
@@ -364,14 +336,14 @@ class _LoginScreenState extends State<LoginScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFEF2F2),
+                    color: CmTheme.surfaceWhite,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFFECACA)),
+                    border: Border.all(color: CmTheme.redDanger),
                   ),
                   child: Text(
                     _error!,
                     style: const TextStyle(
-                      color: Color(0xFFDC2626),
+                      color: CmTheme.redDanger,
                       fontSize: 13,
                     ),
                   ),
@@ -387,7 +359,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: FilledButton(
                   onPressed: _loading ? null : _login,
                   style: FilledButton.styleFrom(
-                    backgroundColor: CmColors.navy,
+                    backgroundColor: CmTheme.navy,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -398,7 +370,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           height: 22,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: Colors.white,
+                            color: CmTheme.surfaceWhite,
                           ),
                         )
                       : const Text(
@@ -415,8 +387,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: OutlinedButton(
                   onPressed: _loading ? null : _goToAdminLogin,
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: CmColors.navy,
-                    side: const BorderSide(color: CmColors.line),
+                    foregroundColor: CmTheme.navy,
+                    side: const BorderSide(color: CmTheme.lineBorder),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -442,7 +414,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
 
     return Scaffold(
-      backgroundColor: CmColors.bg,
+      backgroundColor: CmTheme.background,
       body: LayoutBuilder(
         builder: (context, constraints) {
           final isDesktop = constraints.maxWidth >= kDesktopBreakpoint;

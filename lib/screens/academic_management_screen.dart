@@ -2,17 +2,13 @@ import 'dart:async';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 
 import '../services/academic_api_service.dart';
 import '../services/auth_storage.dart';
 import '../services/curriculum_file_parser.dart';
 import '../services/curriculum_template.dart';
-import 'login_screen.dart' show CmColors;
-
-const Color _activeGreen = Color(0xFF2F8F72);
-const Color _dangerRed = Color(0xFFDC2626);
-const Color _draftBlue = Color(0xFF2F63B8);
 
 // Icons used for the program list.
 const IconData _collegeIcon = Icons.apartment_outlined; // campus building
@@ -68,15 +64,15 @@ InputDecoration _fieldDecoration({String? hint, String? errorText}) {
   return InputDecoration(
     isDense: true,
     filled: true,
-    fillColor: Colors.white,
+    fillColor: CmTheme.surfaceWhite,
     hintText: hint,
     errorText: errorText,
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-    border: border(CmColors.line),
-    enabledBorder: border(CmColors.line),
-    focusedBorder: border(CmColors.navy, 1.5),
-    errorBorder: border(_dangerRed),
-    focusedErrorBorder: border(_dangerRed, 1.5),
+    border: border(CmTheme.lineBorder),
+    enabledBorder: border(CmTheme.lineBorder),
+    focusedBorder: border(CmTheme.navy, 1.5),
+    errorBorder: border(CmTheme.redDanger),
+    focusedErrorBorder: border(CmTheme.redDanger, 1.5),
   );
 }
 
@@ -90,7 +86,7 @@ Widget _labeled(String label, Widget field) {
           label,
           style: const TextStyle(
             fontSize: 13,
-            color: CmColors.slate,
+            color: CmTheme.slateText,
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -101,26 +97,26 @@ Widget _labeled(String label, Widget field) {
 }
 
 ButtonStyle get _primaryButtonStyle => FilledButton.styleFrom(
-  backgroundColor: CmColors.navy,
-  disabledBackgroundColor: const Color(0xFF9AA3B2),
-  disabledForegroundColor: Colors.white,
+  backgroundColor: CmTheme.navy,
+  disabledBackgroundColor: CmTheme.slateText,
+  disabledForegroundColor: CmTheme.surfaceWhite,
   minimumSize: const Size(0, 44),
   padding: const EdgeInsets.symmetric(horizontal: 18),
   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
 );
 
 ButtonStyle get _secondaryButtonStyle => OutlinedButton.styleFrom(
-  foregroundColor: CmColors.navy,
-  backgroundColor: CmColors.bg,
-  side: const BorderSide(color: CmColors.line),
+  foregroundColor: CmTheme.navy,
+  backgroundColor: CmTheme.background,
+  side: const BorderSide(color: CmTheme.lineBorder),
   minimumSize: const Size(0, 44),
   padding: const EdgeInsets.symmetric(horizontal: 18),
   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
 );
 
 ButtonStyle get _dangerOutlineStyle => OutlinedButton.styleFrom(
-  foregroundColor: _dangerRed,
-  side: BorderSide(color: _dangerRed.withValues(alpha: 0.4)),
+  foregroundColor: CmTheme.redDanger,
+  side: BorderSide(color: CmTheme.redDanger.withValues(alpha: 0.4)),
   minimumSize: const Size(0, 44),
   padding: const EdgeInsets.symmetric(horizontal: 18),
   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -128,8 +124,8 @@ ButtonStyle get _dangerOutlineStyle => OutlinedButton.styleFrom(
 
 Widget _dialogShell({required Widget child, double maxWidth = 520}) {
   return Dialog(
-    backgroundColor: Colors.white,
-    surfaceTintColor: Colors.transparent,
+    backgroundColor: CmTheme.surfaceWhite,
+    surfaceTintColor: CmTheme.transparent,
     insetPadding: const EdgeInsets.all(24),
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
     child: ConstrainedBox(
@@ -151,7 +147,7 @@ Widget _dialogHeader(String title, VoidCallback? onClose) {
           style: const TextStyle(
             fontSize: 19,
             fontWeight: FontWeight.w700,
-            color: CmColors.navy,
+            color: CmTheme.navy,
           ),
         ),
       ),
@@ -168,12 +164,18 @@ Widget _badge(String text, Color color) {
   return Container(
     padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
     decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.12),
+      color: color == CmTheme.slateText
+          ? CmTheme.background
+          : color.withValues(alpha: 0.12),
       borderRadius: BorderRadius.circular(8),
     ),
     child: Text(
       text,
-      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color),
+      style: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+        color: color == CmTheme.slateText ? CmTheme.slateText : CmTheme.navy,
+      ),
     ),
   );
 }
@@ -283,7 +285,7 @@ class _ProgramDialogState extends State<_ProgramDialog> {
               padding: EdgeInsets.only(top: 6),
               child: Text(
                 'The level cannot change after curricula exist.',
-                style: TextStyle(fontSize: 12, color: CmColors.slate),
+                style: TextStyle(fontSize: 12, color: CmTheme.slateText),
               ),
             ),
           const SizedBox(height: 14),
@@ -571,9 +573,9 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
       label: Text(label),
       selected: selected,
       showCheckmark: false,
-      selectedColor: CmColors.navy,
+      selectedColor: CmTheme.navy,
       labelStyle: TextStyle(
-        color: selected ? Colors.white : CmColors.navy,
+        color: selected ? CmTheme.surfaceWhite : CmTheme.navy,
         fontWeight: FontWeight.w600,
       ),
       onSelected: enabled
@@ -603,7 +605,7 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
           _dialogHeader('New Curriculum', () => Navigator.pop(context)),
           Text(
             '$_programCode · the new version starts as a draft you can edit.',
-            style: const TextStyle(color: CmColors.slate, fontSize: 13),
+            style: const TextStyle(color: CmTheme.slateText, fontSize: 13),
           ),
           const SizedBox(height: 14),
           if (!_shs) ...[
@@ -642,7 +644,7 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
               padding: EdgeInsets.only(top: 6),
               child: Text(
                 'There is no curriculum to copy yet. Upload a file instead.',
-                style: TextStyle(fontSize: 12, color: CmColors.slate),
+                style: TextStyle(fontSize: 12, color: CmTheme.slateText),
               ),
             ),
           if (_source == _Source.copy && hasOlder) ...[
@@ -668,7 +670,7 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
             const SizedBox(height: 6),
             const Text(
               'Every subject and elective is copied. Change only what is new in the draft.',
-              style: TextStyle(fontSize: 12, color: CmColors.slate),
+              style: TextStyle(fontSize: 12, color: CmTheme.slateText),
             ),
           ],
           if (_source == _Source.upload) ...[
@@ -693,7 +695,7 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
                         'curriculum (BSAIS-24-01 = 2401) are read from the file.',
               style: const TextStyle(
                 fontSize: 12,
-                color: CmColors.slate,
+                color: CmTheme.slateText,
                 height: 1.4,
               ),
             ),
@@ -702,7 +704,7 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
               _shs
                   ? 'A file that is exactly the same as an existing curriculum is not accepted.'
                   : 'OJT and practicum subjects are skipped. A file that is exactly the same as an existing curriculum is not accepted.',
-              style: const TextStyle(fontSize: 12, color: CmColors.slate),
+              style: const TextStyle(fontSize: 12, color: CmTheme.slateText),
             ),
             const SizedBox(height: 12),
             Center(
@@ -722,7 +724,10 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
               Center(
                 child: Text(
                   _reading ? 'Reading file...' : 'Selected file: $_fileName',
-                  style: const TextStyle(fontSize: 12, color: CmColors.slate),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: CmTheme.slateText,
+                  ),
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -735,26 +740,35 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
                 style: const TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: CmColors.navy,
+                  color: CmTheme.navy,
                 ),
               ),
               if (parsed.programCode != null || parsed.curriculumCode != null)
                 Text(
                   'Found in file: ${parsed.programCode ?? '?'} · ${parsed.curriculumCode ?? '?'}',
-                  style: const TextStyle(fontSize: 12, color: CmColors.slate),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: CmTheme.slateText,
+                  ),
                 ),
               for (final p in parsed.problems.take(6))
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
                   child: Text(
                     p,
-                    style: const TextStyle(fontSize: 12, color: _dangerRed),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: CmTheme.redDanger,
+                    ),
                   ),
                 ),
               if (parsed.problems.length > 6)
                 Text(
                   '+ ${parsed.problems.length - 6} more problems',
-                  style: const TextStyle(fontSize: 12, color: _dangerRed),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: CmTheme.redDanger,
+                  ),
                 ),
             ],
           ],
@@ -763,7 +777,10 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
               padding: const EdgeInsets.only(top: 10),
               child: Text(
                 _info!,
-                style: const TextStyle(fontSize: 13, color: _activeGreen),
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: CmTheme.emeraldSuccess,
+                ),
               ),
             ),
           if (_fileError != null)
@@ -771,7 +788,7 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
               padding: const EdgeInsets.only(top: 10),
               child: Text(
                 _fileError!,
-                style: const TextStyle(fontSize: 13, color: _dangerRed),
+                style: const TextStyle(fontSize: 13, color: CmTheme.redDanger),
               ),
             ),
           const SizedBox(height: 22),
@@ -1112,7 +1129,7 @@ class _SubjectDialogState extends State<_SubjectDialog> {
                 margin: const EdgeInsets.only(top: 6),
                 constraints: const BoxConstraints(maxHeight: 180),
                 decoration: BoxDecoration(
-                  border: Border.all(color: CmColors.line),
+                  border: Border.all(color: CmTheme.lineBorder),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: ListView(
@@ -1136,7 +1153,7 @@ class _SubjectDialogState extends State<_SubjectDialog> {
             const SizedBox(height: 6),
             const Text(
               'Or enter a new subject below.',
-              style: TextStyle(fontSize: 12, color: CmColors.slate),
+              style: TextStyle(fontSize: 12, color: CmTheme.slateText),
             ),
             const SizedBox(height: 12),
           ],
@@ -1305,7 +1322,7 @@ class _SubjectDialogState extends State<_SubjectDialog> {
               const SizedBox(height: 6),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                activeThumbColor: CmColors.navy,
+                activeThumbColor: CmTheme.navy,
                 title: const Text('This is an elective slot'),
                 subtitle: const Text(
                   'An elective from the list can be finalized for it each school year.',
@@ -1377,7 +1394,7 @@ class _ElectiveChoiceDialogState extends State<_ElectiveChoiceDialog> {
           _dialogHeader('Choose Elective', () => Navigator.pop(context)),
           Text(
             '$slotName · School year ${widget.schoolYear}',
-            style: const TextStyle(color: CmColors.slate, fontSize: 13),
+            style: const TextStyle(color: CmTheme.slateText, fontSize: 13),
           ),
           const SizedBox(height: 14),
           _labeled(
@@ -1403,7 +1420,7 @@ class _ElectiveChoiceDialogState extends State<_ElectiveChoiceDialog> {
           const SizedBox(height: 8),
           const Text(
             'Until an elective is finalized, the subject stays as listed.',
-            style: TextStyle(fontSize: 12, color: CmColors.slate),
+            style: TextStyle(fontSize: 12, color: CmTheme.slateText),
           ),
           const SizedBox(height: 20),
           Row(
@@ -1526,9 +1543,9 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: error ? _dangerRed : null,
+        CmTheme.feedbackSnackBar(
+          message,
+          color: error ? CmTheme.redDanger : CmTheme.emeraldSuccess,
         ),
       );
   }
@@ -1566,8 +1583,8 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
     return showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.transparent,
+        backgroundColor: CmTheme.surfaceWhite,
+        surfaceTintColor: CmTheme.transparent,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: Text(
           title,
@@ -1575,18 +1592,21 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
         ),
         content: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
-          child: Text(message, style: const TextStyle(color: CmColors.slate)),
+          child: Text(
+            message,
+            style: const TextStyle(color: CmTheme.slateText),
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            style: TextButton.styleFrom(foregroundColor: CmColors.navy),
+            style: TextButton.styleFrom(foregroundColor: CmTheme.navy),
             child: const Text('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(
-              backgroundColor: destructive ? _dangerRed : CmColors.navy,
+              backgroundColor: destructive ? CmTheme.redDanger : CmTheme.navy,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
               ),
@@ -1602,8 +1622,8 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
     return showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.transparent,
+        backgroundColor: CmTheme.surfaceWhite,
+        surfaceTintColor: CmTheme.transparent,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: Text(
           message,
@@ -1618,7 +1638,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
               children: [
                 const Text(
                   'Fix these first:',
-                  style: TextStyle(color: CmColors.slate),
+                  style: TextStyle(color: CmTheme.slateText),
                 ),
                 const SizedBox(height: 8),
                 for (final i in issues)
@@ -1632,7 +1652,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                           child: Icon(
                             Icons.error_outline,
                             size: 16,
-                            color: _dangerRed,
+                            color: CmTheme.redDanger,
                           ),
                         ),
                         Expanded(child: Text(i)),
@@ -1646,7 +1666,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
         actions: [
           FilledButton(
             onPressed: () => Navigator.pop(ctx),
-            style: FilledButton.styleFrom(backgroundColor: CmColors.navy),
+            style: FilledButton.styleFrom(backgroundColor: CmTheme.navy),
             child: const Text('OK'),
           ),
         ],
@@ -2305,12 +2325,12 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                   width: 300,
                   margin: const EdgeInsets.fromLTRB(16, 16, 8, 16),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: CmTheme.surfaceWhite,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: CmColors.line),
+                    border: Border.all(color: CmTheme.lineBorder),
                     boxShadow: [
                       BoxShadow(
-                        color: CmColors.navy.withValues(alpha: 0.05),
+                        color: CmTheme.panelShadow,
                         blurRadius: 14,
                         offset: const Offset(0, 4),
                       ),
@@ -2403,7 +2423,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
       });
 
     return Container(
-      color: Colors.white,
+      color: CmTheme.surfaceWhite,
       child: Column(
         children: [
           Padding(
@@ -2447,7 +2467,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                       _programs.isEmpty
                           ? 'No programs yet.'
                           : 'No programs match your search.',
-                      style: const TextStyle(color: CmColors.slate),
+                      style: const TextStyle(color: CmTheme.slateText),
                     ),
                   )
                 : ListView(
@@ -2502,18 +2522,18 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
     double indent = 0,
   }) {
     return Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      data: Theme.of(context).copyWith(dividerColor: CmTheme.transparent),
       child: ExpansionTile(
         key: PageStorageKey('academic-nav:$label:$_programQuery'),
         initiallyExpanded: expanded,
         controlAffinity: ListTileControlAffinity.leading,
         tilePadding: EdgeInsets.only(left: indent + 8, right: 12),
         childrenPadding: EdgeInsets.zero,
-        iconColor: CmColors.navy,
-        collapsedIconColor: CmColors.slate,
+        iconColor: CmTheme.navy,
+        collapsedIconColor: CmTheme.slateText,
         title: Row(
           children: [
-            Icon(icon, size: 18, color: CmColors.navy),
+            Icon(icon, size: 18, color: CmTheme.navy),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -2521,7 +2541,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                 style: const TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: CmColors.navy,
+                  color: CmTheme.navy,
                 ),
               ),
             ),
@@ -2539,8 +2559,8 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
       padding: EdgeInsets.fromLTRB(indent - 8, 1, 10, 1),
       child: Material(
         color: selected
-            ? CmColors.navy.withValues(alpha: 0.08)
-            : Colors.transparent,
+            ? CmTheme.navy.withValues(alpha: 0.08)
+            : CmTheme.transparent,
         borderRadius: BorderRadius.circular(10),
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
@@ -2555,7 +2575,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                   child: Icon(
                     _programIcon,
                     size: 18,
-                    color: selected ? CmColors.navy : CmColors.slate,
+                    color: selected ? CmTheme.navy : CmTheme.slateText,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -2571,7 +2591,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                           fontWeight: selected
                               ? FontWeight.w700
                               : FontWeight.w500,
-                          color: CmColors.navy,
+                          color: CmTheme.navy,
                         ),
                       ),
                       const SizedBox(height: 2),
@@ -2581,7 +2601,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                             : 'Curriculum $published',
                         style: const TextStyle(
                           fontSize: 11,
-                          color: CmColors.slate,
+                          color: CmTheme.slateText,
                         ),
                       ),
                     ],
@@ -2604,32 +2624,32 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
     final collegePrograms = _programs.where((p) => !_isShs(p)).toList()
       ..sort((a, b) => _s(a['code']).compareTo(_s(b['code'])));
 
-    const hoverColor = Color(0xFFF0EFF5);
-    const selectedColor = Color(0xFFDDDBE1);
-    const borderColor = Color(0xFFDFE3EA);
+    const hoverColor = CmTheme.background;
+    const selectedColor = CmTheme.lineBorder;
+    const borderColor = CmTheme.lineBorder;
 
     Widget groupHeading(String title, String subtitle, IconData icon) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(14, 16, 14, 10),
         child: Row(
           children: [
-            Icon(icon, size: 19, color: CmColors.slate),
+            Icon(icon, size: 19, color: CmTheme.slateText),
             const SizedBox(width: 10),
             Text(
               title,
               style: const TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
-                color: CmColors.navy,
+                color: CmTheme.navy,
               ),
             ),
             const SizedBox(width: 8),
-            const Text('·', style: TextStyle(color: CmColors.slate)),
+            const Text('·', style: TextStyle(color: CmTheme.slateText)),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 subtitle,
-                style: const TextStyle(fontSize: 12, color: CmColors.slate),
+                style: const TextStyle(fontSize: 12, color: CmTheme.slateText),
               ),
             ),
           ],
@@ -2654,9 +2674,9 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
             shape: WidgetStatePropertyAll(
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
             ),
-            foregroundColor: const WidgetStatePropertyAll(CmColors.navy),
-            iconColor: const WidgetStatePropertyAll(CmColors.navy),
-            overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+            foregroundColor: const WidgetStatePropertyAll(CmTheme.navy),
+            iconColor: const WidgetStatePropertyAll(CmTheme.navy),
+            overlayColor: const WidgetStatePropertyAll(CmTheme.transparent),
             backgroundColor: WidgetStateProperty.resolveWith<Color>((states) {
               if (selected) return selectedColor;
 
@@ -2666,7 +2686,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                 return hoverColor;
               }
 
-              return Colors.transparent;
+              return CmTheme.transparent;
             }),
           ),
           child: Text(
@@ -2681,7 +2701,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
     }
 
     return Container(
-      color: Colors.white,
+      color: CmTheme.surfaceWhite,
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2691,7 +2711,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w500,
-              color: CmColors.navy,
+              color: CmTheme.navy,
             ),
           ),
           const SizedBox(height: 10),
@@ -2701,7 +2721,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                 child: _programs.isEmpty
                     ? const Text(
                         'No programs yet.',
-                        style: TextStyle(color: CmColors.slate),
+                        style: TextStyle(color: CmTheme.slateText),
                       )
                     : LayoutBuilder(
                         builder: (context, constraints) {
@@ -2710,10 +2730,10 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                           return MenuAnchor(
                             style: MenuStyle(
                               backgroundColor: const WidgetStatePropertyAll(
-                                Colors.white,
+                                CmTheme.surfaceWhite,
                               ),
                               surfaceTintColor: const WidgetStatePropertyAll(
-                                Colors.transparent,
+                                CmTheme.transparent,
                               ),
                               elevation: const WidgetStatePropertyAll(3),
                               padding: const WidgetStatePropertyAll(
@@ -2786,10 +2806,10 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                                   ),
                                   alignment: Alignment.centerLeft,
                                   backgroundColor: const WidgetStatePropertyAll(
-                                    Colors.white,
+                                    CmTheme.surfaceWhite,
                                   ),
                                   foregroundColor: const WidgetStatePropertyAll(
-                                    CmColors.navy,
+                                    CmTheme.navy,
                                   ),
                                   overlayColor:
                                       WidgetStateProperty.resolveWith<Color>((
@@ -2803,7 +2823,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                                             )) {
                                           return hoverColor;
                                         }
-                                        return Colors.transparent;
+                                        return CmTheme.transparent;
                                       }),
                                   side: const WidgetStatePropertyAll(
                                     BorderSide(color: borderColor),
@@ -2819,7 +2839,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                                     const Icon(
                                       _programIcon,
                                       size: 21,
-                                      color: CmColors.navy,
+                                      color: CmTheme.navy,
                                     ),
                                     const SizedBox(width: 12),
                                     Expanded(
@@ -2839,7 +2859,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                                           ? Icons.keyboard_arrow_up
                                           : Icons.keyboard_arrow_down,
                                       size: 21,
-                                      color: CmColors.slate,
+                                      color: CmTheme.slateText,
                                     ),
                                   ],
                                 ),
@@ -2903,7 +2923,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                       crumb,
                       style: const TextStyle(
                         fontSize: 12.5,
-                        color: CmColors.slate,
+                        color: CmTheme.slateText,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -2912,7 +2932,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                       style: const TextStyle(
                         fontSize: 21,
                         fontWeight: FontWeight.w700,
-                        color: CmColors.navy,
+                        color: CmTheme.navy,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -2922,7 +2942,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                           : 'Curriculum versions are managed separately for each program.',
                       style: const TextStyle(
                         fontSize: 13,
-                        color: CmColors.slate,
+                        color: CmTheme.slateText,
                       ),
                     ),
                   ],
@@ -2948,10 +2968,13 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                     value: 'delete',
                     child: ListTile(
                       dense: true,
-                      leading: Icon(Icons.delete_outline, color: _dangerRed),
+                      leading: Icon(
+                        Icons.delete_outline,
+                        color: CmTheme.redDanger,
+                      ),
                       title: Text(
                         'Delete',
-                        style: TextStyle(color: _dangerRed),
+                        style: TextStyle(color: CmTheme.redDanger),
                       ),
                     ),
                   ),
@@ -2962,7 +2985,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
           const SizedBox(height: 16),
           Container(
             decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: CmColors.line)),
+              border: Border(bottom: BorderSide(color: CmTheme.lineBorder)),
             ),
             child: Row(
               children: [_tabButton('Curricula', 0), _tabButton('Subjects', 1)],
@@ -2995,7 +3018,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
         decoration: BoxDecoration(
           border: Border(
             bottom: BorderSide(
-              color: active ? _activeGreen : Colors.transparent,
+              color: active ? CmTheme.navy : CmTheme.transparent,
               width: 2,
             ),
           ),
@@ -3005,7 +3028,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
           style: TextStyle(
             fontSize: 16,
             fontWeight: active ? FontWeight.w600 : FontWeight.w400,
-            color: active ? _activeGreen : CmColors.slate,
+            color: active ? CmTheme.navy : CmTheme.slateText,
           ),
         ),
       ),
@@ -3037,7 +3060,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
               style: TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.w700,
-                color: CmColors.navy,
+                color: CmTheme.navy,
               ),
             ),
             DropdownButton<String>(
@@ -3063,7 +3086,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
           'Published curricula are read-only: view them in the Subjects tab. '
           'For a new curriculum, copy one to a draft and edit it, or upload a file. '
           'It must differ from the existing ones by at least one subject, group, or required hours.',
-          style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
+          style: const TextStyle(fontSize: 12.5, color: CmTheme.slateText),
         ),
         const SizedBox(height: 12),
         if (_curricula.isEmpty)
@@ -3101,8 +3124,8 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                     ),
                     DataCell(
                       c['status'] == 'published'
-                          ? _badge('Published', _activeGreen)
-                          : _badge('Draft', _draftBlue),
+                          ? _badge('Published', CmTheme.emeraldSuccess)
+                          : _badge('Draft', CmTheme.slateText),
                     ),
                     DataCell(Text('${c['subject_count']}')),
                     DataCell(Text('${c['elective_count']}')),
@@ -3163,7 +3186,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
   List<Widget> _draftEditor(_M selected) {
     return [
       const SizedBox(height: 26),
-      const Divider(height: 1, color: CmColors.line),
+      const Divider(height: 1, color: CmTheme.lineBorder),
       const SizedBox(height: 18),
       Wrap(
         spacing: 10,
@@ -3175,10 +3198,10 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
             style: const TextStyle(
               fontSize: 17,
               fontWeight: FontWeight.w700,
-              color: CmColors.navy,
+              color: CmTheme.navy,
             ),
           ),
-          _badge('Draft', _draftBlue),
+          _badge('Draft', CmTheme.slateText),
         ],
       ),
       const SizedBox(height: 4),
@@ -3186,7 +3209,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
         'Pick a year level and semester, then add, edit or delete subjects one by one. '
         'Subjects kept from the old curriculum stay as they are. Replace only the '
         'ones that changed, such as a core subject with a new course code and name.',
-        style: TextStyle(fontSize: 12.5, color: CmColors.slate, height: 1.4),
+        style: TextStyle(fontSize: 12.5, color: CmTheme.slateText, height: 1.4),
       ),
       const SizedBox(height: 14),
       _contextBar(schoolYear: false, draftsOnly: true),
@@ -3281,9 +3304,9 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
               label: Text(label(value)),
               selected: current == value,
               showCheckmark: false,
-              selectedColor: CmColors.navy,
-              backgroundColor: CmColors.bg,
-              side: const BorderSide(color: CmColors.line),
+              selectedColor: CmTheme.navy,
+              backgroundColor: CmTheme.background,
+              side: const BorderSide(color: CmTheme.lineBorder),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(6.9),
               ),
@@ -3295,7 +3318,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
               labelStyle: TextStyle(
                 fontSize: 12.65,
                 fontWeight: FontWeight.w600,
-                color: current == value ? Colors.white : CmColors.navy,
+                color: current == value ? CmTheme.surfaceWhite : CmTheme.navy,
               ),
               onSelected: (_) => onPick(value),
             ),
@@ -3310,7 +3333,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
         children: [
           Text(
             label,
-            style: const TextStyle(fontSize: 12.65, color: CmColors.slate),
+            style: const TextStyle(fontSize: 12.65, color: CmTheme.slateText),
           ),
           const SizedBox(height: 6.9),
           child,
@@ -3333,7 +3356,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
             vertical: 16.1,
           ),
         ),
-        style: const TextStyle(fontSize: 13.8, color: CmColors.navy),
+        style: const TextStyle(fontSize: 13.8, color: CmTheme.navy),
         items: [
           for (final c in _curricula)
             DropdownMenuItem(
@@ -3365,7 +3388,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
             vertical: 16.1,
           ),
         ),
-        style: const TextStyle(fontSize: 13.8, color: CmColors.navy),
+        style: const TextStyle(fontSize: 13.8, color: CmTheme.navy),
         items: [
           for (final year in _schoolYearOptions())
             DropdownMenuItem(value: year, child: Text(year)),
@@ -3381,9 +3404,9 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
     return Container(
       padding: const EdgeInsets.all(13.8),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(13.8),
-        border: Border.all(color: CmColors.line),
+        border: Border.all(color: CmTheme.lineBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -3460,14 +3483,17 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    color: CmColors.navy,
+                    color: CmTheme.navy,
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   '${_program?['code']} · Curriculum ${_curriculum!['code']} · '
                   '${_yearLabel(true, _year)} · ${_termLabel(true, _term)}',
-                  style: const TextStyle(fontSize: 12, color: CmColors.slate),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: CmTheme.slateText,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -3549,7 +3575,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
               label,
               style: const TextStyle(
                 fontSize: 14.95,
-                color: CmColors.slate,
+                color: CmTheme.slateText,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -3572,9 +3598,9 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
               : Text(text),
           selected: current == value,
           showCheckmark: false,
-          selectedColor: CmColors.navy,
-          backgroundColor: CmColors.bg,
-          side: const BorderSide(color: CmColors.line),
+          selectedColor: CmTheme.navy,
+          backgroundColor: CmTheme.background,
+          side: const BorderSide(color: CmTheme.lineBorder),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(6.9),
           ),
@@ -3586,7 +3612,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
           labelStyle: TextStyle(
             fontSize: fillWidth ? 14.5 : 12.65,
             fontWeight: FontWeight.w600,
-            color: current == value ? Colors.white : CmColors.navy,
+            color: current == value ? CmTheme.surfaceWhite : CmTheme.navy,
           ),
           onSelected: (_) {
             if (current == value) return;
@@ -3610,7 +3636,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
             label,
             style: TextStyle(
               fontSize: fillWidth ? 14.5 : 12.65,
-              color: CmColors.slate,
+              color: CmTheme.slateText,
             ),
           ),
           const SizedBox(height: 6.9),
@@ -3651,7 +3677,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
     return Container(
       padding: const EdgeInsets.all(18.4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(16.1),
       ),
       child: Column(
@@ -3675,7 +3701,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
               ),
               style: TextStyle(
                 fontSize: fillWidth ? 15.5 : 13.8,
-                color: CmColors.navy,
+                color: CmTheme.navy,
               ),
               items: [
                 for (final curriculum in _curricula)
@@ -3717,7 +3743,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                         thickness: 1,
                         indent: 6.9,
                         endIndent: 6.9,
-                        color: CmColors.line,
+                        color: CmTheme.lineBorder,
                       ),
                       Expanded(child: chipGroup('Term', false)),
                     ],
@@ -3744,16 +3770,16 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: CmColors.line),
+        border: Border.all(color: CmTheme.lineBorder),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const ColoredBox(
-            color: Color(0xFFF1F5F9),
+            color: CmTheme.background,
             child: Padding(
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Text(
@@ -3761,7 +3787,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
-                  color: CmColors.slate,
+                  color: CmTheme.slateText,
                 ),
               ),
             ),
@@ -3771,7 +3797,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
               constraints: const BoxConstraints(minHeight: 64),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               decoration: const BoxDecoration(
-                border: Border(top: BorderSide(color: CmColors.line)),
+                border: Border(top: BorderSide(color: CmTheme.lineBorder)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -3779,7 +3805,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                 children: [
                   Text(
                     _s(subject['name']),
-                    style: const TextStyle(fontSize: 13, color: CmColors.navy),
+                    style: const TextStyle(fontSize: 13, color: CmTheme.navy),
                   ),
                   if (_s(subject['category']).isNotEmpty ||
                       subject['hours'] != null) ...[
@@ -3793,7 +3819,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                       ].join(' · '),
                       style: const TextStyle(
                         fontSize: 11,
-                        color: CmColors.slate,
+                        color: CmTheme.slateText,
                       ),
                     ),
                   ],
@@ -3828,11 +3854,11 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
               label: Text(label(i)),
               selected: current == i,
               showCheckmark: false,
-              selectedColor: CmColors.navy,
-              backgroundColor: CmColors.bg,
-              side: const BorderSide(color: CmColors.line),
+              selectedColor: CmTheme.navy,
+              backgroundColor: CmTheme.background,
+              side: const BorderSide(color: CmTheme.lineBorder),
               labelStyle: TextStyle(
-                color: current == i ? Colors.white : CmColors.navy,
+                color: current == i ? CmTheme.surfaceWhite : CmTheme.navy,
                 fontWeight: FontWeight.w600,
               ),
               onSelected: (_) => onPick(i),
@@ -3844,9 +3870,9 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: CmColors.line),
+        border: Border.all(color: CmTheme.lineBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3966,7 +3992,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
-                  color: CmColors.navy,
+                  color: CmTheme.navy,
                 ),
               ),
               if (editable) ...[
@@ -3990,14 +4016,17 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
             '${_program?['code']} · '
             '${_curriculum == null ? '' : 'Curriculum ${_curriculum!['code']} · '}'
             '${_yearLabel(_shs, _year)} · ${_termLabel(_shs, _term)}',
-            style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
+            style: const TextStyle(fontSize: 12.5, color: CmTheme.slateText),
           ),
           if (!editor && _electives.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
                 'Tap an elective subject to finalize which elective is taken for $_schoolYear.',
-                style: const TextStyle(fontSize: 12.5, color: CmColors.slate),
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  color: CmTheme.slateText,
+                ),
               ),
             ),
           const SizedBox(height: 12),
@@ -4125,14 +4154,14 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                     ),
                     if (slot && !finalized) ...[
                       const SizedBox(width: 8),
-                      _badge('Elective', _draftBlue),
+                      _badge('Elective', CmTheme.navy),
                     ],
                     if (canChoose && !finalized) ...[
                       const SizedBox(width: 4),
                       const Icon(
                         Icons.arrow_drop_down,
                         size: 20,
-                        color: CmColors.slate,
+                        color: CmTheme.slateText,
                       ),
                     ],
                   ],
@@ -4144,7 +4173,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                       subtext,
                       style: const TextStyle(
                         fontSize: 12,
-                        color: CmColors.slate,
+                        color: CmTheme.slateText,
                       ),
                     ),
                   ),
@@ -4186,9 +4215,9 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: CmColors.line),
+        border: Border.all(color: CmTheme.lineBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4204,7 +4233,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 0.6,
-                  color: CmColors.navy,
+                  color: CmTheme.navy,
                 ),
               ),
               FilledButton.icon(
@@ -4219,14 +4248,14 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
           const Text(
             'These are the electives that can replace an elective subject in a term. '
             'An elective subject with no choice finalized stays as listed.',
-            style: TextStyle(fontSize: 12.5, color: CmColors.slate),
+            style: TextStyle(fontSize: 12.5, color: CmTheme.slateText),
           ),
           if (_electives.isEmpty)
             const Padding(
               padding: EdgeInsets.only(top: 12),
               child: Text(
                 'No electives yet. Use Add Elective.',
-                style: TextStyle(color: CmColors.slate),
+                style: TextStyle(color: CmTheme.slateText),
               ),
             )
           else ...[
@@ -4238,7 +4267,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                   g.key,
                   style: const TextStyle(
                     fontWeight: FontWeight.w700,
-                    color: CmColors.slate,
+                    color: CmTheme.slateText,
                   ),
                 ),
               ),
@@ -4300,7 +4329,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
       icon: Icon(icon, size: 16),
       label: Text(label),
       style: TextButton.styleFrom(
-        foregroundColor: danger ? _dangerRed : CmColors.navy,
+        foregroundColor: danger ? CmTheme.redDanger : CmTheme.navy,
         padding: const EdgeInsets.symmetric(horizontal: 8),
         minimumSize: const Size(0, 36),
         visualDensity: VisualDensity.compact,
@@ -4313,8 +4342,8 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
       builder: (context, constraints) {
         return Container(
           decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border.all(color: CmColors.line),
+            color: CmTheme.surfaceWhite,
+            border: Border.all(color: CmTheme.lineBorder),
             borderRadius: BorderRadius.circular(12),
           ),
           clipBehavior: Clip.antiAlias,
@@ -4324,7 +4353,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
               constraints: BoxConstraints(minWidth: constraints.maxWidth),
               child: DataTable(
                 headingRowColor: const WidgetStatePropertyAll(
-                  Color(0xFFF1F5F9),
+                  CmTheme.background,
                 ),
                 headingRowHeight: 44,
                 dataRowMinHeight: 48,
@@ -4339,7 +4368,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
                         style: const TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w700,
-                          color: CmColors.slate,
+                          color: CmTheme.slateText,
                         ),
                       ),
                     ),
@@ -4363,13 +4392,13 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: CmColors.line),
+        border: Border.all(color: CmTheme.lineBorder),
       ),
       child: Column(
         children: [
-          Icon(icon, size: 48, color: CmColors.slate),
+          Icon(icon, size: 48, color: CmTheme.slateText),
           const SizedBox(height: 12),
           Text(
             title,
@@ -4381,7 +4410,7 @@ class _AcademicManagementScreenState extends State<AcademicManagementScreen> {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: CmColors.slate),
+              style: const TextStyle(color: CmTheme.slateText),
             ),
           ],
           if (action != null) ...[const SizedBox(height: 16), action],

@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 
@@ -13,26 +14,14 @@ import 'teacher_dashboard.dart' show TeacherPage, TeacherShell;
 // =============================================================
 // CheckMate Brand Palette & Tokens (Scanner Entry)
 // =============================================================
-const Color _kNavy = Color(0xFF1E293B);
-const Color _kNavyDark = Color(0xFF162137);
-const Color _kSlate = Color(0xFF64748B);
-const Color _kBg = Color(0xFFF8FAFC);
-const Color _kLine = Color(0xFFE2E8F0);
-const Color _kEmerald = Color(0xFF10B981);
-const Color _kEmeraldDark = Color(0xFF047857);
-const Color _kAmber = Color(0xFFF59E0B);
 
 class AnswerSheetInputScreen extends StatefulWidget {
-  const AnswerSheetInputScreen({
-    super.key,
-    this.initialExamId,
-  });
+  const AnswerSheetInputScreen({super.key, this.initialExamId});
 
   final int? initialExamId;
 
   @override
-  State<AnswerSheetInputScreen> createState() =>
-      _AnswerSheetInputScreenState();
+  State<AnswerSheetInputScreen> createState() => _AnswerSheetInputScreenState();
 }
 
 class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
@@ -44,7 +33,8 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
   // Cascading filter state: Subject -> Section -> Active/Published Assessment
   List<Map<String, dynamic>> _subjects = [];
   Map<String, dynamic>? _selectedSubject;
-  Map<String, dynamic>? _selectedSection; // {'class_id': int, 'name': String, 'students': int}
+  Map<String, dynamic>?
+  _selectedSection; // {'class_id': int, 'name': String, 'students': int}
 
   List<Map<String, dynamic>> _allExams = [];
   List<Map<String, dynamic>> _exams = [];
@@ -104,11 +94,13 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
         for (final e in allExams) {
           final cls = e['class'];
           final subj = cls is Map ? cls['subject'] : e['subject'];
-          final code = (subj is Map ? subj['code'] : e['subject_code'])
+          final code =
+              (subj is Map ? subj['code'] : e['subject_code'])
                   ?.toString()
                   .trim() ??
               '';
-          final name = (subj is Map ? subj['name'] : e['subject_name'])
+          final name =
+              (subj is Map ? subj['name'] : e['subject_name'])
                   ?.toString()
                   .trim() ??
               '';
@@ -117,7 +109,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
           );
           final secName =
               (cls is Map ? cls['section'] : e['section'])?.toString().trim() ??
-                  '';
+              '';
           if (code.isEmpty && name.isEmpty) continue;
           final key = '$code|$name';
           final card = bySubj.putIfAbsent(
@@ -167,8 +159,9 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
         _isLoading = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to load subjects and exams: $e'),
+        CmTheme.feedbackSnackBar(
+          'Failed to load subjects and exams: $e',
+          color: CmTheme.redDanger,
         ),
       );
     }
@@ -200,7 +193,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
         }
       }
     } catch (_) {}
-    if (targetExam == null || targetExam['creation_mode']=='manual') return;
+    if (targetExam == null || targetExam['creation_mode'] == 'manual') return;
 
     for (final subj in _subjects) {
       final sections = _subjectSections(subj);
@@ -212,10 +205,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
             _selectedSubject = subj;
             _selectedSection = sec;
           });
-          await _loadAssessmentsForSection(
-            sec,
-            preferredExamId: targetExamId,
-          );
+          await _loadAssessmentsForSection(sec, preferredExamId: targetExamId);
           return;
         }
       }
@@ -224,12 +214,14 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
     final targetSubjId = int.tryParse(
       '${targetExam['subject_id'] ?? (targetExam['class'] is Map ? (targetExam['class'] as Map)['subject_id'] : '')}',
     );
-    final targetSubjCode =
-        (targetExam['subject_code']?.toString() ?? '').trim().toLowerCase();
+    final targetSubjCode = (targetExam['subject_code']?.toString() ?? '')
+        .trim()
+        .toLowerCase();
     for (final subj in _subjects) {
       final sid = int.tryParse('${subj['subject_id']}');
       final scode = (subj['code']?.toString() ?? '').trim().toLowerCase();
-      final matchesSubject = (targetSubjId != null && sid == targetSubjId) ||
+      final matchesSubject =
+          (targetSubjId != null && sid == targetSubjId) ||
           (targetSubjCode.isNotEmpty && scode == targetSubjCode);
       if (matchesSubject) {
         final sections = _subjectSections(subj);
@@ -239,10 +231,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
             _selectedSubject = subj;
             _selectedSection = sec;
           });
-          await _loadAssessmentsForSection(
-            sec,
-            preferredExamId: targetExamId,
-          );
+          await _loadAssessmentsForSection(sec, preferredExamId: targetExamId);
           return;
         }
       }
@@ -260,12 +249,16 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
   }
 
   bool _isActiveAndPublished(Map<String, dynamic> exam) {
-    if(exam['creation_mode']=='manual')return false;
+    if (exam['creation_mode'] == 'manual') return false;
     final status = (exam['status']?.toString() ?? '').trim().toLowerCase();
     return status == 'published' || status == 'active';
   }
 
-  bool _examBelongsToClass(Map<String, dynamic> exam, int classId, String sectionName) {
+  bool _examBelongsToClass(
+    Map<String, dynamic> exam,
+    int classId,
+    String sectionName,
+  ) {
     final directCid = int.tryParse('${exam['class_id'] ?? ''}');
     if (directCid == classId) return true;
 
@@ -283,7 +276,8 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
 
     if (sectionName.isNotEmpty && exam['sections'] is List) {
       for (final s in exam['sections'] as List) {
-        if (s is String && s.trim().toLowerCase() == sectionName.toLowerCase()) {
+        if (s is String &&
+            s.trim().toLowerCase() == sectionName.toLowerCase()) {
           return true;
         }
       }
@@ -337,15 +331,15 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
         final sb = await MySubjectsApi.scorebook(token, classId);
         final sbStudents = (sb['students'] is List)
             ? (sb['students'] as List)
-                .whereType<Map>()
-                .map((e) => Map<String, dynamic>.from(e))
-                .toList()
+                  .whereType<Map>()
+                  .map((e) => Map<String, dynamic>.from(e))
+                  .toList()
             : <Map<String, dynamic>>[];
         final sbAssessments = (sb['assessments'] is List)
             ? (sb['assessments'] as List)
-                .whereType<Map>()
-                .map((e) => Map<String, dynamic>.from(e))
-                .toList()
+                  .whereType<Map>()
+                  .map((e) => Map<String, dynamic>.from(e))
+                  .toList()
             : <Map<String, dynamic>>[];
 
         if (sbStudents.isNotEmpty) {
@@ -356,7 +350,8 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
             for (final st in sbStudents) {
               final scores = st['scores'];
               final cell = (scores is Map) ? scores['$aid'] : null;
-              final stStatus = (cell is Map ? cell['status'] : null)
+              final stStatus =
+                  (cell is Map ? cell['status'] : null)
                       ?.toString()
                       .toLowerCase() ??
                   'pending';
@@ -424,8 +419,12 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
             break;
           }
         }
-        if (chosenExam == null && byId.containsKey(preferredExamId) && byId[preferredExamId]!['creation_mode'] != 'manual') {
-          final fallbackExam = Map<String, dynamic>.from(byId[preferredExamId]!);
+        if (chosenExam == null &&
+            byId.containsKey(preferredExamId) &&
+            byId[preferredExamId]!['creation_mode'] != 'manual') {
+          final fallbackExam = Map<String, dynamic>.from(
+            byId[preferredExamId]!,
+          );
           activeExams.insert(0, fallbackExam);
           chosenExam = fallbackExam;
         }
@@ -456,8 +455,9 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
         _isLoadingAssessments = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to load assessments for section: $e'),
+        CmTheme.feedbackSnackBar(
+          'Failed to load assessments for section: $e',
+          color: CmTheme.redDanger,
         ),
       );
     }
@@ -468,12 +468,14 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
   // =========================
 
   Future<void> _loadExamSections() async {
-    if (_selectedExam == null || _selectedExam!['creation_mode']=='manual') return;
+    if (_selectedExam == null || _selectedExam!['creation_mode'] == 'manual') {
+      return;
+    }
 
     final int? examId = int.tryParse('${_selectedExam!['id']}');
     if (examId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid exam ID.')),
+        CmTheme.feedbackSnackBar('Invalid exam ID.', color: CmTheme.redDanger),
       );
       return;
     }
@@ -499,8 +501,9 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
 
       // Stamp the selected Subject & Section onto fullExam so downstream
       // scanner and scorebook screens always use the selected section.
-      final int? selectedClassId =
-          int.tryParse('${_selectedSection?['class_id'] ?? ''}');
+      final int? selectedClassId = int.tryParse(
+        '${_selectedSection?['class_id'] ?? ''}',
+      );
       final String selectedSectionName =
           (_selectedSection?['name']?.toString() ?? '').trim();
       final String selectedSubjCode =
@@ -616,8 +619,9 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
         _selectedExamSections = [];
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to load exam sections: $e'),
+        CmTheme.feedbackSnackBar(
+          'Failed to load exam sections: $e',
+          color: CmTheme.redDanger,
           duration: const Duration(seconds: 5),
         ),
       );
@@ -655,22 +659,29 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
     return 'Section';
   }
 
-  String _subjectDisplayLabel(Map<String, dynamic>? subject, [Map<String, dynamic>? exam]) {
-    final code = (subject?['code'] ??
-            exam?['subject_code'] ??
-            (exam?['class'] is Map && (exam!['class'] as Map)['subject'] is Map
-                ? ((exam['class'] as Map)['subject'] as Map)['code']
-                : null))
-        ?.toString()
-        .trim() ??
+  String _subjectDisplayLabel(
+    Map<String, dynamic>? subject, [
+    Map<String, dynamic>? exam,
+  ]) {
+    final code =
+        (subject?['code'] ??
+                exam?['subject_code'] ??
+                (exam?['class'] is Map &&
+                        (exam!['class'] as Map)['subject'] is Map
+                    ? ((exam['class'] as Map)['subject'] as Map)['code']
+                    : null))
+            ?.toString()
+            .trim() ??
         '';
-    final name = (subject?['name'] ??
-            exam?['subject_name'] ??
-            (exam?['class'] is Map && (exam!['class'] as Map)['subject'] is Map
-                ? ((exam['class'] as Map)['subject'] as Map)['name']
-                : null))
-        ?.toString()
-        .trim() ??
+    final name =
+        (subject?['name'] ??
+                exam?['subject_name'] ??
+                (exam?['class'] is Map &&
+                        (exam!['class'] as Map)['subject'] is Map
+                    ? ((exam['class'] as Map)['subject'] as Map)['name']
+                    : null))
+            ?.toString()
+            .trim() ??
         '';
     final parts = [code, name].where((e) => e.isNotEmpty).toList();
     return parts.join(' - ');
@@ -680,8 +691,8 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
     final fromSelected = (_selectedSection?['name']?.toString() ?? '').trim();
     if (fromSelected.isNotEmpty) return fromSelected;
 
-    final fromExamSelected =
-        (exam?['selected_section']?.toString() ?? '').trim();
+    final fromExamSelected = (exam?['selected_section']?.toString() ?? '')
+        .trim();
     if (fromExamSelected.isNotEmpty) return fromExamSelected;
 
     final cls = exam?['class'];
@@ -714,21 +725,30 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
   Future<void> _continueToScanner({bool? forceUpload}) async {
     if (_selectedSubject == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a subject first.')),
+        CmTheme.feedbackSnackBar(
+          'Please select a subject first.',
+          color: CmTheme.amberWarning,
+        ),
       );
       return;
     }
 
     if (_selectedSection == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a section first.')),
+        CmTheme.feedbackSnackBar(
+          'Please select a section first.',
+          color: CmTheme.amberWarning,
+        ),
       );
       return;
     }
 
     if (_selectedExam == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select an assessment first.')),
+        CmTheme.feedbackSnackBar(
+          'Please select an assessment first.',
+          color: CmTheme.amberWarning,
+        ),
       );
       return;
     }
@@ -743,32 +763,32 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
     final int? examId = int.tryParse('${_selectedExam!['id']}');
     if (examId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid exam ID.')),
+        CmTheme.feedbackSnackBar('Invalid exam ID.', color: CmTheme.redDanger),
       );
       return;
     }
 
-    final List<Map<String, dynamic>> scannerSections =
-        _selectedExamSections.map((section) {
-      return {
-        'id': section['id'],
-        'name': _getSectionName(section),
-        'section_name': _getSectionName(section),
-        'display_name': _getSectionName(section),
-        'default_points': section['default_points'],
-        'question_type': _normalizeQuestionType(section['question_type']),
-        'question_count': section['question_count'] ?? 0,
-        'questions': section['questions'] ?? [],
-      };
-    }).toList();
+    final List<Map<String, dynamic>> scannerSections = _selectedExamSections
+        .map((section) {
+          return {
+            'id': section['id'],
+            'name': _getSectionName(section),
+            'section_name': _getSectionName(section),
+            'display_name': _getSectionName(section),
+            'default_points': section['default_points'],
+            'question_type': _normalizeQuestionType(section['question_type']),
+            'question_count': section['question_count'] ?? 0,
+            'questions': section['questions'] ?? [],
+          };
+        })
+        .toList();
 
     final examMap = Map<String, dynamic>.from(_selectedExam!);
     final studentsList = List<Map<String, dynamic>>.from(_selectedExamStudents);
 
     final screenWidth = MediaQuery.sizeOf(context).width;
     final bool isMobileOrTablet = screenWidth < 1024;
-    final bool useUploadScreen =
-        forceUpload ?? (!isMobileOrTablet || kIsWeb);
+    final bool useUploadScreen = forceUpload ?? (!isMobileOrTablet || kIsWeb);
 
     if (!mounted) return;
 
@@ -808,31 +828,29 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
     final bool isMobileOrTablet = screenWidth < 1024;
 
     return Scaffold(
-      backgroundColor: _kBg,
+      backgroundColor: CmTheme.background,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        foregroundColor: _kNavy,
+        backgroundColor: CmTheme.surfaceWhite,
+        foregroundColor: CmTheme.navy,
         elevation: 0,
-        surfaceTintColor: Colors.transparent,
+        surfaceTintColor: CmTheme.transparent,
         title: const Text(
           'Answer Sheet Scanner',
           style: TextStyle(
-            color: _kNavy,
+            color: CmTheme.navy,
             fontWeight: FontWeight.w700,
             fontSize: 18,
           ),
         ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: _kLine),
+          child: Container(height: 1, color: CmTheme.lineBorder),
         ),
       ),
       body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: _kNavy),
-            )
+          ? const Center(child: CircularProgressIndicator(color: CmTheme.navy))
           : RefreshIndicator(
-              color: _kNavy,
+              color: CmTheme.navy,
               onRefresh: _loadExams,
               child: ListView(
                 padding: EdgeInsets.symmetric(
@@ -850,12 +868,12 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                           Container(
                             padding: const EdgeInsets.all(24),
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: CmTheme.surfaceWhite,
                               borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: _kLine),
+                              border: Border.all(color: CmTheme.lineBorder),
                               boxShadow: [
                                 BoxShadow(
-                                  color: _kNavy.withValues(alpha: 0.04),
+                                  color: CmTheme.scanCardShadow,
                                   blurRadius: 16,
                                   offset: const Offset(0, 6),
                                 ),
@@ -867,13 +885,13 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                                   width: 64,
                                   height: 64,
                                   decoration: BoxDecoration(
-                                    color: _kNavy.withValues(alpha: 0.08),
+                                    color: CmTheme.navy.withValues(alpha: 0.08),
                                     borderRadius: BorderRadius.circular(16),
                                   ),
                                   child: const Icon(
                                     Icons.document_scanner_outlined,
                                     size: 32,
-                                    color: _kNavy,
+                                    color: CmTheme.navy,
                                   ),
                                 ),
                                 const SizedBox(height: 16),
@@ -883,7 +901,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                                   style: TextStyle(
                                     fontSize: 22,
                                     fontWeight: FontWeight.w700,
-                                    color: _kNavy,
+                                    color: CmTheme.navy,
                                   ),
                                 ),
                                 const SizedBox(height: 6),
@@ -894,7 +912,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                                   textAlign: TextAlign.center,
                                   style: const TextStyle(
                                     fontSize: 14,
-                                    color: _kSlate,
+                                    color: CmTheme.slateText,
                                     height: 1.4,
                                   ),
                                 ),
@@ -913,9 +931,9 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                             Container(
                               padding: const EdgeInsets.all(20),
                               decoration: BoxDecoration(
-                                color: Colors.white,
+                                color: CmTheme.surfaceWhite,
                                 borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: _kLine),
+                                border: Border.all(color: CmTheme.lineBorder),
                               ),
                               child: const Row(
                                 children: [
@@ -924,7 +942,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                                     height: 22,
                                     child: CircularProgressIndicator(
                                       strokeWidth: 2,
-                                      color: _kNavy,
+                                      color: CmTheme.navy,
                                     ),
                                   ),
                                   SizedBox(width: 14),
@@ -932,7 +950,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                                     child: Text(
                                       'Loading exam structure, answer keys, and enrolled students...',
                                       style: TextStyle(
-                                        color: _kNavy,
+                                        color: CmTheme.navy,
                                         fontWeight: FontWeight.w500,
                                       ),
                                     ),
@@ -967,16 +985,16 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: _kBg,
+        color: CmTheme.background,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _kLine),
+        border: Border.all(color: CmTheme.lineBorder),
       ),
       child: Column(
         children: [
           const Icon(
             Icons.assignment_late_outlined,
             size: 44,
-            color: _kSlate,
+            color: CmTheme.slateText,
           ),
           const SizedBox(height: 12),
           const Text(
@@ -984,21 +1002,21 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w700,
-              color: _kNavy,
+              color: CmTheme.navy,
             ),
           ),
           const SizedBox(height: 6),
           const Text(
             'Assign a subject section and publish an assessment in My Subjects or Exams first before scanning answer sheets.',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 13, color: _kSlate),
+            style: TextStyle(fontSize: 13, color: CmTheme.slateText),
           ),
           const SizedBox(height: 16),
           OutlinedButton.icon(
             onPressed: _loadExams,
             style: OutlinedButton.styleFrom(
-              foregroundColor: _kNavy,
-              side: const BorderSide(color: _kLine),
+              foregroundColor: CmTheme.navy,
+              side: const BorderSide(color: CmTheme.lineBorder),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -1019,21 +1037,24 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
     return InputDecoration(
       labelText: label,
       hintText: hint,
-      labelStyle: const TextStyle(color: _kSlate, fontWeight: FontWeight.w600),
+      labelStyle: const TextStyle(
+        color: CmTheme.slateText,
+        fontWeight: FontWeight.w600,
+      ),
       filled: true,
-      fillColor: _kBg,
-      prefixIcon: Icon(icon, color: _kNavy),
+      fillColor: CmTheme.background,
+      prefixIcon: Icon(icon, color: CmTheme.navy),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: _kLine),
+        borderSide: const BorderSide(color: CmTheme.lineBorder),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: _kLine),
+        borderSide: const BorderSide(color: CmTheme.lineBorder),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: _kNavy, width: 1.5),
+        borderSide: const BorderSide(color: CmTheme.navy, width: 1.5),
       ),
     );
   }
@@ -1051,13 +1072,14 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
 
     final String? selectedSubjectKey = _selectedSubject != null
         ? (_selectedSubject!['key'] ??
-                '${_selectedSubject!['subject_id'] ?? _selectedSubject!['code']}')
-            .toString()
+                  '${_selectedSubject!['subject_id'] ?? _selectedSubject!['code']}')
+              .toString()
         : null;
     final String? validSubjectKey =
-        (selectedSubjectKey != null && seenSubjKeys.contains(selectedSubjectKey))
-            ? selectedSubjectKey
-            : null;
+        (selectedSubjectKey != null &&
+            seenSubjKeys.contains(selectedSubjectKey))
+        ? selectedSubjectKey
+        : null;
 
     // 2. Sections belonging to the selected subject
     final sections = _subjectSections(_selectedSubject);
@@ -1070,12 +1092,13 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
       }
     }
 
-    final int? selectedClassId =
-        int.tryParse('${_selectedSection?['class_id'] ?? ''}');
+    final int? selectedClassId = int.tryParse(
+      '${_selectedSection?['class_id'] ?? ''}',
+    );
     final int? validClassId =
         (selectedClassId != null && seenClassIds.contains(selectedClassId))
-            ? selectedClassId
-            : null;
+        ? selectedClassId
+        : null;
 
     // 3. Active & Published assessments for the selected section
     final uniqueExams = <Map<String, dynamic>>[];
@@ -1090,8 +1113,8 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
     final int? selectedExamId = int.tryParse('${_selectedExam?['id'] ?? ''}');
     final int? validSelectedExamId =
         (selectedExamId != null && seenExamIds.contains(selectedExamId))
-            ? selectedExamId
-            : null;
+        ? selectedExamId
+        : null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1107,8 +1130,8 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
             icon: Icons.menu_book_outlined,
           ),
           items: uniqueSubjects.map((subj) {
-            final k =
-                (subj['key'] ?? '${subj['subject_id'] ?? subj['code']}').toString();
+            final k = (subj['key'] ?? '${subj['subject_id'] ?? subj['code']}')
+                .toString();
             final label = _subjectDisplayLabel(subj);
             return DropdownMenuItem<String>(
               value: k,
@@ -1116,7 +1139,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                 label.isEmpty ? 'Subject' : label,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  color: _kNavy,
+                  color: CmTheme.navy,
                   fontWeight: FontWeight.w600,
                   fontSize: 14,
                 ),
@@ -1127,8 +1150,8 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
             if (subjKey == null) return;
             Map<String, dynamic>? chosenSubj;
             for (final s in uniqueSubjects) {
-              final k =
-                  (s['key'] ?? '${s['subject_id'] ?? s['code']}').toString();
+              final k = (s['key'] ?? '${s['subject_id'] ?? s['code']}')
+                  .toString();
               if (k == subjKey) {
                 chosenSubj = s;
                 break;
@@ -1153,16 +1176,16 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: _kBg,
+                color: CmTheme.background,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _kLine),
+                border: Border.all(color: CmTheme.lineBorder),
               ),
               child: const Text(
                 'No sections assigned to this subject yet.',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w500,
-                  color: _kSlate,
+                  color: CmTheme.slateText,
                 ),
               ),
             )
@@ -1187,7 +1210,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                     secName,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      color: _kNavy,
+                      color: CmTheme.navy,
                       fontWeight: FontWeight.w600,
                       fontSize: 14,
                     ),
@@ -1223,9 +1246,9 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: _kBg,
+                color: CmTheme.background,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _kLine),
+                border: Border.all(color: CmTheme.lineBorder),
               ),
               child: const Row(
                 children: [
@@ -1234,7 +1257,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                     height: 18,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: _kNavy,
+                      color: CmTheme.navy,
                     ),
                   ),
                   SizedBox(width: 12),
@@ -1244,7 +1267,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
-                        color: _kNavy,
+                        color: CmTheme.navy,
                       ),
                     ),
                   ),
@@ -1255,13 +1278,13 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: _kAmber.withValues(alpha: 0.08),
+                color: CmTheme.background,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _kAmber.withValues(alpha: 0.35)),
+                border: Border.all(color: CmTheme.lineBorder),
               ),
               child: const Row(
                 children: [
-                  Icon(Icons.info_outline, size: 18, color: _kAmber),
+                  Icon(Icons.info_outline, size: 18, color: CmTheme.slateText),
                   SizedBox(width: 10),
                   Expanded(
                     child: Text(
@@ -1269,7 +1292,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
-                        color: _kNavy,
+                        color: CmTheme.navy,
                       ),
                     ),
                   ),
@@ -1297,7 +1320,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                     title,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      color: _kNavy,
+                      color: CmTheme.navy,
                       fontWeight: FontWeight.w600,
                       fontSize: 14,
                     ),
@@ -1339,12 +1362,12 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _kLine),
+        border: Border.all(color: CmTheme.lineBorder),
         boxShadow: [
           BoxShadow(
-            color: _kNavy.withValues(alpha: 0.03),
+            color: CmTheme.subtleCardShadow,
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -1361,15 +1384,17 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    color: _kNavy,
+                    color: CmTheme.navy,
                   ),
                 ),
               ),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
-                  color: _kEmerald.withValues(alpha: 0.14),
+                  color: CmTheme.emeraldSuccess.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
@@ -1377,7 +1402,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
-                    color: _kEmeraldDark,
+                    color: CmTheme.navy,
                   ),
                 ),
               ),
@@ -1395,15 +1420,12 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                   Icons.groups_outlined,
                   'Section: $selectedSectionName',
                 ),
-              _metaChip(
-                Icons.people_outline,
-                'No. of Students: $studentCount',
-              ),
+              _metaChip(Icons.people_outline, 'No. of Students: $studentCount'),
             ],
           ),
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 14),
-            child: Divider(height: 1, color: _kLine),
+            child: Divider(height: 1, color: CmTheme.lineBorder),
           ),
           ..._selectedExamSections.map((section) {
             final type = _normalizeQuestionType(section['question_type']);
@@ -1416,14 +1438,14 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                     width: 34,
                     height: 34,
                     decoration: BoxDecoration(
-                      color: _kBg,
+                      color: CmTheme.background,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: _kLine),
+                      border: Border.all(color: CmTheme.lineBorder),
                     ),
                     child: Icon(
                       _sectionIcon(type),
                       size: 18,
-                      color: _kNavy,
+                      color: CmTheme.navy,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1436,14 +1458,14 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                           style: const TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 14,
-                            color: _kNavy,
+                            color: CmTheme.navy,
                           ),
                         ),
                         Text(
                           _typeDescription(type),
                           style: const TextStyle(
                             fontSize: 12,
-                            color: _kSlate,
+                            color: CmTheme.slateText,
                           ),
                         ),
                       ],
@@ -1455,16 +1477,16 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: _kBg,
+                      color: CmTheme.background,
                       borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: _kLine),
+                      border: Border.all(color: CmTheme.lineBorder),
                     ),
                     child: Text(
                       '$count Qs',
                       style: const TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 12,
-                        color: _kNavy,
+                        color: CmTheme.navy,
                       ),
                     ),
                   ),
@@ -1481,14 +1503,14 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: _kBg,
+        color: CmTheme.background,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: _kLine),
+        border: Border.all(color: CmTheme.lineBorder),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: _kSlate),
+          Icon(icon, size: 14, color: CmTheme.slateText),
           const SizedBox(width: 6),
           Flexible(
             child: Text(
@@ -1497,7 +1519,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
               style: const TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: _kSlate,
+                color: CmTheme.slateText,
               ),
             ),
           ),
@@ -1510,9 +1532,9 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _kLine),
+        border: Border.all(color: CmTheme.lineBorder),
       ),
       child: Row(
         children: [
@@ -1520,7 +1542,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: _kNavy.withValues(alpha: 0.08),
+              color: CmTheme.navy.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(14),
             ),
             child: Icon(
@@ -1528,7 +1550,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                   ? Icons.photo_camera_outlined
                   : Icons.upload_file_outlined,
               size: 26,
-              color: _kNavy,
+              color: CmTheme.navy,
             ),
           ),
           const SizedBox(width: 14),
@@ -1543,7 +1565,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                   style: const TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
-                    color: _kNavy,
+                    color: CmTheme.navy,
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -1553,7 +1575,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                       : 'Supports JPG and PNG answer sheet scans with automatic 4-corner marker registration and bubble detection.',
                   style: const TextStyle(
                     fontSize: 13,
-                    color: _kSlate,
+                    color: CmTheme.slateText,
                   ),
                 ),
               ],
@@ -1572,15 +1594,15 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
           onPressed: _isLoadingSections
               ? null
               : () => _continueToScanner(
-                    forceUpload: kIsWeb ? !isMobileOrTablet : null,
-                  ),
+                  forceUpload: kIsWeb ? !isMobileOrTablet : null,
+                ),
           icon: _isLoadingSections
               ? const SizedBox(
                   width: 20,
                   height: 20,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    color: Colors.white,
+                    color: CmTheme.surfaceWhite,
                   ),
                 )
               : Icon(
@@ -1592,16 +1614,13 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
             _isLoadingSections
                 ? 'Loading Assessment...'
                 : (isMobileOrTablet && !kIsWeb)
-                    ? 'Open Camera Scanner'
-                    : 'Continue to Answer Sheet Scanner',
-            style: const TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 15,
-            ),
+                ? 'Open Camera Scanner'
+                : 'Continue to Answer Sheet Scanner',
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
           ),
           style: FilledButton.styleFrom(
-            backgroundColor: _kNavyDark,
-            foregroundColor: Colors.white,
+            backgroundColor: CmTheme.navy,
+            foregroundColor: CmTheme.surfaceWhite,
             padding: const EdgeInsets.symmetric(vertical: 16),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14),
@@ -1620,9 +1639,9 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
               style: TextStyle(fontWeight: FontWeight.w600),
             ),
             style: OutlinedButton.styleFrom(
-              foregroundColor: _kNavy,
-              side: const BorderSide(color: _kLine),
-              backgroundColor: Colors.white,
+              foregroundColor: CmTheme.navy,
+              side: const BorderSide(color: CmTheme.lineBorder),
+              backgroundColor: CmTheme.surfaceWhite,
               padding: const EdgeInsets.symmetric(vertical: 15),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
@@ -1642,7 +1661,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                     height: 18,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: _kNavy,
+                      color: CmTheme.navy,
                     ),
                   )
                 : const Icon(Icons.download_outlined),
@@ -1653,9 +1672,9 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
             style: OutlinedButton.styleFrom(
-              foregroundColor: _kNavy,
-              side: const BorderSide(color: _kLine),
-              backgroundColor: Colors.white,
+              foregroundColor: CmTheme.navy,
+              side: const BorderSide(color: CmTheme.lineBorder),
+              backgroundColor: CmTheme.surfaceWhite,
               padding: const EdgeInsets.symmetric(vertical: 15),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
@@ -1709,13 +1728,14 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
         questions[sectionId] = await ApiService.getQuestions(token, sectionId);
       }
 
-      final int? selectedClassId =
-          int.tryParse('${_selectedSection?['class_id'] ?? ''}');
+      final int? selectedClassId = int.tryParse(
+        '${_selectedSection?['class_id'] ?? ''}',
+      );
       final students = _selectedExamStudents.isNotEmpty
           ? _selectedExamStudents
           : (selectedClassId != null
-              ? await ApiService.getStudents(token, classId: selectedClassId)
-              : await ApiService.getExamStudents(token, exam));
+                ? await ApiService.getStudents(token, classId: selectedClassId)
+                : await ApiService.getExamStudents(token, exam));
 
       final pdfBytes = await AnswerSheetPdfService.generate(
         exam: exam,
@@ -1736,8 +1756,9 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.toString().replaceFirst('Exception: ', '')),
+        CmTheme.feedbackSnackBar(
+          e.toString().replaceFirst('Exception: ', ''),
+          color: CmTheme.redDanger,
         ),
       );
     } finally {

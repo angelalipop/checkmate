@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 
@@ -10,10 +11,7 @@ import '../services/question_paper_pdf_service.dart';
 class ExamPreviewScreen extends StatefulWidget {
   final int examId;
 
-  const ExamPreviewScreen({
-    super.key,
-    required this.examId,
-  });
+  const ExamPreviewScreen({super.key, required this.examId});
 
   @override
   State<ExamPreviewScreen> createState() => _ExamPreviewScreenState();
@@ -43,9 +41,7 @@ class _ExamPreviewScreenState extends State<ExamPreviewScreen> {
       final token = await AuthStorage.getToken();
 
       if (token == null || token.isEmpty) {
-        throw Exception(
-          'Your session has expired. Please log in again.',
-        );
+        throw Exception('Your session has expired. Please log in again.');
       }
 
       final exams = await ApiService.getExams(token);
@@ -63,26 +59,18 @@ class _ExamPreviewScreenState extends State<ExamPreviewScreen> {
         throw Exception('This exam has no questionnaire.');
       }
 
-      final sections = await ApiService.getExamSections(
-        token,
-        widget.examId,
-      );
+      final sections = await ApiService.getExamSections(token, widget.examId);
 
       final questionsBySection = <int, List<Map<String, dynamic>>>{};
 
       for (final section in sections) {
-        final sectionId = int.tryParse(
-          section['id']?.toString() ?? '',
-        );
+        final sectionId = int.tryParse(section['id']?.toString() ?? '');
 
         if (sectionId == null) {
           continue;
         }
 
-        final questions = await ApiService.getQuestions(
-          token,
-          sectionId,
-        );
+        final questions = await ApiService.getQuestions(token, sectionId);
         questions.sort((a, b) {
           final na = int.tryParse(a['question_number']?.toString() ?? '') ?? 0;
           final nb = int.tryParse(b['question_number']?.toString() ?? '') ?? 0;
@@ -109,10 +97,7 @@ class _ExamPreviewScreenState extends State<ExamPreviewScreen> {
       if (!mounted) return;
 
       setState(() {
-        _errorMessage = e.toString().replaceFirst(
-          'Exception: ',
-          '',
-        );
+        _errorMessage = e.toString().replaceFirst('Exception: ', '');
         _isLoading = false;
       });
     }
@@ -143,7 +128,10 @@ class _ExamPreviewScreenState extends State<ExamPreviewScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        CmTheme.feedbackSnackBar(
+          e.toString().replaceFirst('Exception: ', ''),
+          color: CmTheme.redDanger,
+        ),
       );
     }
   }
@@ -157,14 +145,14 @@ class _ExamPreviewScreenState extends State<ExamPreviewScreen> {
         sections: _sections,
         questions: _questions,
       );
-      await Printing.sharePdf(
-        bytes: bytes,
-        filename: _fileName('docx'),
-      );
+      await Printing.sharePdf(bytes: bytes, filename: _fileName('docx'));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        CmTheme.feedbackSnackBar(
+          e.toString().replaceFirst('Exception: ', ''),
+          color: CmTheme.redDanger,
+        ),
       );
     }
   }
@@ -195,9 +183,7 @@ class _ExamPreviewScreenState extends State<ExamPreviewScreen> {
 
   Widget _buildBody() {
     if (_isLoading) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
 
     if (_errorMessage != null) {
@@ -210,11 +196,13 @@ class _ExamPreviewScreenState extends State<ExamPreviewScreen> {
               const Icon(
                 Icons.error_outline,
                 size: 48,
+                color: CmTheme.redDanger,
               ),
               const SizedBox(height: 16),
               Text(
                 _errorMessage!,
                 textAlign: TextAlign.center,
+                style: const TextStyle(color: CmTheme.redDanger),
               ),
               const SizedBox(height: 16),
               ElevatedButton(
