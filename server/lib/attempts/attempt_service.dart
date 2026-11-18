@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:postgres/postgres.dart';
 
 import 'package:server/database.dart';
@@ -124,7 +126,8 @@ class AttemptService {
   /// linked in `exam_class_assignments` so the scorebook updates immediately.
   static Future<Map<String, dynamic>> recordVerifiedScan({
     required int examId,
-    required List<Map<String, dynamic>> answers, int? studentId,
+    required List<Map<String, dynamic>> answers,
+    int? studentId,
     int? classId,
     String? studentNumber,
     String? sectionName,
@@ -287,10 +290,10 @@ class AttemptService {
       final acceptableByQuestion = <int, Set<String>>{};
       for (final r in acceptableRows) {
         final qid = r[0]! as int;
-        final ans = (r[1]?.toString() ?? '')
-            .trim()
-            .toUpperCase()
-            .replaceAll(RegExp(r'\s+'), ' ');
+        final ans = (r[1]?.toString() ?? '').trim().toUpperCase().replaceAll(
+          RegExp(r'\s+'),
+          ' ',
+        );
         if (ans.isNotEmpty) {
           acceptableByQuestion.putIfAbsent(qid, () => <String>{}).add(ans);
         }
@@ -362,7 +365,9 @@ class AttemptService {
           },
         );
         await tx.execute(
-          Sql.named('DELETE FROM student_answers WHERE attempt_id = @attempt_id'),
+          Sql.named(
+            'DELETE FROM student_answers WHERE attempt_id = @attempt_id',
+          ),
           parameters: {'attempt_id': attemptId},
         );
       } else {
@@ -441,7 +446,8 @@ class AttemptService {
         final secType = q[6]?.toString() ?? 'multiple_choice';
         final secIndex = distinctSectionIds.indexOf(secId);
 
-        final submitted = submittedByQuestionId[qId] ??
+        final submitted =
+            submittedByQuestionId[qId] ??
             submittedBySectionAndNum['id:$secId:$qNum'] ??
             submittedBySectionAndNum['idx:$secIndex:$qNum'] ??
             submittedBySectionAndNum['num:$qNum'];
@@ -481,8 +487,8 @@ class AttemptService {
         final storedAnswer = normalizedStudent.isEmpty
             ? 'Unanswered'
             : (secType.toLowerCase() == 'identification'
-                ? normalizedStudent
-                : rawAnswerText.toUpperCase());
+                  ? normalizedStudent
+                  : rawAnswerText.toUpperCase());
 
         final insertedAns = await tx.execute(
           Sql.named('''
@@ -543,10 +549,8 @@ class AttemptService {
         if (isCorrect) {
           stats['correct_count'] = (stats['correct_count'] as int) + 1;
         }
-        stats['earned_points'] =
-            (stats['earned_points'] as double) + earned;
-        stats['total_points'] =
-            (stats['total_points'] as double) + points;
+        stats['earned_points'] = (stats['earned_points'] as double) + earned;
+        stats['total_points'] = (stats['total_points'] as double) + points;
 
         savedAnswers.add({
           'id': insertedAns.first[0],
@@ -601,8 +605,9 @@ class AttemptService {
         },
       );
 
-      final percentage =
-          maxScore > 0 ? (totalEarnedScore / maxScore) * 100.0 : 0.0;
+      final percentage = maxScore > 0
+          ? (totalEarnedScore / maxScore) * 100.0
+          : 0.0;
 
       final baseAttempt = _attemptFromRow(finalized.first);
       return {
@@ -767,6 +772,7 @@ class AttemptService {
     int? examId,
     int? studentId,
     int? teacherId,
+    bool includeAnswers = false,
   }) async {
     final conditions = <String>[];
     final parameters = <String, dynamic>{};
@@ -796,6 +802,7 @@ class AttemptService {
         )
       ''');
       parameters['teacher_id'] = teacherId;
+      if (includeAnswers) conditions.add('sc.teacher_id = @teacher_id');
     }
 
     final whereClause = conditions.isEmpty
@@ -820,7 +827,29 @@ class AttemptService {
           s.last_name,
           s.email,
           s.class_id,
-          sc.section
+          sc.section,
+          ${includeAnswers ? """
+            COALESCE((
+              SELECT json_agg(json_build_object(
+                'question_id', q.id,
+                'question_number', q.question_number,
+                'question_text', q.question_text,
+                'correct_answer', q.correct_answer,
+                'section_id', es.id,
+                'section_name', es.name,
+                'question_type', es.question_type,
+                'section_order', es.section_order,
+                'recognized_answer', sa.recognized_answer,
+                'raw_answer', sa.raw_answer,
+                'is_correct', sa.is_correct,
+                'verification_status', sa.verification_status
+              ) ORDER BY es.section_order, q.question_number, q.id)
+              FROM student_answers sa
+              JOIN questions q ON q.id = sa.question_id
+              JOIN exam_sections es ON es.id = q.section_id
+              WHERE sa.attempt_id = a.id AND es.exam_id = a.exam_id
+            ), '[]'::json)::text
+          """ : 'NULL::text'} AS analytics_answers
         FROM exam_attempts a
         JOIN exams e ON e.id = a.exam_id
         JOIN students s ON s.id = a.student_id
@@ -843,6 +872,7 @@ class AttemptService {
         'started_at': row[6]?.toString(),
         'completed_at': row[7]?.toString(),
         'created_at': row[8].toString(),
+        if (includeAnswers) 'answers': jsonDecode(row[16] as String),
         'exam': {
           'id': row[1],
           'title': row[9],

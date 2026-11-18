@@ -37,11 +37,18 @@ Future<Response> _listAttempts(RequestContext context) async {
       context.request.uri.queryParameters['student_id'] ?? '',
     );
 
+    final includeAnswers =
+        context.request.uri.queryParameters['include_answers'] == 'true';
+    if (includeAnswers && examId == null) {
+      return ExamAccess.deny(400, 'exam_id is required for answer analytics.');
+    }
+
     // Teachers only receive attempts on exams of their own classes.
     final attempts = await AttemptService.list(
       examId: examId,
       studentId: studentId,
       teacherId: actor.isAdmin ? null : actor.id,
+      includeAnswers: includeAnswers,
     );
 
     return Response.json(

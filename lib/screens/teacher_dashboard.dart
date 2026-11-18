@@ -13,6 +13,7 @@ import 'exams_tab.dart';
 import 'login_screen.dart' show LoginScreen;
 import 'my_subjects_screen.dart';
 import 'students_screen.dart';
+import 'teacher_analytics_panel.dart';
 
 typedef JsonMap = Map<String, dynamic>;
 
@@ -79,193 +80,60 @@ class _ExamInfo {
     required this.date,
     required this.students,
     required this.status,
+    this.requiresScan = true,
   });
 
   final int? id;
   final String title, code, date, status;
   final int students;
+  final bool requiresScan;
 }
 
 class _ExamAnalytics {
   const _ExamAnalytics({
-    required this.examId,
-    required this.examTitle,
-    required this.attemptPercentages,
-    required this.lowAccuracyItemCount,
-    required this.missedQuestionNumbers,
-    required this.hasIdentificationSection,
-    required this.lowestSectionName,
-    required this.lowestSectionAvg,
+    required this.attempts,
     required this.idReviewCount,
     required this.omrReviewCount,
     required this.pendingScanCount,
   });
 
-  final int examId;
-  final String examTitle;
-  final List<double> attemptPercentages;
-  final int lowAccuracyItemCount;
-  final List<int> missedQuestionNumbers;
-  final bool hasIdentificationSection;
-  final String? lowestSectionName;
-  final double? lowestSectionAvg;
-  final int idReviewCount;
-  final int omrReviewCount;
-  final int pendingScanCount;
+  final List<JsonMap> attempts;
+  final int idReviewCount, omrReviewCount, pendingScanCount;
 }
 
 class _DashboardMetrics {
   const _DashboardMetrics({
-    required this.totalForReview,
     required this.idReviewPapers,
     required this.omrReviewPapers,
     required this.unscannedPapers,
     required this.firstReviewExamId,
-    required this.totalAttempts,
-    required this.averagePercent,
-    required this.highestPercent,
-    required this.lowestPercent,
-    required this.buckets,
-    required this.lowAccuracyItems,
-    required this.insightBannerText,
   });
 
-  final int totalForReview;
-  final int idReviewPapers;
-  final int omrReviewPapers;
-  final int unscannedPapers;
+  final int idReviewPapers, omrReviewPapers, unscannedPapers;
   final int? firstReviewExamId;
-  final int totalAttempts;
-  final double averagePercent;
-  final double highestPercent;
-  final double lowestPercent;
-  final Map<String, int> buckets;
-  final int lowAccuracyItems;
-  final String insightBannerText;
-
-  static const emptyBuckets = <String, int>{
-    '0-59': 0,
-    '60-69': 0,
-    '70-79': 0,
-    '80-89': 0,
-    '90-100': 0,
-  };
+  int get totalForReview => idReviewPapers + omrReviewPapers + unscannedPapers;
 
   factory _DashboardMetrics.fromExams(
     List<_ExamInfo> exams,
-    Map<int, _ExamAnalytics> byExam, {
-    int? selectedExamId,
-  }) {
-    final targetAnalytics =
-        selectedExamId != null && byExam.containsKey(selectedExamId)
-        ? [byExam[selectedExamId]!]
-        : byExam.values.toList();
-
-    int idRev = 0;
-    int omrRev = 0;
-    int pendingScans = 0;
-    int? reviewExamId;
-
-    for (final e in exams) {
-      final id = e.id;
-      if (id == null) continue;
-      final a = byExam[id];
-      if (a != null) {
-        idRev += a.idReviewCount;
-        omrRev += a.omrReviewCount;
-        pendingScans += a.pendingScanCount;
-        if (reviewExamId == null &&
-            (a.idReviewCount + a.omrReviewCount + a.pendingScanCount) > 0) {
-          reviewExamId = id;
-        }
+    Map<int, _ExamAnalytics> byExam,
+  ) {
+    int idReview = 0, omrReview = 0, pending = 0;
+    int? first;
+    for (final exam in exams) {
+      final a = byExam[exam.id];
+      if (a == null) continue;
+      idReview += a.idReviewCount;
+      omrReview += a.omrReviewCount;
+      pending += a.pendingScanCount;
+      if (a.idReviewCount + a.omrReviewCount + a.pendingScanCount > 0) {
+        first ??= exam.id;
       }
     }
-
-    final allPercentages = <double>[];
-    int lowItems = 0;
-    final missedQuestions = <int>[];
-    String? weakestSection;
-    double? weakestSectionVal;
-
-    for (final a in targetAnalytics) {
-      allPercentages.addAll(a.attemptPercentages);
-      lowItems += a.lowAccuracyItemCount;
-      missedQuestions.addAll(a.missedQuestionNumbers);
-      if (a.lowestSectionName != null && a.lowestSectionAvg != null) {
-        if (weakestSectionVal == null ||
-            a.lowestSectionAvg! < weakestSectionVal) {
-          weakestSectionVal = a.lowestSectionAvg;
-          weakestSection = a.lowestSectionName;
-        }
-      }
-    }
-
-    final buckets = Map<String, int>.from(emptyBuckets);
-    double sum = 0;
-    double high = 0;
-    double low = 100;
-
-    for (final p in allPercentages) {
-      final clamped = p.clamp(0.0, 100.0);
-      sum += clamped;
-      if (clamped > high) high = clamped;
-      if (clamped < low) low = clamped;
-
-      if (clamped < 60) {
-        buckets['0-59'] = (buckets['0-59'] ?? 0) + 1;
-      } else if (clamped < 70) {
-        buckets['60-69'] = (buckets['60-69'] ?? 0) + 1;
-      } else if (clamped < 80) {
-        buckets['70-79'] = (buckets['70-79'] ?? 0) + 1;
-      } else if (clamped < 90) {
-        buckets['80-89'] = (buckets['80-89'] ?? 0) + 1;
-      } else {
-        buckets['90-100'] = (buckets['90-100'] ?? 0) + 1;
-      }
-    }
-
-    final count = allPercentages.length;
-    final avg = count > 0 ? (sum / count) : 0.0;
-    if (count == 0) low = 0.0;
-
-    String banner;
-    if (count == 0) {
-      banner = 'No recorded exam attempts yet. Scan answer sheets to generate item difficulty analysis and smart recommendations.';
-    } else if (lowItems > 0) {
-      final sampleNums = missedQuestions.take(4).map((q) => '#$q').join(', ');
-      final itemWord = lowItems == 1 ? 'item' : 'items';
-      banner = sampleNums.isNotEmpty
-          ? '$lowItems $itemWord ($sampleNums) answered correctly by fewer than 40% — review recommended.'
-          : '$lowItems $itemWord answered correctly by fewer than 40% — review these concepts with the class.';
-    } else if (weakestSection != null &&
-        weakestSectionVal != null &&
-        weakestSectionVal < 60) {
-      banner =
-          'Lowest accuracy in $weakestSection (${weakestSectionVal.toStringAsFixed(0)}%) — consider a targeted topic review.';
-    } else if (avg < 75.0) {
-      banner =
-          'Class average (${avg.toStringAsFixed(1)}%) is below 75% — a remedial review session is recommended.';
-    } else {
-      banner =
-          'Strong class mastery! All items achieved at least 40% accuracy (Class average: ${avg.toStringAsFixed(1)}%).';
-    }
-
-    final totalReview = idRev + omrRev + pendingScans;
-
     return _DashboardMetrics(
-      totalForReview: totalReview,
-      idReviewPapers: idRev,
-      omrReviewPapers: omrRev,
-      unscannedPapers: pendingScans,
-      firstReviewExamId:
-          reviewExamId ?? (exams.isNotEmpty ? exams.first.id : null),
-      totalAttempts: count,
-      averagePercent: avg,
-      highestPercent: high,
-      lowestPercent: low,
-      buckets: buckets,
-      lowAccuracyItems: lowItems,
-      insightBannerText: banner,
+      idReviewPapers: idReview,
+      omrReviewPapers: omrReview,
+      unscannedPapers: pending,
+      firstReviewExamId: first ?? (exams.isNotEmpty ? exams.first.id : null),
     );
   }
 }
@@ -390,19 +258,36 @@ class _ModuleShell extends StatelessWidget {
   void _select(BuildContext context, TeacherPage target) {
     if (target == page && target != TeacherPage.exams) return;
 
+    final navigator = Navigator.of(context);
     final screen = _moduleScreenFor(target);
     if (screen != null) {
-      Navigator.of(context).pushReplacement(_shellRoute(target, screen));
+      navigator.pushReplacement(_shellRoute(target, screen));
       return;
     }
 
     final dashboard = _teacherDashboardRoute;
-    if (dashboard != null) {
-      Navigator.of(context).popUntil((route) => route == dashboard);
-      _dashboardNavigate?.call(target);
-    } else {
-      Navigator.of(context).pop();
+    if (dashboard != null &&
+        dashboard.isActive &&
+        dashboard.navigator == navigator) {
+      var foundDashboard = false;
+
+      navigator.popUntil((route) {
+        foundDashboard = route == dashboard;
+        return foundDashboard || route.isFirst;
+      });
+
+      if (foundDashboard) {
+        _dashboardNavigate?.call(target);
+        return;
+      }
     }
+
+    navigator.pushReplacement(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            TeacherDashboard(teacherName: _TeacherIdentity.displayName),
+      ),
+    );
   }
 
   @override
@@ -1024,7 +909,8 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
   String? _error;
   List<_ExamInfo> _exams = [];
   Map<int, _ExamAnalytics> _analyticsByExam = {};
-  int? _selectedAnalyticsExamId;
+  List<JsonMap> _analyticsClasses = [];
+  List<JsonMap> _analyticsExams = [];
 
   @override
   void initState() {
@@ -1075,264 +961,68 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
   Future<_ExamAnalytics> _computeExamAnalytics(
     String token,
     _ExamInfo examInfo,
-    JsonMap rawExam,
   ) async {
-    final examId = examInfo.id!;
-
-    JsonMap examMap = rawExam;
-    try {
-      examMap = await ApiService.getExamById(token, examId);
-    } catch (_) {}
-
-    List<JsonMap> sectionsList = [];
-    try {
-      sectionsList = await ApiService.getExamSections(token, examId);
-    } catch (_) {}
-
-    final attemptsData = await _fetchBackendJson(
+    if (!examInfo.requiresScan) {
+      return const _ExamAnalytics(
+        attempts: [],
+        idReviewCount: 0,
+        omrReviewCount: 0,
+        pendingScanCount: 0,
+      );
+    }
+    final data = await _fetchBackendJson(
       token,
-      '/attempts?exam_id=$examId',
+      '/attempts?exam_id=${examInfo.id}&include_answers=true',
     );
-
-    double maxPossiblePoints = 0;
-    bool hasIdentification = false;
-    final questionTypeById = <int, String>{};
-    final questionNumberById = <int, int>{};
-    final sectionNameByQuestionId = <int, String>{};
-
-    final rawEmbeddedSections = examMap['sections'] ?? examMap['exam_sections'];
-    final List<JsonMap> effectiveSections = [];
-    if (sectionsList.isNotEmpty) {
-      effectiveSections.addAll(sectionsList);
-    } else if (rawEmbeddedSections is List) {
-      for (final item in rawEmbeddedSections) {
-        if (item is Map) {
-          effectiveSections.add(JsonMap.from(item));
-        }
-      }
+    if (data is! Map || data['attempts'] is! List) {
+      throw Exception('Unable to load examination results. Please retry.');
+    }
+    final attempts = (data['attempts'] as List)
+        .whereType<Map>()
+        .map(JsonMap.from)
+        .toList();
+    if (attempts.any((a) => a['answers'] is! List)) {
+      throw Exception(
+        'The backend must be updated to support answer analytics.',
+      );
     }
 
-    for (final s in effectiveSections) {
-      final secId = int.tryParse(s['id']?.toString() ?? '');
-      final secType = (s['question_type'] ?? s['exam_type'] ?? s['type'] ?? '')
-          .toString()
-          .toLowerCase();
-      final secName = (s['name'] ?? s['section_name'] ?? s['title'] ?? secType)
-          .toString();
-      final defaultPts =
-          double.tryParse(
-            (s['default_points'] ?? s['item_weight'] ?? 1).toString(),
-          ) ??
-          1.0;
-
-      if (secType.contains('ident')) hasIdentification = true;
-
-      final List<JsonMap> qList = [];
-      if (s['questions'] is List) {
-        for (final item in s['questions'] as List) {
-          if (item is Map) {
-            qList.add(JsonMap.from(item));
-          }
-        }
-      } else if (secId != null) {
-        try {
-          final fetched = await ApiService.getQuestions(token, secId);
-          qList.addAll(fetched);
-        } catch (_) {}
+    int idReview = 0, omrReview = 0;
+    final scannedStudents = <String>{};
+    for (final attempt in attempts) {
+      final answers = (attempt['answers'] as List).whereType<Map>();
+      final studentId = attempt['student_id']?.toString();
+      if (studentId != null &&
+          (answers.isNotEmpty || attempt['status'] == 'completed')) {
+        scannedStudents.add(studentId);
       }
-
-      for (final q in qList) {
-        final qId = int.tryParse(q['id']?.toString() ?? '');
-        final qNo =
-            int.tryParse(
-              (q['question_number'] ?? q['question_no'] ?? q['number'] ?? '')
-                  .toString(),
-            ) ??
-            0;
-        final pts =
-            double.tryParse((q['points'] ?? defaultPts).toString()) ??
-            defaultPts;
-        final qType = (q['question_type'] ?? q['exam_type'] ?? secType)
-            .toString()
-            .toLowerCase();
-
-        if (qType.contains('ident')) hasIdentification = true;
-        maxPossiblePoints += pts;
-
-        if (qId != null) {
-          questionTypeById[qId] = qType;
-          questionNumberById[qId] = qNo;
-          sectionNameByQuestionId[qId] = secName;
+      bool idFlagged = false, omrFlagged = false;
+      for (final answer in answers) {
+        if (answer['verification_status'] != 'needs_review') continue;
+        if ((answer['question_type'] ?? '').toString().contains('ident')) {
+          idFlagged = true;
+        } else {
+          omrFlagged = true;
         }
       }
+      if (idFlagged) idReview++;
+      if (omrFlagged) omrReview++;
     }
-
-    if (maxPossiblePoints <= 0) {
-      maxPossiblePoints =
-          double.tryParse(
-            (examMap['total_points'] ??
-                    rawExam['total_points'] ??
-                    rawExam['total_items'] ??
-                    100)
-                .toString(),
-          ) ??
-          100.0;
-    }
-
-    List<dynamic> attemptsList = [];
-    if (attemptsData is List) {
-      attemptsList = attemptsData;
-    } else if (attemptsData is Map) {
-      final inner =
-          attemptsData['attempts'] ??
-          attemptsData['data'] ??
-          attemptsData['results'];
-      if (inner is List) attemptsList = inner;
-    }
-    if (attemptsList.isEmpty && examMap['attempts'] is List) {
-      attemptsList = examMap['attempts'] as List;
-    }
-
-    final percentages = <double>[];
-    final itemCorrect = <int, int>{};
-    final itemTotal = <int, int>{};
-    final sectionCorrect = <String, int>{};
-    final sectionTotal = <String, int>{};
-    int idFlagged = 0;
-    int omrFlagged = 0;
-
-    for (final att in attemptsList) {
-      if (att is! Map) continue;
-
-      final score =
-          double.tryParse(
-            (att['total_score'] ?? att['score'] ?? 0).toString(),
-          ) ??
-          0.0;
-      final attMax =
-          double.tryParse(
-            (att['max_score'] ?? att['total_points'] ?? maxPossiblePoints)
-                .toString(),
-          ) ??
-          maxPossiblePoints;
-      final pct = attMax > 0 ? (score / attMax) * 100.0 : 0.0;
-      percentages.add(pct);
-
-      final answers = att['answers'] ?? att['student_answers'];
-      if (answers is List) {
-        bool paperHasIdReview = false;
-        bool paperHasOmrReview = false;
-
-        for (final ans in answers) {
-          if (ans is! Map) continue;
-          final qId = int.tryParse(
-            (ans['question_id'] ?? ans['id'] ?? '').toString(),
-          );
-          final qNo =
-              int.tryParse(
-                (ans['question_number'] ?? ans['question_no'] ?? '').toString(),
-              ) ??
-              (qId != null ? (questionNumberById[qId] ?? 0) : 0);
-          final key = qNo > 0 ? qNo : (qId ?? 0);
-
-          final isCorrect =
-              ans['is_correct'] == true ||
-              ans['is_correct']?.toString() == 'true' ||
-              ans['is_correct'] == 1;
-
-          if (key > 0) {
-            itemTotal[key] = (itemTotal[key] ?? 0) + 1;
-            if (isCorrect) {
-              itemCorrect[key] = (itemCorrect[key] ?? 0) + 1;
-            }
-          }
-
-          final secName = qId != null ? sectionNameByQuestionId[qId] : null;
-          if (secName != null && secName.isNotEmpty) {
-            sectionTotal[secName] = (sectionTotal[secName] ?? 0) + 1;
-            if (isCorrect) {
-              sectionCorrect[secName] = (sectionCorrect[secName] ?? 0) + 1;
-            }
-          }
-
-          final status = (ans['status'] ?? ans['verification_status'] ?? '')
-              .toString()
-              .toLowerCase();
-          final recognized = (ans['recognized_text'] ?? ans['answer'] ?? '')
-              .toString()
-              .trim();
-          final qType =
-              (ans['question_type'] ??
-                      ans['exam_type'] ??
-                      (qId != null ? questionTypeById[qId] : '') ??
-                      '')
-                  .toString()
-                  .toLowerCase();
-
-          if (status.contains('review') ||
-              status.contains('ambiguous') ||
-              status.contains('multiple') ||
-              recognized.isEmpty) {
-            if (qType.contains('ident')) {
-              paperHasIdReview = true;
-            } else {
-              paperHasOmrReview = true;
-            }
-          }
-        }
-
-        if (paperHasIdReview) idFlagged++;
-        if (paperHasOmrReview) omrFlagged++;
-      }
-    }
-
-    int lowAccuracyCount = 0;
-    final missedQNums = <int>[];
-    itemTotal.forEach((qNum, total) {
-      if (total > 0) {
-        final corr = itemCorrect[qNum] ?? 0;
-        final pValue = corr / total;
-        if (pValue < 0.40) {
-          lowAccuracyCount++;
-          missedQNums.add(qNum);
-        }
-      }
-    });
-    missedQNums.sort();
-
-    String? lowestSec;
-    double? lowestSecPct;
-    sectionTotal.forEach((sec, total) {
-      if (total > 0) {
-        final pct = ((sectionCorrect[sec] ?? 0) / total) * 100.0;
-        if (lowestSecPct == null || pct < lowestSecPct!) {
-          lowestSecPct = pct;
-          lowestSec = sec;
-        }
-      }
-    });
-
-    final bool activeExam = !_isDone(examInfo.status);
-    final int unscanned = activeExam
-        ? math.max(0, examInfo.students - attemptsList.length)
-        : 0;
 
     return _ExamAnalytics(
-      examId: examId,
-      examTitle: examInfo.title,
-      attemptPercentages: percentages,
-      lowAccuracyItemCount: lowAccuracyCount,
-      missedQuestionNumbers: missedQNums,
-      hasIdentificationSection: hasIdentification,
-      lowestSectionName: lowestSec,
-      lowestSectionAvg: lowestSecPct,
-      idReviewCount: idFlagged,
-      omrReviewCount: omrFlagged,
-      pendingScanCount: unscanned,
+      attempts: attempts,
+      idReviewCount: idReview,
+      omrReviewCount: omrReview,
+      pendingScanCount: _isDone(examInfo.status)
+          ? 0
+          : math.max(0, examInfo.students - scannedStudents.length),
     );
   }
 
-  Future<void> _loadData({bool silent = false}) async {
+  Future<void> _loadData({
+    bool silent = false,
+    bool showRefreshError = false,
+  }) async {
     if (!mounted) return;
     if (!silent) {
       setState(() {
@@ -1384,7 +1074,6 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
       }
 
       final exams = <_ExamInfo>[];
-      final rawExamById = <int, JsonMap>{};
 
       for (final e in rawExams) {
         final id = int.tryParse(e['id']?.toString() ?? '');
@@ -1395,19 +1084,15 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
           date: (e['created_at']?.toString() ?? '').split('T').first,
           students: studentCountForExam(e),
           status: _prettyStatus(e['status']?.toString()),
+          requiresScan: e['creation_mode'] != 'manual',
         );
         exams.add(info);
-        if (id != null) rawExamById[id] = e;
       }
 
       final analyticsMap = <int, _ExamAnalytics>{};
       await Future.wait(
         exams.where((e) => e.id != null).map((e) async {
-          final a = await _computeExamAnalytics(
-            token,
-            e,
-            rawExamById[e.id!] ?? const {},
-          );
+          final a = await _computeExamAnalytics(token, e);
           analyticsMap[e.id!] = a;
         }),
       );
@@ -1416,15 +1101,24 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
       setState(() {
         _exams = exams;
         _analyticsByExam = analyticsMap;
-        if (_selectedAnalyticsExamId != null &&
-            !_analyticsByExam.containsKey(_selectedAnalyticsExamId)) {
-          _selectedAnalyticsExamId = null;
-        }
+        _analyticsClasses = rawClasses;
+        _analyticsExams = rawExams;
+        _error = null;
         _loading = false;
       });
     } catch (e) {
       if (!mounted) return;
-      if (silent) return;
+      if (silent) {
+        if (showRefreshError) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            CmTheme.feedbackSnackBar(
+              'Unable to refresh analytics. Try again.',
+              color: CmTheme.redDanger,
+            ),
+          );
+        }
+        return;
+      }
       setState(() {
         _error = e.toString().replaceFirst('Exception: ', '');
         _loading = false;
@@ -1456,11 +1150,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
 
   Widget _body() {
     if (_page == TeacherPage.dashboard) {
-      final metrics = _DashboardMetrics.fromExams(
-        _exams,
-        _analyticsByExam,
-        selectedExamId: _selectedAnalyticsExamId,
-      );
+      final metrics = _DashboardMetrics.fromExams(_exams, _analyticsByExam);
       return _DashboardContent(
         teacherName: widget.teacherName,
         onNavigate: _select,
@@ -1470,8 +1160,15 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
         onRetry: _loadData,
         exams: _exams,
         metrics: metrics,
-        selectedExamId: _selectedAnalyticsExamId,
-        onSelectExamId: (id) => setState(() => _selectedAnalyticsExamId = id),
+        analytics: TeacherAnalyticsPanel(
+          classes: _analyticsClasses,
+          exams: _analyticsExams,
+          attemptsByExam: {
+            for (final entry in _analyticsByExam.entries)
+              entry.key: entry.value.attempts,
+          },
+          onRefresh: () => _loadData(silent: true, showRefreshError: true),
+        ),
       );
     }
     return _PlaceholderPage(page: _page);
@@ -1655,8 +1352,7 @@ class _DashboardContent extends StatelessWidget {
     required this.onRetry,
     required this.exams,
     required this.metrics,
-    required this.selectedExamId,
-    required this.onSelectExamId,
+    required this.analytics,
   });
 
   final String teacherName;
@@ -1667,8 +1363,7 @@ class _DashboardContent extends StatelessWidget {
   final VoidCallback onRetry;
   final List<_ExamInfo> exams;
   final _DashboardMetrics metrics;
-  final int? selectedExamId;
-  final ValueChanged<int?> onSelectExamId;
+  final Widget analytics;
 
   static const _months = [
     'January',
@@ -1740,7 +1435,7 @@ class _DashboardContent extends StatelessWidget {
                       else ...[
                         _stats(w),
                         const SizedBox(height: 24),
-                        _reviewAndAnalytics(context, w),
+                        _reviewAndAnalytics(context),
                         const SizedBox(height: 32),
                         _sectionHeader(
                           'Recent Examinations',
@@ -1799,7 +1494,7 @@ class _DashboardContent extends StatelessWidget {
     ]);
   }
 
-  Widget _reviewAndAnalytics(BuildContext context, double w) {
+  Widget _reviewAndAnalytics(BuildContext context) {
     final review = _ReviewQueueCard(
       metrics: metrics,
       onReview: () {
@@ -1811,24 +1506,10 @@ class _DashboardContent extends StatelessWidget {
         }
       },
     );
-    final analytics = _AnalyticsCard(
-      exams: exams,
-      metrics: metrics,
-      selectedExamId: selectedExamId,
-      onSelectExamId: onSelectExamId,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [review, const SizedBox(height: 16), analytics],
     );
-
-    if (w >= _kDesktop) {
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(flex: 5, child: review),
-          const SizedBox(width: 16),
-          Expanded(flex: 6, child: analytics),
-        ],
-      );
-    }
-    return Column(children: [review, const SizedBox(height: 16), analytics]);
   }
 
   Widget _sectionHeader(String title, String? action, VoidCallback? onTap) {
@@ -2104,239 +1785,13 @@ class _ReviewRow extends StatelessWidget {
   }
 }
 
-class _AnalyticsCard extends StatelessWidget {
-  const _AnalyticsCard({
-    required this.exams,
-    required this.metrics,
-    required this.selectedExamId,
-    required this.onSelectExamId,
-  });
-
-  final List<_ExamInfo> exams;
-  final _DashboardMetrics metrics;
-  final int? selectedExamId;
-  final ValueChanged<int?> onSelectExamId;
-
-  @override
-  Widget build(BuildContext context) {
-    final buckets = metrics.buckets;
-    final rawMax = buckets.values.isEmpty
-        ? 0
-        : buckets.values.reduce((a, b) => a > b ? a : b);
-    final maxCount = rawMax > 0 ? rawMax : 1;
-
-    final hasAttempts = metrics.totalAttempts > 0;
-    final avgText = hasAttempts
-        ? '${metrics.averagePercent.toStringAsFixed(1)}%'
-        : '—';
-    final highText = hasAttempts
-        ? '${metrics.highestPercent.toStringAsFixed(0)}%'
-        : '—';
-    final lowText = hasAttempts
-        ? '${metrics.lowestPercent.toStringAsFixed(0)}%'
-        : '—';
-
-    return _Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Score Distribution',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        color: CmTheme.navy,
-                      ),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      'Live class performance & item difficulty insights',
-                      style: TextStyle(fontSize: 12, color: CmTheme.slateText),
-                    ),
-                  ],
-                ),
-              ),
-              if (exams.isNotEmpty)
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 210),
-                  child: DropdownButtonHideUnderline(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: CmTheme.background,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: CmTheme.lineBorder),
-                      ),
-                      child: DropdownButton<int?>(
-                        value: selectedExamId,
-                        isDense: true,
-                        isExpanded: true,
-                        style: const TextStyle(
-                          fontFamily: CmTheme.fontFamily,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: CmTheme.navy,
-                        ),
-                        items: [
-                          const DropdownMenuItem<int?>(
-                            value: null,
-                            child: Text(
-                              'All Examinations',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          for (final e in exams.where((x) => x.id != null))
-                            DropdownMenuItem<int?>(
-                              value: e.id,
-                              child: Text(
-                                e.title,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                        ],
-                        onChanged: onSelectExamId,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 24,
-            runSpacing: 8,
-            children: [
-              _MiniStat('Class average', avgText),
-              _MiniStat('Highest', highText),
-              _MiniStat('Lowest', lowText),
-              _MiniStat('Checked', '${metrics.totalAttempts}'),
-            ],
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            height: 140,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                for (final e in buckets.entries)
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          Text(
-                            '${e.value}',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: CmTheme.navy,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Container(
-                            height: e.value == 0
-                                ? 4
-                                : (90 * e.value / maxCount),
-                            decoration: BoxDecoration(
-                              color: e.value == 0
-                                  ? CmTheme.lineBorder
-                                  : CmTheme.navy,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            e.key,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: CmTheme.slateText,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: metrics.lowAccuracyItems > 0
-                  ? CmTheme.amberWarning.withValues(alpha: 0.10)
-                  : CmTheme.background,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  metrics.lowAccuracyItems > 0
-                      ? Icons.warning_amber_rounded
-                      : Icons.lightbulb_outline_rounded,
-                  size: 20,
-                  color: metrics.lowAccuracyItems > 0
-                      ? CmTheme.amberWarning
-                      : CmTheme.slateText,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    metrics.insightBannerText,
-                    style: const TextStyle(fontSize: 13, color: CmTheme.navy),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MiniStat extends StatelessWidget {
-  const _MiniStat(this.label, this.value);
-  final String label, value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-            color: value == '—' ? CmTheme.slateText : CmTheme.navy,
-          ),
-        ),
-        Text(
-          label,
-          style: const TextStyle(fontSize: 12, color: CmTheme.slateText),
-        ),
-      ],
-    );
-  }
-}
-
 class _StatusChip extends StatelessWidget {
   const _StatusChip(this.status);
   final String status;
 
   Color get _color {
     switch (status) {
+      case 'Published':
       case 'Completed':
       case 'Finalized':
         return CmTheme.emeraldSuccess;
@@ -2372,7 +1827,9 @@ class _StatusChip extends StatelessWidget {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w700,
-              color: c == CmTheme.slateText ? CmTheme.slateText : CmTheme.navy,
+              color: status == 'Published'
+                  ? CmTheme.emeraldSuccess
+                  : (c == CmTheme.slateText ? CmTheme.slateText : CmTheme.navy),
             ),
           ),
         ],
