@@ -85,11 +85,8 @@ void _disposeControllersLater(List<TextEditingController> controllers) {
 }
 
 void _toast(BuildContext c, String m, {Color? color}) {
-  ScaffoldMessenger.of(c).showSnackBar(
-    color == null
-        ? SnackBar(content: Text(m))
-        : CmTheme.feedbackSnackBar(m, color: color),
-  );
+  final snackBar = CmTheme.feedbackSnackBar(m, color: color, minimumHeight: 40);
+  ScaffoldMessenger.of(c).showSnackBar(snackBar);
 }
 
 String _typeLabel(String t) {
@@ -204,15 +201,6 @@ String _statusLabel(String s) {
   }
 }
 
-Color _statusColor(String s) {
-  switch (s.toLowerCase()) {
-    case 'published':
-      return CmTheme.emeraldSuccess;
-    default:
-      return CmTheme.slateText;
-  }
-}
-
 EdgeInsets _pagePad(double w) {
   final h = w > 1160 ? (w - 1120) / 2 : (w < 600 ? 16.0 : 24.0);
   return EdgeInsets.fromLTRB(h, 24, h, 32);
@@ -242,6 +230,19 @@ InputDecoration _deco(String hint, {Widget? prefix}) => InputDecoration(
   errorBorder: _ob(CmTheme.redDanger),
   focusedErrorBorder: _ob(CmTheme.redDanger, 1.5),
 );
+
+InputDecoration _choiceDecoration(String letter, {required bool isCorrect}) {
+  final decoration = _deco('Option $letter');
+  if (!isCorrect) return decoration;
+
+  final border = _ob(CmTheme.emeraldSuccess);
+  return decoration.copyWith(
+    fillColor: CmTheme.emeraldSuccess.withValues(alpha: 0.08),
+    enabledBorder: border,
+    disabledBorder: border,
+    focusedBorder: _ob(CmTheme.emeraldSuccess, 1.5),
+  );
+}
 
 InputDecoration _floatingDeco(
   String label, {
@@ -423,13 +424,19 @@ class _StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = _statusColor(status);
+    final (background, foreground, dot) = switch (status.toLowerCase()) {
+      'manual' => (CmTheme.navyTint, CmTheme.navy, CmTheme.navy),
+      'published' => (
+        CmTheme.emeraldSuccess.withValues(alpha: 0.14),
+        CmTheme.navy,
+        CmTheme.emeraldSuccess,
+      ),
+      _ => (CmTheme.background, CmTheme.slateText, CmTheme.slateText),
+    };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: c == CmTheme.slateText
-            ? CmTheme.background
-            : c.withValues(alpha: 0.14),
+        color: background,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -438,7 +445,7 @@ class _StatusPill extends StatelessWidget {
           Container(
             width: 6,
             height: 6,
-            decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+            decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
           ),
           const SizedBox(width: 6),
           Text(
@@ -446,7 +453,7 @@ class _StatusPill extends StatelessWidget {
             style: TextStyle(
               fontSize: 11.5,
               fontWeight: FontWeight.w700,
-              color: c == CmTheme.slateText ? CmTheme.slateText : CmTheme.navy,
+              color: foreground,
             ),
           ),
         ],
@@ -2161,6 +2168,294 @@ class _UploadQuestionnaireDialogState
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+Future<({int sectionId, String questionType, int itemCount})?>
+showExamSectionDialog(
+  BuildContext context, {
+  required int examId,
+  required List<Map<String, dynamic>> sections,
+  Map<String, dynamic>? section,
+  int? sectionIndex,
+}) async {
+  final order = section == null
+      ? sections.fold<int>(
+              0,
+              (maxOrder, item) =>
+                  math.max(maxOrder, _id(item['section_order']) ?? 0),
+            ) +
+            1
+      : (_id(section['section_order']) ?? ((sectionIndex ?? 0) + 1));
+  final navigator = Navigator.of(context, rootNavigator: true);
+  final route =
+      DialogRoute<({int sectionId, String questionType, int itemCount})>(
+        context: context,
+        barrierDismissible: false,
+        barrierColor:
+            DialogTheme.of(context).barrierColor ?? CmTheme.dialogBackdrop,
+        themes: InheritedTheme.capture(from: context, to: navigator.context),
+        builder: (_) =>
+            _ExamSectionDialog(examId: examId, order: order, section: section),
+      );
+  final saved = await navigator.push(route);
+  await route.completed;
+  return saved;
+}
+
+class _ExamSectionDialog extends StatefulWidget {
+  const _ExamSectionDialog({
+    required this.examId,
+    required this.order,
+    this.section,
+  });
+
+  final int examId;
+  final int order;
+  final _Json? section;
+
+  @override
+  State<_ExamSectionDialog> createState() => _ExamSectionDialogState();
+}
+
+class _ExamSectionDialogState extends State<_ExamSectionDialog> {
+  static const _minValue = 1;
+  static const _maxValue = 99;
+  static const _chevron = Icon(Icons.expand_more, color: CmTheme.slateText);
+
+  final _formKey = GlobalKey<FormState>();
+  final _itemsController = TextEditingController(text: '$_minValue');
+  late final TextEditingController _nameController;
+  late final TextEditingController _pointsController;
+  late String _questionType;
+  bool _saving = false;
+  String? _error;
+
+  bool get _editing => widget.section != null;
+  String get _automaticName => _autoSectionName(widget.order, _questionType);
+
+  @override
+  void initState() {
+    super.initState();
+    final section = widget.section;
+    final type = section?['question_type']?.toString() ?? _kTypes.first;
+    _questionType = _kTypes.contains(type) ? type : _kTypes.first;
+    final name = section?['name']?.toString().trim() ?? '';
+    _nameController = TextEditingController(
+      text: name.isEmpty ? _automaticName : name,
+    );
+    _pointsController = TextEditingController(
+      text: section?['default_points']?.toString() ?? '$_minValue',
+    );
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _itemsController.dispose();
+    _pointsController.dispose();
+    super.dispose();
+  }
+
+  String? _validateWholeNumber(String? input) {
+    final value = int.tryParse(input?.trim() ?? '', radix: 10);
+    if (value == null || value < _minValue || value > _maxValue) {
+      return 'Use a whole number from $_minValue to $_maxValue.';
+    }
+    return null;
+  }
+
+  Widget _numberField(String label, TextEditingController controller) {
+    return _Field(
+      label,
+      TextFormField(
+        controller: controller,
+        enabled: !_saving,
+        keyboardType: TextInputType.number,
+        style: _inputText,
+        validator: _validateWholeNumber,
+        decoration: _deco('$_minValue').copyWith(
+          errorMaxLines: 3,
+          suffixIcon: PopupMenuButton<int>(
+            enabled: !_saving,
+            tooltip: 'Choose ${label.toLowerCase()}',
+            icon: _chevron,
+            color: CmTheme.surfaceWhite,
+            surfaceTintColor: CmTheme.transparent,
+            position: PopupMenuPosition.under,
+            constraints: const BoxConstraints(minWidth: 96, maxHeight: 288),
+            onSelected: (value) => controller.text = value.toString(),
+            itemBuilder: (_) => [
+              for (var value = _minValue; value <= _maxValue; value++)
+                PopupMenuItem(
+                  value: value,
+                  child: Text('$value', style: _inputText),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _save() async {
+    if (_saving || !_formKey.currentState!.validate()) return;
+    final name = _nameController.text.trim();
+    final pointsText = _pointsController.text.trim();
+    final points = _editing
+        ? num.parse(pointsText)
+        : int.parse(pointsText, radix: 10);
+    final itemCount = _editing
+        ? 0
+        : int.parse(_itemsController.text.trim(), radix: 10);
+
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+
+    try {
+      final token = await _token();
+      final int sectionId;
+      if (_editing) {
+        sectionId =
+            _id(widget.section?['id']) ??
+            (throw StateError('Invalid section ID.'));
+        await ApiService.updateExamSection(
+          token: token,
+          sectionId: sectionId,
+          name: name.isEmpty ? _automaticName : name,
+          defaultPoints: points,
+          questionType: _questionType,
+        );
+      } else {
+        final created = await ApiService.createExamSection(
+          token: token,
+          examId: widget.examId,
+          name: name.isEmpty ? _automaticName : name,
+          questionType: _questionType,
+          sectionOrder: widget.order,
+          defaultPoints: points,
+        );
+        sectionId =
+            _id(created['id']) ?? (throw StateError('Invalid section ID.'));
+      }
+      await resequenceExamSectionHeadings(token: token, examId: widget.examId);
+      if (!mounted) return;
+      Navigator.of(context).pop((
+        sectionId: sectionId,
+        questionType: _questionType,
+        itemCount: itemCount,
+      ));
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = _err(error);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: !_saving,
+      child: _CmDialog(
+        title: _editing ? 'Edit exam section' : 'Add exam section',
+        subtitle: 'Section details',
+        actions: [
+          OutlinedButton(
+            style: _outlineStyle,
+            onPressed: _saving ? null : () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: _primaryStyle,
+            onPressed: _saving ? null : _save,
+            child: _saving
+                ? const _Spin()
+                : Text(_editing ? 'Save changes' : 'Save section'),
+          ),
+        ],
+        child: Form(
+          key: _formKey,
+          autovalidateMode: AutovalidateMode.onUserInteraction,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Field(
+                'Section name',
+                TextField(
+                  controller: _nameController,
+                  enabled: !_saving,
+                  style: _inputText,
+                  decoration: _deco(_automaticName),
+                ),
+              ),
+              _Field(
+                'Question type',
+                DropdownButtonFormField<String>(
+                  initialValue: _questionType,
+                  isExpanded: true,
+                  icon: _chevron,
+                  style: _inputText,
+                  decoration: _deco('Question type'),
+                  items: [
+                    for (final type in _kTypes)
+                      DropdownMenuItem(
+                        value: type,
+                        child: Text(_typeLabel(type)),
+                      ),
+                  ],
+                  onChanged: _saving
+                      ? null
+                      : (value) {
+                          if (value == null) return;
+                          final name = _nameController.text.trim();
+                          final useAutomaticName =
+                              name.isEmpty || name == _automaticName;
+                          setState(() {
+                            _questionType = value;
+                            if (useAutomaticName)
+                              _nameController.text = _automaticName;
+                          });
+                        },
+                ),
+              ),
+              if (_editing)
+                _Field(
+                  'Default points per item',
+                  TextFormField(
+                    controller: _pointsController,
+                    enabled: !_saving,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    style: _inputText,
+                    decoration: _deco('$_minValue'),
+                    validator: (input) {
+                      final points = num.tryParse(input?.trim() ?? '');
+                      return points == null || !points.isFinite || points <= 0
+                          ? 'Enter points greater than zero.'
+                          : null;
+                    },
+                  ),
+                )
+              else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: _numberField('Items', _itemsController)),
+                    const SizedBox(width: 12),
+                    Expanded(child: _numberField('Points', _pointsController)),
+                  ],
+                ),
+              if (_error != null) _ErrorText(_error!),
+            ],
+          ),
         ),
       ),
     );
@@ -4110,7 +4405,6 @@ class _ExamsTabState extends State<ExamsTab> {
           ? _ExamBuilderPane(
               key: ValueKey('$openId-$_openedFromUpload'),
               examId: openId,
-              classes: _classes,
               initialBulkMode: _openedFromUpload,
               onBack: _closeBuilder,
             )
@@ -4401,7 +4695,7 @@ class _DraftQuestionEntry {
 
   final String uid;
   final int sectionId;
-  final String questionType;
+  String questionType;
   final TextEditingController textController;
   final TextEditingController answerController;
   final List<TextEditingController> choiceControllers;
@@ -4437,25 +4731,33 @@ class _DraftQuestionEntry {
 // EXAM BUILDER (in place)
 // =============================================================
 
-Widget buildAnswerKeyExam({
+Widget buildExamBuilderPane({
   required int examId,
-  required List<Map<String, dynamic>> classes,
   required VoidCallback onBack,
-}) => _ExamBuilderPane(examId: examId, classes: classes, onBack: onBack);
+  int? initialSectionId,
+  int initialItemCount = 0,
+}) => _ExamBuilderPane(
+  examId: examId,
+  onBack: onBack,
+  initialSectionId: initialSectionId,
+  initialItemCount: initialItemCount,
+);
 
 class _ExamBuilderPane extends StatefulWidget {
   const _ExamBuilderPane({
     super.key,
     required this.examId,
-    required this.classes,
     required this.onBack,
     this.initialBulkMode = false,
+    this.initialSectionId,
+    this.initialItemCount = 0,
   });
 
   final int examId;
-  final List<_Json> classes;
   final VoidCallback onBack;
   final bool initialBulkMode;
+  final int? initialSectionId;
+  final int initialItemCount;
 
   @override
   State<_ExamBuilderPane> createState() => _ExamBuilderPaneState();
@@ -4470,6 +4772,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
   List<_Json> _sections = [];
   final Map<int, List<_Json>> _questions = {};
   final Map<int, List<_Json>> _acceptable = {};
+  List<_Json> _classes = [];
   List<_Json> _students = [];
   int? _answerSheetClassId;
 
@@ -4497,6 +4800,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
   int? _editingQuestionId;
 
   int _draftCounter = 0;
+  late int _initialItemCount = widget.initialItemCount;
 
   @override
   void initState() {
@@ -4706,6 +5010,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
       if (!mounted) return;
       setState(() {
         _exam = examWithHeaders;
+        _classes = allClasses;
         _sections = sections;
         if (_expandedId == null && sections.isNotEmpty) {
           _expandedId = _id(sections.first['id']);
@@ -4725,6 +5030,20 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         }
         _loading = false;
       });
+      final initialSectionId = widget.initialSectionId;
+      if (initialSectionId != null && _initialItemCount > 0 && !_isPublished) {
+        final section = sections
+            .where((section) => _id(section['id']) == initialSectionId)
+            .firstOrNull;
+        if (section != null) {
+          _addDrafts(
+            initialSectionId,
+            section['question_type']?.toString() ?? 'multiple_choice',
+            count: _initialItemCount,
+          );
+          _initialItemCount = 0;
+        }
+      }
     } catch (e) {
       if (!mounted) return;
       if (silent) {
@@ -4999,7 +5318,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     if (exam == null) return;
     final updatedId = await showExamDetailsModal(
       context,
-      classes: widget.classes,
+      classes: _classes,
       exam: exam,
     );
     if (updatedId != null) await _load(silent: true);
@@ -5008,173 +5327,29 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
   // ---------- sections (with automatic Part I / Part II section naming) ----------
 
   Future<void> _showSectionDialog({_Json? section, int? sectionIndex}) async {
-    final editing = section != null;
-    var type = section?['question_type']?.toString() ?? 'multiple_choice';
-    if (!_kTypes.contains(type)) type = 'multiple_choice';
-
-    final nextOrder =
-        _sections.fold<int>(0, (m, s) {
-          final o = int.tryParse(s['section_order']?.toString() ?? '') ?? 0;
-          return o > m ? o : m;
-        }) +
-        1;
-
-    final effectiveOrder = editing
-        ? (int.tryParse(section['section_order']?.toString() ?? '') ??
-              ((sectionIndex ?? 0) + 1))
-        : nextOrder;
-
-    final initialName = editing
-        ? ((section['name']?.toString().trim().isNotEmpty ?? false)
-              ? section['name'].toString().trim()
-              : _autoSectionName(effectiveOrder, type))
-        : _autoSectionName(effectiveOrder, type);
-
-    final nameC = TextEditingController(text: initialName);
-    final ptsC = TextEditingController(
-      text: editing ? _trim(_num(section['default_points'])) : '1',
+    final saved = await showExamSectionDialog(
+      context,
+      examId: widget.examId,
+      sections: _sections,
+      section: section,
+      sectionIndex: sectionIndex,
     );
-    bool saving = false;
-    String? error;
+    if (saved == null || !mounted) return;
 
-    final created = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setS) {
-          Future<void> save() async {
-            final rawName = nameC.text.trim();
-            final name = rawName.isEmpty
-                ? _autoSectionName(effectiveOrder, type)
-                : rawName;
-            final points = num.tryParse(ptsC.text.trim());
-            if (points == null || !points.isFinite || points <= 0) {
-              setS(() => error = 'Enter default points greater than zero.');
-              return;
-            }
-            setS(() {
-              saving = true;
-              error = null;
-            });
-            try {
-              final token = await _token();
-              if (editing) {
-                final sectionId = _id(section['id']);
-                if (sectionId == null) throw Exception('Invalid section ID.');
-                await ApiService.updateExamSection(
-                  token: token,
-                  sectionId: sectionId,
-                  name: name,
-                  defaultPoints: points,
-                  questionType: type,
-                );
-              } else {
-                final createdSec = await ApiService.createExamSection(
-                  token: token,
-                  examId: widget.examId,
-                  name: name,
-                  questionType: type,
-                  sectionOrder: nextOrder,
-                  defaultPoints: points,
-                );
-                final newSid = _id(createdSec['id']);
-                if (newSid != null) {
-                  _expandedId = newSid;
-                }
-              }
-              await resequenceExamSectionHeadings(
-                token: token,
-                examId: widget.examId,
-              );
-              if (dialogContext.mounted) Navigator.pop(dialogContext, true);
-            } catch (e) {
-              setS(() {
-                saving = false;
-                error = _err(e);
-              });
-            }
-          }
-
-          return _CmDialog(
-            title: editing ? 'Edit exam section' : 'Add exam section',
-            subtitle: 'Section details',
-            actions: [
-              OutlinedButton(
-                style: _outlineStyle,
-                onPressed: saving
-                    ? null
-                    : () => Navigator.pop(dialogContext, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                style: _primaryStyle,
-                onPressed: saving ? null : save,
-                child: saving
-                    ? const _Spin()
-                    : Text(editing ? 'Save changes' : 'Save section'),
-              ),
-            ],
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _Field(
-                  'Section name',
-                  TextField(
-                    controller: nameC,
-                    enabled: !saving,
-                    style: _inputText,
-                    decoration: _deco(_autoSectionName(effectiveOrder, type)),
-                  ),
-                ),
-                _Field(
-                  'Question type',
-                  DropdownButtonFormField<String>(
-                    initialValue: type,
-                    isExpanded: true,
-                    style: _inputText,
-                    decoration: _deco('Question type'),
-                    items: [
-                      for (final t in _kTypes)
-                        DropdownMenuItem(value: t, child: Text(_typeLabel(t))),
-                    ],
-                    onChanged: saving
-                        ? null
-                        : (v) {
-                            if (v != null) {
-                              setS(() {
-                                type = v;
-                                // Automatically generate section name based on
-                                // the selected exam type and section sequence.
-                                nameC.text = _autoSectionName(
-                                  effectiveOrder,
-                                  v,
-                                );
-                              });
-                            }
-                          },
-                  ),
-                ),
-                _Field(
-                  'Default points per item',
-                  TextField(
-                    controller: ptsC,
-                    enabled: !saving,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    style: _inputText,
-                    decoration: _deco('1'),
-                  ),
-                ),
-                if (error != null) _ErrorText(error!),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-
-    _disposeControllersLater([nameC, ptsC]);
-    if (created == true) await _load(silent: true);
+    if (saved.itemCount > 0) {
+      _addDrafts(saved.sectionId, saved.questionType, count: saved.itemCount);
+    } else {
+      for (final draft
+          in _drafts[saved.sectionId] ?? const <_DraftQuestionEntry>[]) {
+        if (draft.questionType == saved.questionType) continue;
+        draft
+          ..questionType = saved.questionType
+          ..pickedAnswer = null
+          ..errorMessage = null;
+        draft.answerController.clear();
+      }
+    }
+    await _load(silent: true);
   }
 
   Future<void> _deleteSection(int sectionId, String name) async {
@@ -5209,15 +5384,19 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
 
   // ---------- questions, bulk save & shuffling ----------
 
-  void _addDraft(int sectionId, String questionType) {
+  void _addDrafts(int sectionId, String questionType, {int count = 1}) {
     setState(() {
       _expandedId = sectionId;
-      final entry = _DraftQuestionEntry(
-        uid: 'draft_${++_draftCounter}',
-        sectionId: sectionId,
-        questionType: questionType,
-      );
-      _drafts.putIfAbsent(sectionId, () => []).add(entry);
+      final drafts = _drafts.putIfAbsent(sectionId, () => []);
+      for (var i = 0; i < count; i++) {
+        drafts.add(
+          _DraftQuestionEntry(
+            uid: 'draft_${++_draftCounter}',
+            sectionId: sectionId,
+            questionType: questionType,
+          ),
+        );
+      }
     });
   }
 
@@ -5933,7 +6112,11 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                     style: _outlineStyle,
                     onPressed: widget.onBack,
                     icon: const Icon(Icons.arrow_back, size: 16),
-                    label: const Text('All exams'),
+                    label: Text(
+                      widget.initialSectionId == null
+                          ? 'All exams'
+                          : 'Exam sections',
+                    ),
                   ),
                 ],
               ),
@@ -5973,7 +6156,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 ],
               ),
               const SizedBox(height: 16),
-              _validationBanner(status),
+              _validationBanner(),
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 18),
                 child: Divider(height: 1, color: CmTheme.lineBorder),
@@ -6000,11 +6183,15 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
     );
   }
 
-  Widget _validationBanner(String status) {
+  Widget _validationBanner() {
     final v = _validation;
     final ok = v.isValid;
-    final isPublished = status.toLowerCase() == 'published';
-    final accent = ok ? CmTheme.emeraldSuccess : CmTheme.redDanger;
+    final isPublished = _isPublished;
+    final hasWarnings = !isPublished && v.itemCountWarnings.isNotEmpty;
+    final ready = isPublished || (ok && !hasWarnings);
+    final accent = ready
+        ? CmTheme.emeraldSuccess
+        : (ok ? CmTheme.amberWarning : CmTheme.redDanger);
 
     return _Card(
       padding: 16,
@@ -6015,33 +6202,19 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Icon(
-                ok ? Icons.check_circle_outline : Icons.error_outline,
+                ready ? Icons.check_circle_outline : Icons.info_outline,
                 size: 20,
                 color: accent,
               ),
               const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${v.assessmentLabel} Question Requirements',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
-                        color: CmTheme.navy,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      'Each included question type requires at least '
-                      '${v.requiredPerQuestionType} questions.',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: CmTheme.slateText,
-                      ),
-                    ),
-                  ],
+              const Expanded(
+                child: Text(
+                  'Publishing',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: CmTheme.navy,
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
@@ -6080,17 +6253,31 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 ),
             ],
           ),
-          if (!ok) ...[
+          if (!isPublished && !ok) ...[
             const SizedBox(height: 8),
             for (final err in v.errors)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: Text(
                   '• $err',
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 12,
-                    color: Theme.of(context).colorScheme.error,
+                    color: CmTheme.redDanger,
                     fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+          ],
+          if (hasWarnings) ...[
+            const SizedBox(height: 8),
+            for (final warning in v.itemCountWarnings)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  warning,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: CmTheme.slateText,
                   ),
                 ),
               ),
@@ -6274,6 +6461,10 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         : 'Items ${_answerKeyOnly ? numberOffset + 1 : (qs.first['question_number'] ?? 1)}'
               '–${_answerKeyOnly ? numberOffset + qs.length : (qs.last['question_number'] ?? qs.length)}'
               ' (${qs.length} $itemLabel)';
+    final draftNumberOffset = _answerKeyOnly
+        ? numberOffset + qs.length
+        : (int.tryParse(qs.lastOrNull?['question_number']?.toString() ?? '') ??
+              0);
 
     return Padding(
       key: ValueKey('section-${sid ?? index}'),
@@ -6341,10 +6532,12 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                         iconSize: 18,
                         color: CmTheme.slateText,
                         icon: const Icon(Icons.edit_outlined),
-                        onPressed: () => _showSectionDialog(
-                          section: section,
-                          sectionIndex: index,
-                        ),
+                        onPressed: _savingBulk
+                            ? null
+                            : () => _showSectionDialog(
+                                section: section,
+                                sectionIndex: index,
+                              ),
                       ),
                       IconButton(
                         tooltip: 'Delete section',
@@ -6352,7 +6545,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                         iconSize: 18,
                         color: CmTheme.slateText,
                         icon: const Icon(Icons.delete_outline),
-                        onPressed: sid == null
+                        onPressed: _savingBulk || sid == null
                             ? null
                             : () => _deleteSection(sid, name),
                       ),
@@ -6411,31 +6604,30 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                     for (var i = 0; i < drafts.length; i++)
                       _buildBulkDraftQuestionCard(
                         entry: drafts[i],
-                        number: numberOffset + qs.length + i + 1,
+                        number: draftNumberOffset + i + 1,
                         pointsLabel: _trim(_num(section['default_points'])),
                       ),
                     if (!_isPublished) ...[
                       const SizedBox(height: 4),
-                      Row(
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 8,
                         children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              style: _outlineStyle.copyWith(
-                                backgroundColor: WidgetStatePropertyAll(
-                                  CmTheme.background,
-                                ),
-                              ),
-                              onPressed: _savingBulk
-                                  ? null
-                                  : () => _addDraft(sid, type),
-                              icon: const Icon(Icons.add, size: 16),
-                              label: Text(
-                                _answerKeyOnly ? 'Add item' : 'Add question',
+                          OutlinedButton.icon(
+                            style: _outlineStyle.copyWith(
+                              backgroundColor: WidgetStatePropertyAll(
+                                CmTheme.background,
                               ),
                             ),
+                            onPressed: _savingBulk
+                                ? null
+                                : () => _addDrafts(sid, type),
+                            icon: const Icon(Icons.add, size: 16),
+                            label: Text(
+                              _answerKeyOnly ? 'Add item' : 'Add question',
+                            ),
                           ),
-                          if (_showCentralizedSaveButton) ...[
-                            const SizedBox(width: 10),
+                          if (_showCentralizedSaveButton)
                             FilledButton.icon(
                               style: _saveStyle.copyWith(
                                 minimumSize: const WidgetStatePropertyAll(
@@ -6457,7 +6649,6 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                                     : 'Save Questions and Answers',
                               ),
                             ),
-                          ],
                         ],
                       ),
                     ],
@@ -6500,15 +6691,15 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
               height: 26,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: isSelected ? CmTheme.navy : CmTheme.background,
+                color: isSelected ? CmTheme.emeraldSuccess : CmTheme.background,
                 borderRadius: BorderRadius.circular(7),
               ),
               child: Text(
                 letter,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w800,
-                  color: isSelected ? CmTheme.surfaceWhite : CmTheme.navy,
+                  color: CmTheme.navy,
                 ),
               ),
             ),
@@ -6524,14 +6715,7 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
                 }
               },
               style: _inputText,
-              decoration: _deco('Option $letter').copyWith(
-                fillColor: isSelected
-                    ? CmTheme.navy.withValues(alpha: 0.08)
-                    : CmTheme.surfaceWhite,
-                enabledBorder: _ob(
-                  isSelected ? CmTheme.navy : CmTheme.lineBorder,
-                ),
-              ),
+              decoration: _choiceDecoration(letter, isCorrect: isSelected),
             ),
           ),
         ],
@@ -6588,44 +6772,49 @@ class _ExamBuilderPaneState extends State<_ExamBuilderPane> {
         children: [
           Row(
             children: [
-              Text(
-                '${_answerKeyOnly ? 'Item' : 'Question'} $number',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: CmTheme.navy,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                '$pointsLabel ${pointsLabel == '1' ? 'pt' : 'pts'}',
-                style: const TextStyle(
-                  fontSize: 11.5,
-                  color: CmTheme.slateText,
-                ),
-              ),
-              if (missingKey) ...[
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: CmTheme.amberWarning.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Text(
-                    'Answer key needed',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: CmTheme.navy,
+              Expanded(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      '${_answerKeyOnly ? 'Item' : 'Question'} $number',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: CmTheme.navy,
+                      ),
                     ),
-                  ),
+                    Text(
+                      '$pointsLabel ${pointsLabel == '1' ? 'pt' : 'pts'}',
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: CmTheme.slateText,
+                      ),
+                    ),
+                    if (missingKey)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: CmTheme.amberWarning.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Text(
+                          'Answer key needed',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: CmTheme.navy,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-              ],
-              const Spacer(),
+              ),
               IconButton(
                 tooltip: 'Discard question',
                 visualDensity: VisualDensity.compact,
@@ -7258,18 +7447,22 @@ Widget _buildMultipleChoiceKeyTiles({
                   vertical: 7,
                 ),
                 decoration: BoxDecoration(
-                  color: isSelected ? CmTheme.navy : CmTheme.background,
+                  color: isSelected
+                      ? CmTheme.emeraldSuccess
+                      : CmTheme.background,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: isSelected ? CmTheme.navy : CmTheme.lineBorder,
+                    color: isSelected
+                        ? CmTheme.emeraldSuccess
+                        : CmTheme.lineBorder,
                   ),
                 ),
                 child: Text(
                   letter,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w800,
-                    color: isSelected ? CmTheme.surfaceWhite : CmTheme.navy,
+                    color: CmTheme.navy,
                   ),
                 ),
               ),
@@ -7503,15 +7696,15 @@ class _DraftQuestionState extends State<_DraftQuestion> {
             height: 26,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: isSelected ? CmTheme.navy : CmTheme.background,
+              color: isSelected ? CmTheme.emeraldSuccess : CmTheme.background,
               borderRadius: BorderRadius.circular(7),
             ),
             child: Text(
               letter,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w800,
-                color: isSelected ? CmTheme.surfaceWhite : CmTheme.navy,
+                color: CmTheme.navy,
               ),
             ),
           ),
@@ -7522,12 +7715,7 @@ class _DraftQuestionState extends State<_DraftQuestion> {
             controller: _choices[i],
             enabled: !_saving,
             style: _inputText,
-            decoration: _deco('Option $letter').copyWith(
-              fillColor: isSelected
-                  ? CmTheme.navy.withValues(alpha: 0.08)
-                  : CmTheme.surfaceWhite,
-              enabledBorder: _ob(CmTheme.lineBorder),
-            ),
+            decoration: _choiceDecoration(letter, isCorrect: isSelected),
           ),
         ),
       ],

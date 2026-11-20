@@ -6,15 +6,15 @@ import '../services/answer_sheet_pdf_service.dart';
 import '../services/api_service.dart';
 import '../services/assessment_validator.dart';
 import '../services/auth_storage.dart';
-import '../services/question_paper_import_service.dart';
 import '../services/question_paper_pdf_service.dart';
 import 'answer_sheet_preview_screen.dart';
 import 'exam_preview_screen.dart';
 import 'exams_tab.dart'
     show
-        buildAnswerKeyExam,
+        buildExamBuilderPane,
         importParsedSectionsIntoExam,
         resequenceExamSectionHeadings,
+        showExamSectionDialog,
         showUploadQuestionnaireModal;
 import 'questions_screen.dart';
 import 'teacher_dashboard.dart' show openTeacherScansForExam;
@@ -34,7 +34,6 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
   String? _errorMessage;
 
   Map<String, dynamic>? _exam;
-  List<Map<String, dynamic>> _answerKeyClasses = [];
   List<Map<String, dynamic>> _sections = [];
   final Map<int, List<Map<String, dynamic>>> _questions = {};
   List<Map<String, dynamic>> _students = [];
@@ -70,11 +69,9 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
 
       final exam = matchingExams.first;
       if (exam['creation_mode'] == 'answer_key') {
-        final classes = await ApiService.getClasses(token);
         if (!mounted) return;
         setState(() {
           _exam = exam;
-          _answerKeyClasses = classes;
           _isLoading = false;
         });
         return;
@@ -443,216 +440,31 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
     Map<String, dynamic>? section,
     int? sectionIndex,
   }) async {
-    final editing = section != null;
-    String questionType =
-        section?['question_type']?.toString() ?? 'multiple_choice';
-    final nextOrder =
-        _sections.fold<int>(0, (maxOrder, sec) {
-          final order =
-              int.tryParse(sec['section_order']?.toString() ?? '') ?? 0;
-          return order > maxOrder ? order : maxOrder;
-        }) +
-        1;
-    final effectiveOrder = editing
-        ? (int.tryParse(section['section_order']?.toString() ?? '') ??
-              ((sectionIndex ?? 0) + 1))
-        : nextOrder;
-
-    final initialName = editing
-        ? ((section['name']?.toString().trim().isNotEmpty ?? false)
-              ? section['name'].toString().trim()
-              : QuestionPaperImportService.autoSectionName(
-                  effectiveOrder,
-                  questionType,
-                ))
-        : QuestionPaperImportService.autoSectionName(
-            effectiveOrder,
-            questionType,
-          );
-
-    final nameController = TextEditingController(text: initialName);
-    final pointsController = TextEditingController(
-      text: editing ? (section['default_points']?.toString() ?? '1') : '1',
+    final saved = await showExamSectionDialog(
+      context,
+      examId: widget.examId,
+      sections: _sections,
+      section: section,
+      sectionIndex: sectionIndex,
     );
-    bool saving = false;
-    String? error;
-
-    try {
-      final created = await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => StatefulBuilder(
-          builder: (dialogContext, updateDialog) => AlertDialog(
-            title: Text(editing ? 'Edit Exam Section' : 'Add Exam Section'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: nameController,
-                    enabled: !saving,
-                    decoration: InputDecoration(
-                      labelText: 'Section Name',
-                      hintText: QuestionPaperImportService.autoSectionName(
-                        effectiveOrder,
-                        questionType,
-                      ),
-                      border: const OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  DropdownButtonFormField<String>(
-                    initialValue: questionType,
-                    decoration: const InputDecoration(
-                      labelText: 'Question Type',
-                      border: OutlineInputBorder(),
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'multiple_choice',
-                        child: Text('Multiple Choice'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'true_false',
-                        child: Text('True or False'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'identification',
-                        child: Text('Identification'),
-                      ),
-                    ],
-                    onChanged: saving
-                        ? null
-                        : (value) {
-                            if (value != null) {
-                              updateDialog(() {
-                                questionType = value;
-                                nameController.text =
-                                    QuestionPaperImportService.autoSectionName(
-                                      effectiveOrder,
-                                      value,
-                                    );
-                              });
-                            }
-                          },
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: pointsController,
-                    enabled: !saving,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(
-                      labelText: 'Default Points per Item',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  if (error != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      error!,
-                      style: TextStyle(
-                        color: Theme.of(dialogContext).colorScheme.error,
-                      ),
-                    ),
-                  ],
-                ],
+    if (saved == null || !mounted) return;
+    if (saved.itemCount > 0) {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (routeContext) => Scaffold(
+            body: SafeArea(
+              child: buildExamBuilderPane(
+                examId: widget.examId,
+                initialSectionId: saved.sectionId,
+                initialItemCount: saved.itemCount,
+                onBack: () => Navigator.maybePop(routeContext),
               ),
             ),
-            actions: [
-              TextButton(
-                onPressed: saving
-                    ? null
-                    : () => Navigator.pop(dialogContext, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: saving
-                    ? null
-                    : () async {
-                        final rawName = nameController.text.trim();
-                        final name = rawName.isEmpty
-                            ? QuestionPaperImportService.autoSectionName(
-                                effectiveOrder,
-                                questionType,
-                              )
-                            : rawName;
-                        final points = num.tryParse(
-                          pointsController.text.trim(),
-                        );
-                        if (points == null || points <= 0) {
-                          updateDialog(
-                            () => error = 'Enter points greater than zero.',
-                          );
-                          return;
-                        }
-                        updateDialog(() {
-                          saving = true;
-                          error = null;
-                        });
-                        try {
-                          final token = await AuthStorage.getToken();
-                          if (token == null || token.isEmpty) {
-                            throw Exception('Please log in again.');
-                          }
-                          if (editing) {
-                            final sectionId = int.tryParse(
-                              section['id']?.toString() ?? '',
-                            );
-                            if (sectionId == null) {
-                              throw Exception('Invalid section ID.');
-                            }
-                            await ApiService.updateExamSection(
-                              token: token,
-                              sectionId: sectionId,
-                              name: name,
-                              defaultPoints: points,
-                              questionType: questionType,
-                            );
-                          } else {
-                            await ApiService.createExamSection(
-                              token: token,
-                              examId: widget.examId,
-                              name: name,
-                              questionType: questionType,
-                              sectionOrder: nextOrder,
-                              defaultPoints: points,
-                            );
-                          }
-                          await resequenceExamSectionHeadings(
-                            token: token,
-                            examId: widget.examId,
-                          );
-                          if (dialogContext.mounted) {
-                            Navigator.pop(dialogContext, true);
-                          }
-                        } catch (e) {
-                          updateDialog(() {
-                            saving = false;
-                            error = e.toString().replaceFirst(
-                              'Exception: ',
-                              '',
-                            );
-                          });
-                        }
-                      },
-                child: saving
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Text(editing ? 'Save Changes' : 'Save Section'),
-              ),
-            ],
           ),
         ),
       );
-      if (created == true) await _loadExam();
-    } finally {
-      nameController.dispose();
-      pointsController.dispose();
     }
+    if (mounted) await _loadExam();
   }
 
   String _pdfFileName(String prefix, Map<String, dynamic> exam) =>
@@ -670,27 +482,12 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
     return '${prefix}_${title.isEmpty ? 'exam' : title}.$extension';
   }
 
-  String _formatQuestionType(String type) {
-    switch (type) {
-      case 'multiple_choice':
-        return 'Multiple Choice';
-
-      case 'true_false':
-        return 'True or False';
-
-      case 'identification':
-        return 'Identification';
-
-      default:
-        return type;
-    }
-  }
-
   Widget _buildValidationCard() {
     final validation = _validation;
-    final status = (_exam?['status']?.toString() ?? 'draft').toLowerCase();
+    final published = _isPublished;
     final isValid = validation.isValid;
-    final color = isValid ? CmTheme.emeraldSuccess : CmTheme.redDanger;
+    final hasWarnings = !published && validation.itemCountWarnings.isNotEmpty;
+    final ready = published || (isValid && !hasWarnings);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -702,29 +499,25 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
             Row(
               children: [
                 Icon(
-                  isValid ? Icons.check_circle : Icons.error_outline,
-                  color: color,
+                  ready ? Icons.check_circle_outline : Icons.info_outline,
+                  color: ready
+                      ? CmTheme.emeraldSuccess
+                      : (isValid ? CmTheme.amberWarning : CmTheme.redDanger),
                 ),
                 const SizedBox(width: 8),
-                Expanded(
+                const Expanded(
                   child: Text(
-                    '${validation.assessmentLabel} Question Requirements',
+                    'Publishing',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 15,
-                      color: isValid ? CmTheme.navy : CmTheme.redDanger,
+                      color: CmTheme.navy,
                     ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Each included question type requires at least '
-              '${validation.requiredPerQuestionType} questions across all sections of that type.',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            if (!isValid) ...[
+            if (!published && !isValid) ...[
               const SizedBox(height: 8),
               for (final err in validation.errors)
                 Padding(
@@ -733,13 +526,27 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                     '• $err',
                     style: TextStyle(
                       fontSize: 12.5,
-                      color: Theme.of(context).colorScheme.error,
+                      color: CmTheme.redDanger,
+                    ),
+                  ),
+                ),
+            ],
+            if (hasWarnings) ...[
+              const SizedBox(height: 8),
+              for (final warning in validation.itemCountWarnings)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    warning,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      color: CmTheme.slateText,
                     ),
                   ),
                 ),
             ],
             const SizedBox(height: 12),
-            if (status == 'published')
+            if (published)
               FilledButton.icon(
                 onPressed: () =>
                     openTeacherScansForExam(context, widget.examId),
@@ -780,9 +587,8 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
         _exam?['creation_mode'] == 'answer_key') {
       return Scaffold(
         body: SafeArea(
-          child: buildAnswerKeyExam(
+          child: buildExamBuilderPane(
             examId: widget.examId,
-            classes: _answerKeyClasses,
             onBack: () => Navigator.maybePop(context),
           ),
         ),
@@ -823,17 +629,6 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
           ),
         ),
       );
-    }
-
-    // Compute aggregate question counts per type across repeated sections
-    final typeTotals = <String, int>{};
-    for (final s in _sections) {
-      final sid = int.tryParse(s['id']?.toString() ?? '');
-      final qType = AssessmentValidator.normalizeQuestionType(
-        s['question_type']?.toString(),
-      );
-      final count = sid == null ? 0 : (_questions[sid]?.length ?? 0);
-      typeTotals[qType] = (typeTotals[qType] ?? 0) + count;
     }
 
     return RefreshIndicator(
@@ -998,15 +793,11 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
               builder: (context) {
                 final section = _sections[idx];
                 final type = section['question_type']?.toString() ?? '';
-                final normType = AssessmentValidator.normalizeQuestionType(
-                  type,
-                );
                 final sectionId = int.tryParse(section['id']?.toString() ?? '');
                 final secQs = sectionId == null
                     ? const <Map<String, dynamic>>[]
                     : (_questions[sectionId] ?? const <Map<String, dynamic>>[]);
                 final qCount = secQs.length;
-                final aggTypeCount = typeTotals[normType] ?? qCount;
                 final rangeLabel = secQs.isEmpty
                     ? '0 questions'
                     : 'Items ${secQs.first['question_number'] ?? 1}\u2013${secQs.last['question_number'] ?? qCount} ($qCount items)';
@@ -1025,7 +816,6 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                                   sectionName:
                                       section['name']?.toString() ?? 'Section',
                                   questionType: type,
-                                  aggregateTypeQuestionCount: aggTypeCount,
                                 ),
                               ),
                             );
@@ -1040,9 +830,9 @@ class _ExamBuilderScreenState extends State<ExamBuilderScreen> {
                     ),
                     title: Text(section['name']?.toString() ?? 'Section'),
                     subtitle: Text(
-                      '${_formatQuestionType(type)} • '
+                      '${AssessmentValidator.questionTypeLabel(type)} • '
                       '${section['default_points'] ?? '1'} pts/item • '
-                      '$rangeLabel • $aggTypeCount/5 type min',
+                      '$rangeLabel',
                     ),
                     trailing: _isPublished
                         ? null

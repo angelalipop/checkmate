@@ -198,7 +198,7 @@ class _ExamsScreenState extends State<ExamsScreen> {
     if (createdId != null) {
       await _loadData();
       if (!mounted) return;
-      if (answerKeyOnly && createdId > 0) {
+      if (createdId > 0) {
         await Navigator.push(
           context,
           MaterialPageRoute(

@@ -27,14 +27,12 @@ class QuestionsScreen extends StatefulWidget {
   final int sectionId;
   final String sectionName;
   final String questionType;
-  final int? aggregateTypeQuestionCount;
 
   const QuestionsScreen({
     super.key,
     required this.sectionId,
     required this.sectionName,
     required this.questionType,
-    this.aggregateTypeQuestionCount,
   });
 
   @override
@@ -723,12 +721,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
       );
     }
 
-    final effectiveTypeCount =
-        widget.aggregateTypeQuestionCount ?? _questions.length;
-    final isValidSection = effectiveTypeCount >= 5;
-    final statusColor = isValidSection
-        ? CmTheme.emeraldSuccess
-        : CmTheme.redDanger;
+    final count = _questions.length;
 
     return Column(
       children: [
@@ -737,31 +730,23 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
           margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: isValidSection
-                ? CmTheme.emeraldSuccess.withValues(alpha: 0.10)
-                : CmTheme.surfaceWhite,
+            color: CmTheme.surfaceWhite,
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: statusColor.withValues(alpha: 0.4)),
+            border: Border.all(color: CmTheme.lineBorder),
           ),
           child: Row(
             children: [
-              Icon(
-                isValidSection
-                    ? Icons.check_circle_outline
-                    : Icons.error_outline,
-                color: statusColor,
+              const Icon(
+                Icons.format_list_numbered,
+                color: CmTheme.slateText,
                 size: 20,
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  isValidSection
-                      ? '${_formatQuestionType(widget.questionType)} minimum met '
-                            '(${_questions.length} in this section • $effectiveTypeCount/5 total for type).'
-                      : '${_formatQuestionType(widget.questionType)} requires at least 5 questions '
-                            'across sections of this type (currently $effectiveTypeCount/5; add ${5 - effectiveTypeCount} more).',
-                  style: TextStyle(
-                    color: isValidSection ? CmTheme.navy : CmTheme.redDanger,
+                  '$count ${count == 1 ? 'question' : 'questions'} in this section.',
+                  style: const TextStyle(
+                    color: CmTheme.navy,
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
                   ),

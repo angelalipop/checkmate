@@ -1,4 +1,4 @@
-/// Server-side minimum question validation for CheckMate assessments.
+/// Per-format item counts included in an assessment's validation response.
 class ExamQuestionTypeRequirement {
   const ExamQuestionTypeRequirement({
     required this.questionType,
@@ -36,6 +36,7 @@ class ExamValidationResult {
     required this.requiredPerQuestionType,
     required this.questionTypeRequirements,
     required this.errors,
+    this.itemCountWarnings = const [],
   });
 
   final String assessmentType;
@@ -45,6 +46,7 @@ class ExamValidationResult {
   final int requiredPerQuestionType;
   final List<ExamQuestionTypeRequirement> questionTypeRequirements;
   final List<String> errors;
+  final List<String> itemCountWarnings;
 
   bool get isValid => errors.isEmpty;
 
@@ -53,8 +55,7 @@ class ExamValidationResult {
 
   String get summaryMessage {
     if (isValid) {
-      return '$assessmentLabel meets all minimum question requirements '
-          '($actualTotal/$requiredTotal total questions).';
+      return '$assessmentLabel meets the publishing requirements.';
     }
     return errors.join(' ');
   }
@@ -70,6 +71,7 @@ class ExamValidationResult {
         'question_types':
             questionTypeRequirements.map((r) => r.toJson()).toList(),
         'errors': errors,
+        'item_count_warnings': itemCountWarnings,
         'message': summaryMessage,
       };
 }
@@ -77,21 +79,30 @@ class ExamValidationResult {
 class ExamValidator {
   ExamValidator._();
 
-  static const int minQuestionsPerIncludedType = 5;
+  static const int minQuestionsPerIncludedType = 0;
+  static const int _minQuestionsToPublish = 1;
 
   static const Map<String, int> minTotalByAssessmentType = <String, int>{
-    'quiz': 5,
-    'short_quiz': 5,
+    'quiz': _minQuestionsToPublish,
+    'short_quiz': _minQuestionsToPublish,
+    'long_quiz': _minQuestionsToPublish,
+    'performance_task': _minQuestionsToPublish,
+    'laboratory': _minQuestionsToPublish,
+    'prelim': _minQuestionsToPublish,
+    'midterm': _minQuestionsToPublish,
+    'prefinal': _minQuestionsToPublish,
+    'pre_finals': _minQuestionsToPublish,
+    'final': _minQuestionsToPublish,
+    'finals': _minQuestionsToPublish,
+    'other': _minQuestionsToPublish,
+  };
+
+  static const Map<String, int> _recommendedTotalByAssessmentType = {
     'long_quiz': 15,
-    'performance_task': 5,
-    'laboratory': 5,
     'prelim': 35,
     'midterm': 35,
     'prefinal': 35,
-    'pre_finals': 35,
     'final': 35,
-    'finals': 35,
-    'other': 5,
   };
 
   static const Set<String> supportedQuestionTypes = <String>{
@@ -227,7 +238,7 @@ class ExamValidator {
       title: title,
       description: description,
     );
-    return minTotalByAssessmentType[normalized] ?? 5;
+    return minTotalByAssessmentType[normalized] ?? _minQuestionsToPublish;
   }
 
   static String normalizeQuestionType(String? rawType) {
@@ -268,14 +279,13 @@ class ExamValidator {
     }
   }
 
-  /// Validates an assessment given its sections and question counts.
-  ///
-  /// Each entry in [sections] may contain:
-  /// - `question_type`: String
-  /// - `question_count`: int (or `questions`: List)
+  /// Checks publish eligibility and returns item-count guidance.
+  /// Each section can supply its questions or precomputed question and
+  /// missing-answer-key counts from the database.
   static ExamValidationResult validate({
     required String? assessmentType,
-    required List<Map<String, dynamic>> sections, String? title,
+    required List<Map<String, dynamic>> sections,
+    String? title,
     String? description,
     Map<int, List<Map<String, dynamic>>>? questionsBySectionId,
   }) {
@@ -294,83 +304,68 @@ class ExamValidator {
       description: description,
     );
 
+    final recommendedTotal =
+        _recommendedTotalByAssessmentType[normalizedAssessment];
     final errors = <String>[];
+    final itemCountWarnings = <String>[];
     if (assessmentType != null &&
         assessmentType.trim().isNotEmpty &&
         !minTotalByAssessmentType.containsKey(normalizedAssessment)) {
       errors.add('Invalid assessment type "$assessmentType".');
     }
 
-    // Track included question types and their total question counts.
-    // A question type is included whenever at least one section of that type
-    // exists in the assessment OR questions of that type exist.
-    final includedOrder = <String>[];
     final countsByType = <String, int>{};
+    var actualTotal = 0;
+    var missingAnswerKeyCount = 0;
 
     for (final section in sections) {
       final qType = normalizeQuestionType(
         section['question_type']?.toString() ?? section['type']?.toString(),
       );
-      if (qType.isEmpty) continue;
-
-      if (!includedOrder.contains(qType)) {
-        includedOrder.add(qType);
-      }
-
-      var count = 0;
       final sectionId = int.tryParse(section['id']?.toString() ?? '');
-      if (questionsBySectionId != null &&
-          sectionId != null &&
-          questionsBySectionId.containsKey(sectionId)) {
-        count = questionsBySectionId[sectionId]!.length;
-      } else if (section['questions'] is List) {
-        count = (section['questions'] as List).length;
-      } else if (section['question_count'] != null) {
-        count = int.tryParse(section['question_count'].toString()) ?? 0;
+      final questions =
+          questionsBySectionId?[sectionId] ?? section['questions'];
+      final count = questions is List
+          ? questions.length
+          : int.tryParse(section['question_count']?.toString() ?? '') ?? 0;
+      if (questions is List) {
+        for (final question in questions.whereType<Map>()) {
+          final answer = question['correct_answer']
+              ?.toString()
+              .trim()
+              .toLowerCase();
+          if (answer == null || answer.isEmpty || answer == 'null') {
+            missingAnswerKeyCount++;
+          }
+        }
+      } else {
+        missingAnswerKeyCount +=
+            int.tryParse(
+              section['missing_answer_key_count']?.toString() ?? '',
+            ) ??
+            0;
       }
 
-      countsByType[qType] = (countsByType[qType] ?? 0) + count;
+      actualTotal += count;
+      if (qType.isNotEmpty) {
+        countsByType[qType] = (countsByType[qType] ?? 0) + count;
+      }
     }
 
-    final actualTotal =
-        countsByType.values.fold<int>(0, (sum, item) => sum + item);
-
-    final typeRequirements = <ExamQuestionTypeRequirement>[];
-
-    if (includedOrder.isEmpty) {
-      errors.add(
-        '$assessmentLabel requires at least $requiredTotal total questions '
-        '(currently 0). Add at least one question section with a minimum of '
-        '$minQuestionsPerIncludedType questions.',
+    if (recommendedTotal != null && actualTotal < recommendedTotal) {
+      itemCountWarnings.add(
+        '$assessmentLabel has $actualTotal saved ${actualTotal == 1 ? 'item' : 'items'}. '
+        'Aim for at least $recommendedTotal in total.',
       );
-    } else {
-      for (final qType in includedOrder) {
-        final actual = countsByType[qType] ?? 0;
-        final label = questionTypeLabel(qType);
-        final req = ExamQuestionTypeRequirement(
-          questionType: qType,
-          label: label,
-          requiredCount: minQuestionsPerIncludedType,
-          actualCount: actual,
-        );
-        typeRequirements.add(req);
-
-        if (!req.isValid) {
-          errors.add(
-            '$label requires at least $minQuestionsPerIncludedType questions '
-            '(currently has $actual; add ${req.missingCount} more).',
-          );
-        }
-      }
-
-      if (actualTotal < requiredTotal) {
-        final missing = requiredTotal - actualTotal;
-        errors.add(
-          '$assessmentLabel requires at least $requiredTotal total questions '
-          'across all question types (currently has $actualTotal; add '
-          '$missing more).',
-        );
-      }
+    }
+    if (actualTotal < requiredTotal) {
+      errors.add('Add at least one item before publishing.');
+    }
+    if (missingAnswerKeyCount > 0) {
+      errors.add(
+        '$missingAnswerKeyCount ${missingAnswerKeyCount == 1 ? 'item is' : 'items are'} '
+        'missing an answer key. Select the correct answer for each item.',
+      );
     }
 
     return ExamValidationResult(
@@ -379,8 +374,17 @@ class ExamValidator {
       requiredTotal: requiredTotal,
       actualTotal: actualTotal,
       requiredPerQuestionType: minQuestionsPerIncludedType,
-      questionTypeRequirements: typeRequirements,
+      questionTypeRequirements: [
+        for (final entry in countsByType.entries)
+          ExamQuestionTypeRequirement(
+            questionType: entry.key,
+            label: questionTypeLabel(entry.key),
+            requiredCount: minQuestionsPerIncludedType,
+            actualCount: entry.value,
+          ),
+      ],
       errors: errors,
+      itemCountWarnings: itemCountWarnings,
     );
   }
 }

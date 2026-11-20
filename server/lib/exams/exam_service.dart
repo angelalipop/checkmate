@@ -89,8 +89,7 @@ class ExamService {
         .toList();
   }
 
-  /// Validates an exam's sections and questions in the database against the
-  /// assessment type minimum requirements.
+  /// Checks saved items for publishing and calculates item-count guidance.
   static Future<ExamValidationResult> validateExamInDb(
     Session session,
     int examId, {
@@ -99,13 +98,16 @@ class ExamService {
     String? description,
   }) async {
     final rows = await session.execute(
-      Sql.named('''
+      Sql.named(r'''
         SELECT
           es.id,
           es.name,
           es.question_type,
           es.section_order,
-          COUNT(q.id)::int AS question_count
+          COUNT(q.id)::int AS question_count,
+          COUNT(q.id) FILTER (
+            WHERE COALESCE(q.correct_answer, '') ~* '^[[:space:]]*(null)?[[:space:]]*$'
+          )::int AS missing_answer_key_count
         FROM exam_sections es
         LEFT JOIN questions q ON q.section_id = es.id
         WHERE es.exam_id = @exam_id
@@ -123,6 +125,7 @@ class ExamService {
             'question_type': r[2],
             'section_order': r[3],
             'question_count': r[4],
+            'missing_answer_key_count': r[5],
           },
         )
         .toList();
@@ -401,7 +404,7 @@ class ExamService {
   ///
   /// Returns null when the exam is not found or the user may not edit it.
   /// Throws [ExamValidationException] for bad input or when publishing an
-  /// assessment that does not satisfy minimum question requirements.
+  /// assessment without saved items or with missing answer keys.
   static Future<Map<String, dynamic>?> update(
     int id, {
     required int userId,
@@ -579,10 +582,9 @@ class ExamService {
         description: clean(description),
       );
 
-      // Strict minimum question validation is enforced when publishing or
-      // submitting an assessment (or saving changes to a published assessment).
-      // Incomplete assessments can always remain saved as drafts.
-      if (effectiveStatus == 'published' && !validation.isValid) {
+      final isPublishing =
+          currentStatus != 'published' && effectiveStatus == 'published';
+      if (isPublishing && !validation.isValid) {
         throw ExamValidationException(
           validation.summaryMessage,
           validation: validation,

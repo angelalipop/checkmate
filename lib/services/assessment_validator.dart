@@ -1,61 +1,13 @@
-/// Client-side minimum question validation and header metadata helpers for
-/// CheckMate assessments. Mirrors `server/lib/exams/exam_validator.dart` so
-/// Flutter and Dart Frog enforce identical rules.
-class QuestionTypeValidation {
-  const QuestionTypeValidation({
-    required this.questionType,
-    required this.label,
-    required this.requiredCount,
-    required this.actualCount,
-  });
-
-  final String questionType;
-  final String label;
-  final int requiredCount;
-  final int actualCount;
-
-  bool get isValid => actualCount >= requiredCount;
-
-  int get missingCount =>
-      actualCount >= requiredCount ? 0 : requiredCount - actualCount;
-}
-
 class AssessmentValidationResult {
   const AssessmentValidationResult({
-    required this.assessmentType,
-    required this.assessmentLabel,
-    required this.requiredTotal,
-    required this.actualTotal,
-    required this.requiredPerQuestionType,
-    required this.questionTypeValidations,
     required this.errors,
-    this.missingAnswerKeyCount = 0,
+    required this.itemCountWarnings,
   });
 
-  final String assessmentType;
-  final String assessmentLabel;
-  final int requiredTotal;
-  final int actualTotal;
-  final int requiredPerQuestionType;
-  final List<QuestionTypeValidation> questionTypeValidations;
   final List<String> errors;
-  final int missingAnswerKeyCount;
+  final List<String> itemCountWarnings;
 
   bool get isValid => errors.isEmpty;
-
-  int get missingTotal =>
-      actualTotal >= requiredTotal ? 0 : requiredTotal - actualTotal;
-
-  List<QuestionTypeValidation> get invalidQuestionTypes =>
-      questionTypeValidations.where((q) => !q.isValid).toList();
-
-  String get summaryMessage {
-    if (isValid) {
-      return '$assessmentLabel meets all minimum requirements '
-          '($actualTotal/$requiredTotal total questions).';
-    }
-    return errors.join(' ');
-  }
 }
 
 /// Structured header metadata for Major Examinations (`Prelim`, `Midterm`,
@@ -254,21 +206,12 @@ class ExamHeaderDetails {
 class AssessmentValidator {
   AssessmentValidator._();
 
-  static const int minQuestionsPerIncludedType = 5;
-
-  static const Map<String, int> minTotalByAssessmentType = <String, int>{
-    'quiz': 5,
-    'short_quiz': 5,
+  static const Map<String, int> _recommendedTotalByAssessmentType = {
     'long_quiz': 15,
-    'performance_task': 5,
-    'laboratory': 5,
     'prelim': 35,
     'midterm': 35,
     'prefinal': 35,
-    'pre_finals': 35,
     'final': 35,
-    'finals': 35,
-    'other': 5,
   };
 
   static const Map<String, String> assessmentTypeLabels = <String, String>{
@@ -476,19 +419,6 @@ class AssessmentValidator {
     return clean;
   }
 
-  static int requiredTotalQuestions(
-    String? rawType, {
-    String? title,
-    String? description,
-  }) {
-    final normalized = normalizeAssessmentType(
-      rawType,
-      title: title,
-      description: description,
-    );
-    return minTotalByAssessmentType[normalized] ?? 5;
-  }
-
   static String normalizeQuestionType(String? rawType) {
     final cleaned = (rawType ?? '')
         .trim()
@@ -544,115 +474,50 @@ class AssessmentValidator {
       title: title,
       description: description,
     );
-    final requiredTotal = requiredTotalQuestions(
-      normalizedAssessment,
-      title: title,
-      description: description,
-    );
-
-    final includedOrder = <String>[];
-    final countsByType = <String, int>{};
+    final recommendedTotal =
+        _recommendedTotalByAssessmentType[normalizedAssessment];
+    final itemCountWarnings = <String>[];
+    var actualTotal = 0;
     var missingAnswerKeyCount = 0;
 
     for (final section in sections) {
-      final qType = normalizeQuestionType(
-        section['question_type']?.toString() ?? section['type']?.toString(),
-      );
-      if (qType.isEmpty) continue;
-
-      if (!includedOrder.contains(qType)) {
-        includedOrder.add(qType);
-      }
-
-      var count = 0;
       final sectionId = int.tryParse(section['id']?.toString() ?? '');
-      if (questionsBySectionId != null &&
-          sectionId != null &&
-          questionsBySectionId.containsKey(sectionId)) {
-        final qList = questionsBySectionId[sectionId]!;
-        count = qList.length;
-        for (final q in qList) {
+      final questions =
+          questionsBySectionId?[sectionId] ?? section['questions'];
+      final count = questions is List
+          ? questions.length
+          : int.tryParse(section['question_count']?.toString() ?? '') ?? 0;
+      if (questions is List) {
+        for (final q in questions.whereType<Map>()) {
           final ans = (q['correct_answer']?.toString() ?? '').trim();
           if (ans.isEmpty || ans.toLowerCase() == 'null') {
             missingAnswerKeyCount++;
           }
         }
-      } else if (section['questions'] is List) {
-        final qList = section['questions'] as List;
-        count = qList.length;
-        for (final q in qList.whereType<Map>()) {
-          final ans = (q['correct_answer']?.toString() ?? '').trim();
-          if (ans.isEmpty || ans.toLowerCase() == 'null') {
-            missingAnswerKeyCount++;
-          }
-        }
-      } else if (section['question_count'] != null) {
-        count = int.tryParse(section['question_count'].toString()) ?? 0;
       }
-
-      countsByType[qType] = (countsByType[qType] ?? 0) + count;
+      actualTotal += count;
     }
 
-    final actualTotal = countsByType.values.fold<int>(
-      0,
-      (sum, item) => sum + item,
-    );
-
-    final typeValidations = <QuestionTypeValidation>[];
-    final errors = <String>[];
-
-    if (includedOrder.isEmpty) {
-      errors.add(
-        '$assessmentLabel requires at least $requiredTotal total questions '
-        '(currently 0). Add at least one question section with a minimum of '
-        '$minQuestionsPerIncludedType questions.',
+    if (recommendedTotal != null && actualTotal < recommendedTotal) {
+      itemCountWarnings.add(
+        '$assessmentLabel has $actualTotal saved ${actualTotal == 1 ? 'item' : 'items'}. '
+        'Aim for at least $recommendedTotal in total.',
       );
-    } else {
-      for (final qType in includedOrder) {
-        final actual = countsByType[qType] ?? 0;
-        final label = questionTypeLabel(qType);
-        final v = QuestionTypeValidation(
-          questionType: qType,
-          label: label,
-          requiredCount: minQuestionsPerIncludedType,
-          actualCount: actual,
-        );
-        typeValidations.add(v);
-
-        if (!v.isValid) {
-          errors.add(
-            '$label requires at least $minQuestionsPerIncludedType questions '
-            '(currently has $actual; add ${v.missingCount} more).',
-          );
-        }
-      }
-
-      if (actualTotal < requiredTotal) {
-        final missing = requiredTotal - actualTotal;
-        errors.add(
-          '$assessmentLabel requires at least $requiredTotal total questions '
-          'across all question types (currently has $actualTotal; add '
-          '$missing more).',
-        );
-      }
-
-      if (missingAnswerKeyCount > 0) {
-        errors.add(
-          '$missingAnswerKeyCount ${missingAnswerKeyCount == 1 ? 'question is' : 'questions are'} '
-          'missing an answer key. Select the correct answer for each question below.',
-        );
-      }
+    }
+    final errors = <String>[];
+    if (actualTotal <= 0) {
+      errors.add('Add at least one item before publishing.');
+    }
+    if (missingAnswerKeyCount > 0) {
+      errors.add(
+        '$missingAnswerKeyCount ${missingAnswerKeyCount == 1 ? 'item is' : 'items are'} '
+        'missing an answer key. Select the correct answer for each item.',
+      );
     }
 
     return AssessmentValidationResult(
-      assessmentType: normalizedAssessment,
-      assessmentLabel: assessmentLabel,
-      requiredTotal: requiredTotal,
-      actualTotal: actualTotal,
-      requiredPerQuestionType: minQuestionsPerIncludedType,
-      questionTypeValidations: typeValidations,
       errors: errors,
-      missingAnswerKeyCount: missingAnswerKeyCount,
+      itemCountWarnings: itemCountWarnings,
     );
   }
 }

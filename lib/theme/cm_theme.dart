@@ -12,6 +12,8 @@ class CmTheme {
   static const Color background = Color(0xFFF8FAFC);
   static const Color surfaceWhite = Color(0xFFFFFFFF);
 
+  static const Color navyTint = Color(0xFFDEEDFF);
+
   static const Color transparent = Colors.transparent;
   static final Color mutedOnNavy = surfaceWhite.withValues(alpha: 179 / 255);
   static final Color translucentOnNavy = surfaceWhite.withValues(
@@ -89,17 +91,36 @@ class CmTheme {
 
   static SnackBar feedbackSnackBar(
     String message, {
-    required Color color,
+    Color? color,
     Duration duration = const Duration(milliseconds: 4000),
+    double? minimumHeight,
   }) {
     final isError = color == redDanger;
+    final text = Text(
+      message,
+      style: color == null
+          ? null
+          : TextStyle(color: isError ? redDanger : navy),
+    );
     return SnackBar(
       duration: duration,
       backgroundColor: isError ? surfaceWhite : color,
-      content: Text(
-        message,
-        style: TextStyle(color: isError ? redDanger : navy),
-      ),
+      padding: minimumHeight == null
+          ? null
+          : const EdgeInsets.symmetric(horizontal: 24),
+      content: minimumHeight == null
+          ? text
+          : ConstrainedBox(
+              constraints: BoxConstraints(minHeight: minimumHeight),
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                heightFactor: 1,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: text,
+                ),
+              ),
+            ),
     );
   }
 
