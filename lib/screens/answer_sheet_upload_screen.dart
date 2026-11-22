@@ -86,6 +86,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   bool _isProcessing = false;
   bool _isSavingScore = false;
 
+  String? _processingError;
+  bool _isErrorDialogShowing = false;
+
   String _processingStage = 'Preparing answer sheet...';
 
   List<RegistrationPoint>? _detectedMarkers;
@@ -228,8 +231,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
           if (mounted) {
             setState(() {
               _isProcessing = false;
-              _processingStage =
-                  'Verification cancelled. You can retry or choose another image.';
+              _processingStage = 'Verification cancelled. You can retry or choose another image.';
             });
           }
           return;
@@ -277,6 +279,8 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         _identificationOcrNotice = null;
         _scoringResult = null;
         _answersVerified = false;
+        _processingError = null;
+        _isProcessing = false;
       });
       await _processImage();
     } catch (e) {
@@ -308,6 +312,72 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
     );
   }
 
+  Future<void> _showProcessingErrorDialog({
+    required String title,
+    required String message,
+  }) async {
+    if (!mounted || _isErrorDialogShowing) return;
+
+    _isErrorDialogShowing = true;
+
+    final bool cameFromCamera =
+        widget.autoProcessOnStart && widget.initialImageBytes != null;
+
+    try {
+      final String? action = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.error_outline, color: CmTheme.redDanger),
+              const SizedBox(width: 10),
+              Expanded(child: Text(title)),
+            ],
+          ),
+          content: Text(
+            '$message\n\n'
+            'Make sure the entire answer sheet is visible, '
+            'including all four corner markers and the QR code.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext, 'back');
+              },
+              child: const Text('Go Back'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(
+                  dialogContext,
+                  cameFromCamera ? 'retake' : 'choose_another',
+                );
+              },
+              child: Text(cameFromCamera ? 'Retake' : 'Choose Another Image'),
+            ),
+          ],
+        ),
+      );
+
+      if (!mounted) return;
+
+      if (action == 'retake') {
+        // Return to the existing camera screen.
+        Navigator.of(context).pop('retake');
+      } else if (action == 'choose_another') {
+        // Keep the previous image until a replacement is selected.
+        await _pickImage();
+      } else if (action == 'back') {
+        // Return to the previous screen.
+        if (Navigator.of(context).canPop()) {
+          Navigator.of(context).pop('back');
+        }
+      }
+    } finally {
+      _isErrorDialogShowing = false;
+    }
+  }
   // ------------------------------------------------------------
   // PROCESS ANSWER SHEET & DETECT CORNER REGISTRATION MARKERS
   // ------------------------------------------------------------
@@ -324,11 +394,11 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       _identificationOcrNotice = null;
       _scoringResult = null;
       _answersVerified = false;
-      _processingStage = 'Aligning answer sheet and detecting corner markers...';
+      _processingStage =
+          'Aligning answer sheet and detecting corner markers...';
     });
 
     try {
-      
       final alignmentTimer = Stopwatch()..start();
 
       final result = await AnswerSheetProcessor.processAnswerSheet(
@@ -361,16 +431,17 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
     } catch (e) {
       if (!mounted) return;
 
+      final errorMessage = e.toString().replaceFirst('Exception: ', '');
+
       setState(() {
         _isProcessing = false;
+        _processingError = errorMessage;
+        _processingStage = 'Answer sheet processing failed.';
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        CmTheme.feedbackSnackBar(
-          'Processing failed: ${e.toString().replaceFirst('Exception: ', '')}',
-          color: CmTheme.redDanger,
-          duration: const Duration(seconds: 5),
-        ),
+      await _showProcessingErrorDialog(
+        title: 'Unable to Process Answer Sheet',
+        message: errorMessage,
       );
     }
   }
@@ -403,7 +474,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
 
     setState(() {
       _isProcessing = true;
-      _processingStage = 'Detecting marked answers and reading identification responses...';
+      _processingError = null;
+      _processingStage =
+          'Detecting marked answers and reading identification responses...';
     });
 
     try {
@@ -451,21 +524,25 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       if (!mounted) return;
 
       setState(() {
-        _processingStage = 'Detection complete. Preparing answer verification...';
+        _processingStage =
+            'Detection complete. Preparing answer verification...';
       });
 
       await _verifyDetectedAnswers(result);
     } catch (e) {
       if (!mounted) return;
 
-      setState(() => _isProcessing = false);
+      final errorMessage = e.toString().replaceFirst('Exception: ', '');
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        CmTheme.feedbackSnackBar(
-          'OMR processing failed: $e',
-          color: CmTheme.redDanger,
-          duration: const Duration(seconds: 5),
-        ),
+      setState(() {
+        _isProcessing = false;
+        _processingError = errorMessage;
+        _processingStage = 'Answer detection failed.';
+      });
+
+      await _showProcessingErrorDialog(
+        title: 'Unable to Read Answer Sheet',
+        message: errorMessage,
       );
     }
   }
@@ -3376,6 +3453,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       _answersVerified = false;
       _fileName = null;
       _isProcessing = false;
+      _processingError = null;
     });
   }
 
@@ -3442,13 +3520,13 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   }
 
   Widget _buildContent() {
-  if (_imageBytes == null) {
-    return _buildEmptyUploadState();
-  }
+    if (_imageBytes == null) {
+      return _buildEmptyUploadState();
+    }
 
-  if (widget.autoProcessOnStart) {
-    return _buildAutomaticProcessingState();
-  }
+    if (widget.autoProcessOnStart) {
+      return _buildAutomaticProcessingState();
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -3753,108 +3831,163 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       ),
     );
   }
-  
-Widget _buildAutomaticProcessingState() {
-  final bool showRecovery =
-      !_isProcessing &&
-      _processedImageBytes != null &&
-      _omrResult != null &&
-      !_answersVerified;
 
-  return Center(
-    child: ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 480),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(32),
-        decoration: BoxDecoration(
-          color: CmTheme.surfaceWhite,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: CmTheme.lineBorder),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (!showRecovery) ...[
-              const SizedBox(
-                width: 48,
-                height: 48,
-                child: CircularProgressIndicator(
-                  strokeWidth: 4,
+  Widget _buildAutomaticProcessingState() {
+    final bool showFailure = !_isProcessing && _processingError != null;
+
+    final bool showRecovery =
+        !_isProcessing &&
+        _processingError == null &&
+        _processedImageBytes != null &&
+        _omrResult != null &&
+        !_answersVerified;
+
+    final bool cameFromCamera =
+        widget.autoProcessOnStart && widget.initialImageBytes != null;
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(32),
+          decoration: BoxDecoration(
+            color: CmTheme.surfaceWhite,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: CmTheme.lineBorder),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (showFailure) ...[
+                const Icon(
+                  Icons.error_outline,
+                  size: 52,
+                  color: CmTheme.redDanger,
+                ),
+                const SizedBox(height: 20),
+              ] else if (showRecovery) ...[
+                const Icon(Icons.edit_note, size: 48, color: CmTheme.navy),
+                const SizedBox(height: 24),
+              ] else ...[
+                const SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 4,
+                    color: CmTheme.navy,
+                  ),
+                ),
+                const SizedBox(height: 24),
+              ],
+
+              Text(
+                showFailure
+                    ? 'Processing Failed'
+                    : showRecovery
+                    ? 'Answer Verification Cancelled'
+                    : _processingStage,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
                   color: CmTheme.navy,
                 ),
               ),
-              const SizedBox(height: 24),
-            ] else ...[
-              const Icon(
-                Icons.edit_note,
-                size: 48,
-                color: CmTheme.navy,
-              ),
-              const SizedBox(height: 24),
-            ],
-            Text(
-              showRecovery
-                  ? 'Answer Verification Cancelled'
-                  : _processingStage,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: CmTheme.navy,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              showRecovery
-                  ? 'Your detected answers are still available. You can retry verification or select another answer sheet.'
-                  : 'Please wait while CheckMate processes your answer sheet.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 14,
-                color: CmTheme.slateText,
-                height: 1.5,
-              ),
-            ),
-            if (showRecovery) ...[
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: () {
-                    if (_omrResult != null) {
-                      _verifyDetectedAnswers(_omrResult!);
-                    }
-                  },
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Retry Verification'),
-                ),
-              ),
+
               const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () async {
-                    _chooseAnother();
-                    await _pickImage();
-                  },
-                  icon: const Icon(Icons.upload_file),
-                  label: const Text('Choose Another Image'),
+
+              Text(
+                showFailure
+                    ? 'Check the answer sheet image and try again.'
+                    : showRecovery
+                    ? 'Your detected answers are still available. '
+                          'You can retry verification or select another answer sheet.'
+                    : 'Please wait while CheckMate processes your answer sheet.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: CmTheme.slateText,
+                  height: 1.5,
                 ),
               ),
-            ] else ...[
-              const SizedBox(height: 24),
-              const LinearProgressIndicator(
-                color: CmTheme.navy,
-                backgroundColor: CmTheme.lineBorder,
-              ),
+
+              if (showFailure) ...[
+                const SizedBox(height: 24),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: () {
+                      if (cameFromCamera) {
+                        Navigator.of(context).pop('retake');
+                      } else {
+                        _processImage();
+                      }
+                    },
+                    icon: Icon(
+                      cameFromCamera ? Icons.camera_alt : Icons.refresh,
+                    ),
+                    label: Text(
+                      cameFromCamera
+                          ? 'Retake Answer Sheet'
+                          : 'Retry Processing',
+                    ),
+                  ),
+                ),
+
+                if (!cameFromCamera) ...[
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _pickImage,
+                      icon: const Icon(Icons.upload_file),
+                      label: const Text('Choose Another Image'),
+                    ),
+                  ),
+                ],
+              ] else if (showRecovery) ...[
+                const SizedBox(height: 24),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: () {
+                      if (_omrResult != null) {
+                        _verifyDetectedAnswers(_omrResult!);
+                      }
+                    },
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Retry Verification'),
+                  ),
+                ),
+
+                const SizedBox(height: 10),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      await _pickImage();
+                    },
+                    icon: const Icon(Icons.upload_file),
+                    label: const Text('Choose Another Image'),
+                  ),
+                ),
+              ] else ...[
+                const SizedBox(height: 24),
+                const LinearProgressIndicator(
+                  color: CmTheme.navy,
+                  backgroundColor: CmTheme.lineBorder,
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   Widget _buildProcessedResult() {
     return Column(

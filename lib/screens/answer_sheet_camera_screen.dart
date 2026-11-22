@@ -63,6 +63,19 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
   double _zoomScale = 1.0;
   FlashMode _flashMode = FlashMode.off;
 
+  Color get _scannerFrameColor {
+    if (_markerStatus.startsWith('Capturing automatically') ||
+        _markerStatus.startsWith('Hold still...')) {
+      return const Color(0xFF16A34A); // Green: stable
+    }
+
+    if (_markerStatus.startsWith('Four markers detected')) {
+      return const Color(0xFF2563EB); // Blue: detected
+    }
+
+    return Colors.white; // White: searching
+  }
+
   @override
   void initState() {
     super.initState();
@@ -608,36 +621,56 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
   // ============================================================
 
   Future<void> _openUploadVerification() async {
-  final bytes = _capturedImageBytes;
+    final bytes = _capturedImageBytes;
 
-  if (bytes == null || _isProcessing) return;
+    if (bytes == null || _isProcessing) return;
 
-  setState(() => _isProcessing = true);
+    setState(() => _isProcessing = true);
 
-  try {
-    await Navigator.of(context).push<String>(
-      MaterialPageRoute<String>(
-        builder: (_) => AnswerSheetUploadScreen(
-          examId: widget.examId,
-          exam: widget.exam,
-          sections: widget.sections,
-          students: widget.students,
-          initialImageBytes: bytes,
-          initialFileName: _capturedFileName,
-          autoProcessOnStart: true,
-          onViewInMySubjects: () {
-            Navigator.of(context).pop();
-            widget.onViewInMySubjects?.call();
-          },
+    String? result;
+
+    try {
+      result = await Navigator.of(context).push<String>(
+        MaterialPageRoute<String>(
+          builder: (_) => AnswerSheetUploadScreen(
+            examId: widget.examId,
+            exam: widget.exam,
+            sections: widget.sections,
+            students: widget.students,
+            initialImageBytes: bytes,
+            initialFileName: _capturedFileName,
+            autoProcessOnStart: true,
+            onViewInMySubjects: () {
+              Navigator.of(context).pop();
+              widget.onViewInMySubjects?.call();
+            },
+          ),
         ),
-      ),
-    );
-  } finally {
-    if (mounted) {
+      );
+    } catch (e) {
+      debugPrint('CHECKMATE CAMERA WORKFLOW ERROR: $e');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          CmTheme.feedbackSnackBar(
+            'Unable to continue scanning: $e',
+            color: CmTheme.redDanger,
+          ),
+        );
+      }
+    }
+
+    if (!mounted) return;
+
+    if (result == 'scan_next' ||
+        result == 'retake' ||
+        result == 'back' ||
+        result == null) {
       await _retakePicture();
+    } else {
+      debugPrint('CHECKMATE: Leaving camera workflow. Result: $result');
     }
   }
-}
 
   Future<void> _retakePicture() async {
     final controller = _cameraController;
@@ -753,7 +786,9 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
           children: [
             CameraPreview(controller),
 
-            CustomPaint(painter: ScannerOverlayPainter()),
+            CustomPaint(
+              painter: ScannerOverlayPainter(frameColor: _scannerFrameColor),
+            ),
 
             Positioned(
               top: 20,
@@ -821,10 +856,18 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        'Keep the sheet flat and well lit',
+                        _isTakingPicture
+                            ? 'Capturing answer sheet...'
+                            : _isProcessing
+                            ? 'Processing answer sheet...'
+                            : _markerStatus,
+                        textAlign: TextAlign.center,
                         style: TextStyle(
-                          color: CmTheme.mutedOnNavy,
+                          color: _isTakingPicture || _isProcessing
+                              ? CmTheme.surfaceWhite
+                              : CmTheme.mutedOnNavy,
                           fontSize: 13,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -834,7 +877,7 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
                         children: [
                           // Gallery button
                           OutlinedButton.icon(
-                            onPressed: _isTakingPicture
+                            onPressed: (_isTakingPicture || _isProcessing)
                                 ? null
                                 : _chooseFromGallery,
                             icon: const Icon(
@@ -859,7 +902,9 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
 
                           // Shutter button
                           GestureDetector(
-                            onTap: _isTakingPicture ? null : _takePicture,
+                            onTap: (_isTakingPicture || _isProcessing)
+                                ? null
+                                : _takePicture,
                             child: Container(
                               width: 78,
                               height: 78,
@@ -985,6 +1030,10 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
 // ============================================================
 
 class ScannerOverlayPainter extends CustomPainter {
+  final Color frameColor;
+
+  const ScannerOverlayPainter({required this.frameColor});
+
   @override
   void paint(Canvas canvas, Size size) {
     const double answerSheetRatio = 0.705;
@@ -1014,7 +1063,7 @@ class ScannerOverlayPainter extends CustomPainter {
     canvas.drawPath(overlayPath, overlayPaint);
 
     final Paint framePaint = Paint()
-      ..color = CmTheme.cameraFrameBorder
+      ..color = frameColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
 
@@ -1024,7 +1073,7 @@ class ScannerOverlayPainter extends CustomPainter {
     );
 
     final Paint cornerPaint = Paint()
-      ..color = CmTheme.surfaceWhite
+      ..color = frameColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = 5
       ..strokeCap = StrokeCap.round;
@@ -1085,5 +1134,7 @@ class ScannerOverlayPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant ScannerOverlayPainter oldDelegate) {
+    return oldDelegate.frameColor != frameColor;
+  }
 }
