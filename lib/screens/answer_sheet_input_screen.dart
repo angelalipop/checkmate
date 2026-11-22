@@ -802,6 +802,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
               exam: examMap,
               sections: scannerSections,
               students: studentsList,
+              autoProcessOnStart: true,
               onViewInMySubjects: _routeToMySubjects,
             );
           }

@@ -86,6 +86,8 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   bool _isProcessing = false;
   bool _isSavingScore = false;
 
+  String _processingStage = 'Preparing answer sheet...';
+
   List<RegistrationPoint>? _detectedMarkers;
 
   OMRProcessingResult? _omrResult;
@@ -222,7 +224,16 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
           ),
         );
 
-        if (confirmed != true || !mounted) return;
+        if (confirmed != true || !mounted) {
+          if (mounted) {
+            setState(() {
+              _isProcessing = false;
+              _processingStage =
+                  'Verification cancelled. You can retry or choose another image.';
+            });
+          }
+          return;
+        }
 
         final picker = image_picker.ImagePicker();
 
@@ -267,6 +278,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         _scoringResult = null;
         _answersVerified = false;
       });
+      await _processImage();
     } catch (e) {
       if (!mounted) return;
 
@@ -312,11 +324,20 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       _identificationOcrNotice = null;
       _scoringResult = null;
       _answersVerified = false;
+      _processingStage = 'Aligning answer sheet and detecting corner markers...';
     });
 
     try {
+      
+      final alignmentTimer = Stopwatch()..start();
+
       final result = await AnswerSheetProcessor.processAnswerSheet(
         _imageBytes!,
+      );
+
+      debugPrint(
+        '[CheckMate][Performance] Image alignment: '
+        '${alignmentTimer.elapsedMilliseconds} ms',
       );
 
       if (!mounted) return;
@@ -334,13 +355,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         _detectedMarkers = result.markers;
         _isProcessing = false;
       });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        CmTheme.feedbackSnackBar(
-          'Answer sheet aligned, 4 corner markers detected, and 1-to-1 assessment verified.',
-          color: CmTheme.emeraldSuccess,
-        ),
-      );
+      if (widget.autoProcessOnStart && mounted) {
+        await _runOMR();
+      }
     } catch (e) {
       if (!mounted) return;
 
@@ -384,23 +401,39 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       return;
     }
 
-    setState(() => _isProcessing = true);
+    setState(() {
+      _isProcessing = true;
+      _processingStage = 'Detecting marked answers and reading identification responses...';
+    });
 
     try {
+      final omrTimer = Stopwatch()..start();
+
       final OpenCVOMRResult openCVResult = await OpenCVOMRService.process(
         alignedImageBytes,
         sections: widget.sections,
       );
 
+      debugPrint(
+        '[CheckMate][Performance] OpenCV: '
+        '${omrTimer.elapsedMilliseconds} ms',
+      );
+
       if (!mounted || !identical(_processedImageBytes, alignedImageBytes)) {
         return;
       }
-      _verifyAnswerSheetMatchesAssessment(alignedImageBytes);
 
       final detected = _convertOpenCVResult(openCVResult);
+      final ocrTimer = Stopwatch()..start();
+
       final (result, ocrNotice) = await _readIdentificationAnswers(
         alignedImageBytes,
         detected,
+      );
+
+      debugPrint(
+        '[CheckMate][Performance] Identification OCR: '
+        '${ocrTimer.elapsedMilliseconds} ms',
       );
 
       if (!mounted || !identical(_processedImageBytes, alignedImageBytes)) {
@@ -413,6 +446,12 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         _answersVerified = false;
         _omrDebugImageBytes = result.debugImageBytes;
         _isProcessing = false;
+      });
+
+      if (!mounted) return;
+
+      setState(() {
+        _processingStage = 'Detection complete. Preparing answer verification...';
       });
 
       await _verifyDetectedAnswers(result);
@@ -3349,6 +3388,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
     return Scaffold(
       backgroundColor: CmTheme.background,
       appBar: AppBar(
+        automaticallyImplyLeading: !widget.autoProcessOnStart,
         backgroundColor: CmTheme.surfaceWhite,
         foregroundColor: CmTheme.navy,
         elevation: 0,
@@ -3402,9 +3442,13 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   }
 
   Widget _buildContent() {
-    if (_imageBytes == null) {
-      return _buildEmptyUploadState();
-    }
+  if (_imageBytes == null) {
+    return _buildEmptyUploadState();
+  }
+
+  if (widget.autoProcessOnStart) {
+    return _buildAutomaticProcessingState();
+  }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -3709,6 +3753,108 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       ),
     );
   }
+  
+Widget _buildAutomaticProcessingState() {
+  final bool showRecovery =
+      !_isProcessing &&
+      _processedImageBytes != null &&
+      _omrResult != null &&
+      !_answersVerified;
+
+  return Center(
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 480),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(32),
+        decoration: BoxDecoration(
+          color: CmTheme.surfaceWhite,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: CmTheme.lineBorder),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!showRecovery) ...[
+              const SizedBox(
+                width: 48,
+                height: 48,
+                child: CircularProgressIndicator(
+                  strokeWidth: 4,
+                  color: CmTheme.navy,
+                ),
+              ),
+              const SizedBox(height: 24),
+            ] else ...[
+              const Icon(
+                Icons.edit_note,
+                size: 48,
+                color: CmTheme.navy,
+              ),
+              const SizedBox(height: 24),
+            ],
+            Text(
+              showRecovery
+                  ? 'Answer Verification Cancelled'
+                  : _processingStage,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: CmTheme.navy,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              showRecovery
+                  ? 'Your detected answers are still available. You can retry verification or select another answer sheet.'
+                  : 'Please wait while CheckMate processes your answer sheet.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 14,
+                color: CmTheme.slateText,
+                height: 1.5,
+              ),
+            ),
+            if (showRecovery) ...[
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () {
+                    if (_omrResult != null) {
+                      _verifyDetectedAnswers(_omrResult!);
+                    }
+                  },
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry Verification'),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    _chooseAnother();
+                    await _pickImage();
+                  },
+                  icon: const Icon(Icons.upload_file),
+                  label: const Text('Choose Another Image'),
+                ),
+              ),
+            ] else ...[
+              const SizedBox(height: 24),
+              const LinearProgressIndicator(
+                color: CmTheme.navy,
+                backgroundColor: CmTheme.lineBorder,
+              ),
+            ],
+          ],
+        ),
+      ),
+    ),
+  );
+}
 
   Widget _buildProcessedResult() {
     return Column(

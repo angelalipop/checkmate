@@ -107,15 +107,17 @@ class OpenCVOMRService {
 
         if (type == 'identification') {
           final idGridTop =
-              currentY + _sectionTitleHeight + AnswerSheetLayout.sectionTitleGap;
-          final idGridBottom = idGridTop +
+              currentY +
+              _sectionTitleHeight +
+              AnswerSheetLayout.sectionTitleGap;
+          final idGridBottom =
+              idGridTop +
               questions.length *
                   (_identificationBoxHeight + _identificationRowSpacing);
           var bubblesInIdBand = 0;
           for (final cand in bubbleCandidates) {
             final logicalY = cand.centerY / scaleY;
-            if (logicalY >= idGridTop + 2.0 &&
-                logicalY <= idGridBottom - 2.0) {
+            if (logicalY >= idGridTop + 2.0 && logicalY <= idGridBottom - 2.0) {
               bubblesInIdBand++;
             }
           }
@@ -165,10 +167,11 @@ class OpenCVOMRService {
             _sheetPadding + ((contentWidth - totalBlockWidth) / 2.0);
 
         // _buildSection: title 18 + explicit 3-unit gap before the OMR grid.
-        final gridTop = currentY +
-          _sectionTitleHeight +
-          AnswerSheetLayout.sectionTitleGap +
-          AnswerSheetLayout.omrHeaderHeight;
+        final gridTop =
+            currentY +
+            _sectionTitleHeight +
+            AnswerSheetLayout.sectionTitleGap +
+            AnswerSheetLayout.omrHeaderHeight;
         // Both MC and True/False start immediately below the section title
         // and its explicit 3-unit gap. Do not add an extra MC row here.
         final measurementGridTop = gridTop;
@@ -373,8 +376,7 @@ class OpenCVOMRService {
         var extraBottomBubbles = 0;
         for (final cand in bubbleCandidates) {
           final logicalY = cand.centerY / scaleY;
-          if (logicalY >= currentY + 14.0 &&
-              logicalY <= _sheetHeight - 16.0) {
+          if (logicalY >= currentY + 14.0 && logicalY <= _sheetHeight - 16.0) {
             extraBottomBubbles++;
           }
         }
@@ -441,6 +443,29 @@ class OpenCVOMRService {
     final double toleranceY = math
         .max(2.0, _topRowYToleranceLogical * scaleY)
         .toDouble();
+    // Keep only candidates that could possibly match any tested offset.
+    // This preserves the original matching tolerances and search results.
+    final minExpectedX = expectedLogicalXs.reduce((a, b) => a < b ? a : b);
+    final maxExpectedX = expectedLogicalXs.reduce((a, b) => a > b ? a : b);
+
+    final minSearchX =
+        (minExpectedX - _topRowSearchLeftLogical) * scaleX - toleranceX;
+    final maxSearchX =
+        (maxExpectedX + _topRowSearchRightLogical) * scaleX + toleranceX;
+
+    final minSearchY =
+        (baseLogicalY - _topRowSearchUpLogical) * scaleY - toleranceY;
+    final maxSearchY =
+        (baseLogicalY + _topRowSearchDownLogical) * scaleY + toleranceY;
+
+    final rowCandidates = candidates
+        .where((candidate) {
+          return candidate.centerX >= minSearchX &&
+              candidate.centerX <= maxSearchX &&
+              candidate.centerY >= minSearchY &&
+              candidate.centerY <= maxSearchY;
+        })
+        .toList(growable: false);
 
     // T/F should normally provide both bubbles. MC (and multi-column MC)
     // requires at least half of the expected circles in the physical first row.
@@ -480,7 +505,7 @@ class OpenCVOMRService {
           final targetX = (expectedLogicalX + dx) * scaleX;
           double bestDistance = double.infinity;
 
-          for (final candidate in candidates) {
+          for (final candidate in rowCandidates) {
             final px = (candidate.centerX - targetX).abs().toDouble();
             final py = (candidate.centerY - targetY).abs().toDouble();
 

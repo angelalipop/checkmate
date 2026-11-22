@@ -8,11 +8,9 @@ import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
-import 'package:image/image.dart' as img;
 import 'package:checkmate/services/answer_sheet_processor.dart';
 
 import 'package:checkmate/screens/answer_sheet_upload_screen.dart';
-import 'package:checkmate/services/answer_sheet_processor.dart';
 
 class AnswerSheetCameraScreen extends StatefulWidget {
   final int examId;
@@ -403,6 +401,7 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
       });
 
       debugPrint('[CheckMate] Gallery image selected: ${image.name}');
+      await _openUploadVerification();
     } catch (e) {
       if (!mounted) return;
 
@@ -570,6 +569,7 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
       if (croppedBytes == null) {
         debugPrint('CHECKMATE CROP: Using original image as fallback.');
       }
+      await _openUploadVerification();
     } catch (e) {
       if (!mounted) return;
 
@@ -608,11 +608,14 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
   // ============================================================
 
   Future<void> _openUploadVerification() async {
-    final bytes = _capturedImageBytes;
+  final bytes = _capturedImageBytes;
 
-    if (bytes == null || _isProcessing) return;
+  if (bytes == null || _isProcessing) return;
 
-    final result = await Navigator.of(context).push<String>(
+  setState(() => _isProcessing = true);
+
+  try {
+    await Navigator.of(context).push<String>(
       MaterialPageRoute<String>(
         builder: (_) => AnswerSheetUploadScreen(
           examId: widget.examId,
@@ -629,13 +632,12 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
         ),
       ),
     );
-
-    if (!mounted) return;
-
-    if (result == 'scan_next') {
-      _retakePicture();
+  } finally {
+    if (mounted) {
+      await _retakePicture();
     }
   }
+}
 
   Future<void> _retakePicture() async {
     final controller = _cameraController;
@@ -687,10 +689,6 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_capturedImageBytes != null) {
-      return _buildReviewScreen();
-    }
-
     return _buildCameraScreen();
   }
 
@@ -977,164 +975,6 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  // ============================================================
-  // REVIEW SCREEN
-  // ============================================================
-
-  Widget _buildReviewScreen() {
-    return Scaffold(
-      backgroundColor: CmTheme.navy,
-      appBar: AppBar(
-        backgroundColor: CmTheme.navy,
-        foregroundColor: CmTheme.surfaceWhite,
-        title: const Text(
-          'Review Captured Sheet',
-          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17),
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: ActionChip(
-              avatar: Icon(
-                _zoomScale > 1.0 ? Icons.zoom_out : Icons.zoom_in,
-                size: 18,
-                color: CmTheme.surfaceWhite,
-              ),
-              label: Text(
-                _zoomScale > 1.0 ? '2x Zoom' : '1x / 2x',
-                style: const TextStyle(
-                  color: CmTheme.surfaceWhite,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12.5,
-                ),
-              ),
-              backgroundColor: CmTheme.navy,
-              side: BorderSide(color: CmTheme.translucentOnNavy),
-              onPressed: _toggleInspectZoom,
-            ),
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: Stack(
-              alignment: Alignment.bottomCenter,
-              children: [
-                InteractiveViewer(
-                  transformationController: _zoomController,
-                  minScale: 1.0,
-                  maxScale: 4.0,
-                  child: Center(
-                    child: Image.memory(
-                      _capturedImageBytes!,
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                ),
-
-                Positioned(
-                  bottom: 16,
-                  child: GestureDetector(
-                    onTap: _toggleInspectZoom,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: CmTheme.cameraInfoOverlay,
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(color: CmTheme.translucentOnNavy),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _zoomScale > 1.0 ? Icons.zoom_out : Icons.zoom_in,
-                            color: CmTheme.surfaceWhite,
-                            size: 18,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            _zoomScale > 1.0
-                                ? 'Inspecting at 2x • Tap for 1x'
-                                : 'Tap to toggle 1x / 2x zoom',
-                            style: const TextStyle(
-                              color: CmTheme.surfaceWhite,
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Sticky review actions
-          Container(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-            decoration: const BoxDecoration(
-              color: CmTheme.surfaceWhite,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            child: SafeArea(
-              top: false,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _isProcessing ? null : _retakePicture,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text(
-                        'Retake',
-                        style: TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: CmTheme.navy,
-                        side: const BorderSide(color: CmTheme.slateText),
-                        padding: const EdgeInsets.symmetric(vertical: 15),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(width: 12),
-
-                  Expanded(
-                    flex: 2,
-                    child: FilledButton.icon(
-                      onPressed: _isProcessing ? null : _openUploadVerification,
-                      icon: const Icon(Icons.arrow_forward),
-                      label: const Text(
-                        'Review & Process',
-                        style: TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: CmTheme.navy,
-                        foregroundColor: CmTheme.surfaceWhite,
-                        padding: const EdgeInsets.symmetric(vertical: 15),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
