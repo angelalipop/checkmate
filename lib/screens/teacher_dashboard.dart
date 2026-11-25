@@ -335,6 +335,8 @@ class TeacherShell extends StatefulWidget {
 }
 
 class _TeacherShellState extends State<TeacherShell> {
+  // Keep the scanner session mounted when crossing the shell breakpoint.
+  final _scannerPageKey = GlobalKey();
   bool _drawerOpen = false;
 
   @override
@@ -361,6 +363,9 @@ class _TeacherShellState extends State<TeacherShell> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final w = constraints.maxWidth;
+        final pageContent = widget.current == TeacherPage.scans
+            ? KeyedSubtree(key: _scannerPageKey, child: widget.child)
+            : widget.child;
 
         if (w >= _kDesktop) {
           return Scaffold(
@@ -391,7 +396,7 @@ class _TeacherShellState extends State<TeacherShell> {
                   child: Column(
                     children: [
                       if (widget.desktopHeader != null) widget.desktopHeader!,
-                      Expanded(child: widget.child),
+                      Expanded(child: pageContent),
                     ],
                   ),
                 ),
@@ -414,7 +419,7 @@ class _TeacherShellState extends State<TeacherShell> {
                       onMenu: _openDrawer,
                       actions: widget.mobileActions,
                     ),
-                    Expanded(child: widget.child),
+                    Expanded(child: pageContent),
                   ],
                 ),
                 bottomNavigationBar: isMobile

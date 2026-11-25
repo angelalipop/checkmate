@@ -49,6 +49,8 @@ class CmTheme {
   static final Color moduleCardShadow = navy.withValues(alpha: 0.12);
   static final Color darkPanelShadow = navy.withValues(alpha: 0.30);
 
+  static const Color cameraFrameStable = Color(0xFF16A34A);
+  static const Color cameraFrameDetected = Color(0xFF2563EB);
   static final Color cameraInfoOverlay = navy.withValues(alpha: 0.85);
   static final Color cameraControlsOverlay = navy.withValues(alpha: 0.94);
   static final Color cameraFrameOverlay = navy.withValues(alpha: 0.55);

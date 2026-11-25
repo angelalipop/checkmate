@@ -3,7 +3,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:camera/camera.dart';
-import 'package:file_selector/file_selector.dart';
 import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
@@ -12,12 +11,20 @@ import 'package:checkmate/services/answer_sheet_processor.dart';
 
 import 'package:checkmate/screens/answer_sheet_upload_screen.dart';
 
+class AnswerSheetCameraCapture {
+  const AnswerSheetCameraCapture({required this.bytes, required this.fileName});
+
+  final Uint8List bytes;
+  final String fileName;
+}
+
 class AnswerSheetCameraScreen extends StatefulWidget {
   final int examId;
   final Map<String, dynamic>? exam;
   final List<Map<String, dynamic>> sections;
   final List<Map<String, dynamic>> students;
   final VoidCallback? onViewInMySubjects;
+  final bool returnCapture;
 
   const AnswerSheetCameraScreen({
     super.key,
@@ -26,6 +33,7 @@ class AnswerSheetCameraScreen extends StatefulWidget {
     this.exam,
     this.students = const [],
     this.onViewInMySubjects,
+    this.returnCapture = false,
   });
 
   @override
@@ -42,6 +50,7 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
   bool _isInitializing = true;
   bool _isTakingPicture = false;
   bool _isProcessing = false;
+  bool _isChoosingGallery = false;
   bool _hasError = false;
 
   bool _isAnalyzingFrame = false;
@@ -66,14 +75,14 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
   Color get _scannerFrameColor {
     if (_markerStatus.startsWith('Capturing automatically') ||
         _markerStatus.startsWith('Hold still...')) {
-      return const Color(0xFF16A34A); // Green: stable
+      return CmTheme.cameraFrameStable;
     }
 
     if (_markerStatus.startsWith('Four markers detected')) {
-      return const Color(0xFF2563EB); // Blue: detected
+      return CmTheme.cameraFrameDetected;
     }
 
-    return Colors.white; // White: searching
+    return CmTheme.surfaceWhite;
   }
 
   @override
@@ -181,6 +190,7 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
     if (!mounted ||
         _autoCaptureTriggered ||
         _isTakingPicture ||
+        _isChoosingGallery ||
         _isProcessing ||
         _isAnalyzingFrame) {
       return;
@@ -390,6 +400,8 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
   }
 
   Future<void> _chooseFromGallery() async {
+    if (_isChoosingGallery || _isTakingPicture || _isProcessing) return;
+    _isChoosingGallery = true;
     try {
       final ImagePicker picker = ImagePicker();
 
@@ -425,6 +437,8 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
           duration: const Duration(seconds: 5),
         ),
       );
+    } finally {
+      _isChoosingGallery = false;
     }
   }
 
@@ -530,7 +544,9 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
 
     if (controller == null ||
         !controller.value.isInitialized ||
-        _isTakingPicture) {
+        _isTakingPicture ||
+        _isChoosingGallery ||
+        _isProcessing) {
       return;
     }
 
@@ -623,9 +639,20 @@ class _AnswerSheetCameraScreenState extends State<AnswerSheetCameraScreen> {
   Future<void> _openUploadVerification() async {
     final bytes = _capturedImageBytes;
 
-    if (bytes == null || _isProcessing) return;
+    if (bytes == null ||
+        _isProcessing ||
+        ModalRoute.of(context)?.isCurrent != true) {
+      return;
+    }
 
     setState(() => _isProcessing = true);
+
+    if (widget.returnCapture) {
+      Navigator.of(context).pop(
+        AnswerSheetCameraCapture(bytes: bytes, fileName: _capturedFileName),
+      );
+      return;
+    }
 
     String? result;
 

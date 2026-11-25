@@ -3,7 +3,6 @@ import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:image_picker/image_picker.dart' as image_picker;
-import 'package:flutter/foundation.dart' show kIsWeb, TargetPlatform;
 import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -47,6 +46,47 @@ class _UpperCaseFormatter extends TextInputFormatter {
   }
 }
 
+typedef AnswerSheetScannerEntryBuilder = Widget Function(
+  VoidCallback? start,
+  VoidCallback? upload,
+);
+
+typedef AnswerSheetScannerCardBuilder = Widget Function(Widget? status);
+
+enum _ScanPhase {
+  ready,
+  uploadReady,
+  preparing,
+  aligning,
+  detecting,
+  verifying,
+  verificationCancelled,
+  saving,
+  recorded,
+  processingFailed,
+  recordingFailed,
+}
+
+class _VerificationDraft {
+  const _VerificationDraft({
+    required this.edits,
+    required this.overriddenKeys,
+    required this.selectedStudentId,
+    required this.studentName,
+    required this.studentNumber,
+    required this.section,
+    required this.autoDetectedHighConfidence,
+  });
+
+  final Map<String, String> edits;
+  final Set<String> overriddenKeys;
+  final int? selectedStudentId;
+  final String studentName;
+  final String studentNumber;
+  final String section;
+  final bool autoDetectedHighConfidence;
+}
+
 class AnswerSheetUploadScreen extends StatefulWidget {
   final dynamic examId;
   final Map<String, dynamic>? exam;
@@ -56,6 +96,12 @@ class AnswerSheetUploadScreen extends StatefulWidget {
   final List<Map<String, dynamic>> sections;
   final List<Map<String, dynamic>> students;
   final VoidCallback? onViewInMySubjects;
+  final AnswerSheetScannerEntryBuilder? entryBuilder;
+  final AnswerSheetScannerCardBuilder? scannerCardBuilder;
+  final ValueChanged<bool>? onBusyChanged;
+  final bool cameraAvailable;
+  final bool useWideStatusLayout;
+  final bool enabled;
 
   const AnswerSheetUploadScreen({
     super.key,
@@ -67,7 +113,31 @@ class AnswerSheetUploadScreen extends StatefulWidget {
     this.sections = const [],
     this.students = const [],
     this.onViewInMySubjects,
-  });
+  }) : entryBuilder = null,
+       scannerCardBuilder = null,
+       onBusyChanged = null,
+       cameraAvailable = false,
+       useWideStatusLayout = false,
+       enabled = true;
+
+  const AnswerSheetUploadScreen.inline({
+    super.key,
+    required this.examId,
+    required this.exam,
+    required this.sections,
+    required this.students,
+    required AnswerSheetScannerEntryBuilder this.entryBuilder,
+    required AnswerSheetScannerCardBuilder this.scannerCardBuilder,
+    required this.onBusyChanged,
+    required this.cameraAvailable,
+    required this.useWideStatusLayout,
+    required this.enabled,
+    required this.onViewInMySubjects,
+  }) : initialImageBytes = null,
+       initialFileName = null,
+       autoProcessOnStart = true;
+
+  bool get isInline => entryBuilder != null;
 
   @override
   State<AnswerSheetUploadScreen> createState() =>
@@ -83,13 +153,19 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   int? _sourceImageWidth;
   int? _sourceImageHeight;
 
-  bool _isProcessing = false;
-  bool _isSavingScore = false;
-
-  String? _processingError;
+  _ScanPhase _phase = _ScanPhase.ready;
+  bool _isRunningAction = false;
+  bool _cameFromCamera = false;
+  String? _scanError;
   bool _isErrorDialogShowing = false;
+  _VerificationDraft? _verificationDraft;
 
-  String _processingStage = 'Preparing answer sheet...';
+  bool get _isProcessing => switch (_phase) {
+    _ScanPhase.preparing || _ScanPhase.aligning || _ScanPhase.detecting => true,
+    _ => false,
+  };
+  bool get _isSavingScore => _phase == _ScanPhase.saving;
+  bool get _canStartAction => !_isRunningAction && widget.enabled;
 
   List<RegistrationPoint>? _detectedMarkers;
 
@@ -118,16 +194,50 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
     _fileName =
         widget.initialFileName ??
         (widget.initialImageBytes != null ? 'Camera capture.jpg' : null);
-
+    _cameFromCamera = widget.autoProcessOnStart && _imageBytes != null;
     if (_imageBytes != null) {
       _decodeSourceDimensions(_imageBytes!);
     }
 
-    _ensureExamAndStudentsLoaded().then((_) {
-      if (mounted && widget.autoProcessOnStart && _imageBytes != null) {
-        _processImage();
+    if (!widget.isInline) {
+      if (_cameFromCamera) {
+        _runScannerAction(_processImage);
+      } else {
+        _ensureExamAndStudentsLoaded();
+      }
+    }
+  }
+
+  Future<void> _runScannerAction(Future<void> Function() action) async {
+    if (!_canStartAction) return;
+    setState(() => _isRunningAction = true);
+    widget.onBusyChanged?.call(true);
+    try {
+      await action();
+    } finally {
+      if (mounted) {
+        setState(() => _isRunningAction = false);
+        widget.onBusyChanged?.call(false);
+      }
+    }
+  }
+
+  void _showInlineCard() {
+    if (!widget.isInline) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && ModalRoute.of(context)?.isCurrent == true) {
+        Scrollable.ensureVisible(
+          context,
+          alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+        );
       }
     });
+  }
+
+  void _closeDialog<T>(BuildContext dialogContext, T result) {
+    if (ModalRoute.of(dialogContext)?.isCurrent == true) {
+      Navigator.of(dialogContext).pop(result);
+    }
   }
 
   void _decodeSourceDimensions(Uint8List bytes) {
@@ -196,8 +306,8 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
 
   Future<void> _pickImage() async {
     try {
-      Uint8List? bytes;
-      String? pickedFileName;
+      final Uint8List bytes;
+      final String pickedFileName;
 
       final bool isMobile =
           !kIsWeb &&
@@ -216,26 +326,18 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(dialogContext, false),
+                onPressed: () => _closeDialog(dialogContext, false),
                 child: const Text('Cancel'),
               ),
               FilledButton(
-                onPressed: () => Navigator.pop(dialogContext, true),
+                onPressed: () => _closeDialog(dialogContext, true),
                 child: const Text('Continue'),
               ),
             ],
           ),
         );
 
-        if (confirmed != true || !mounted) {
-          if (mounted) {
-            setState(() {
-              _isProcessing = false;
-              _processingStage = 'Verification cancelled. You can retry or choose another image.';
-            });
-          }
-          return;
-        }
+        if (confirmed != true || !mounted) return;
 
         final picker = image_picker.ImagePicker();
 
@@ -265,24 +367,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         pickedFileName = file.name;
       }
 
-      if (!mounted || bytes == null) return;
+      if (!mounted) return;
 
-      _decodeSourceDimensions(bytes);
-
-      setState(() {
-        _imageBytes = bytes;
-        _fileName = pickedFileName;
-        _processedImageBytes = null;
-        _omrDebugImageBytes = null;
-        _detectedMarkers = null;
-        _omrResult = null;
-        _identificationOcrNotice = null;
-        _scoringResult = null;
-        _answersVerified = false;
-        _processingError = null;
-        _isProcessing = false;
-      });
-      await _processImage();
+      await _processSelectedImage(bytes, pickedFileName);
     } catch (e) {
       if (!mounted) return;
 
@@ -295,20 +382,45 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
     }
   }
 
+  Future<void> _processSelectedImage(
+    Uint8List bytes,
+    String? fileName, {
+    bool cameFromCamera = false,
+  }) async {
+    _imageBytes = bytes;
+    _fileName = fileName;
+    _cameFromCamera = cameFromCamera;
+    _decodeSourceDimensions(bytes);
+    await _processImage();
+  }
+
   Future<void> _openCameraCapture() async {
     final int? eid = int.tryParse('${widget.examId ?? _exam?['id'] ?? ''}');
     if (eid == null) return;
 
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => AnswerSheetCameraScreen(
-          examId: eid,
-          exam: _exam,
-          sections: widget.sections,
-          students: _students,
-          onViewInMySubjects: widget.onViewInMySubjects,
-        ),
-      ),
+    Widget camera() => AnswerSheetCameraScreen(
+      examId: eid,
+      exam: _exam,
+      sections: widget.sections,
+      students: _students,
+      onViewInMySubjects: widget.onViewInMySubjects,
+      returnCapture: widget.isInline,
+    );
+
+    final navigator = Navigator.of(context);
+    if (!widget.isInline) {
+      await navigator.push(MaterialPageRoute<void>(builder: (_) => camera()));
+      return;
+    }
+
+    final capture = await navigator.push<AnswerSheetCameraCapture>(
+      MaterialPageRoute(builder: (_) => camera()),
+    );
+    if (!mounted || capture == null) return;
+    await _processSelectedImage(
+      capture.bytes,
+      capture.fileName,
+      cameFromCamera: true,
     );
   }
 
@@ -320,11 +432,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
 
     _isErrorDialogShowing = true;
 
-    final bool cameFromCamera =
-        widget.autoProcessOnStart && widget.initialImageBytes != null;
-
+    String? action;
     try {
-      final String? action = await showDialog<String>(
+      action = await showDialog<String>(
         context: context,
         barrierDismissible: false,
         builder: (dialogContext) => AlertDialog(
@@ -342,40 +452,39 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext, 'back');
-              },
+              onPressed: () => _closeDialog(dialogContext, 'back'),
               child: const Text('Go Back'),
             ),
             FilledButton(
-              onPressed: () {
-                Navigator.pop(
-                  dialogContext,
-                  cameFromCamera ? 'retake' : 'choose_another',
-                );
-              },
-              child: Text(cameFromCamera ? 'Retake' : 'Choose Another Image'),
+              onPressed: () => _closeDialog(
+                dialogContext,
+                _cameFromCamera ? 'retake' : 'choose_another',
+              ),
+              child: Text(_cameFromCamera ? 'Retake' : 'Choose Another Image'),
             ),
           ],
         ),
       );
-
-      if (!mounted) return;
-
-      if (action == 'retake') {
-        // Return to the existing camera screen.
-        Navigator.of(context).pop('retake');
-      } else if (action == 'choose_another') {
-        // Keep the previous image until a replacement is selected.
-        await _pickImage();
-      } else if (action == 'back') {
-        // Return to the previous screen.
-        if (Navigator.of(context).canPop()) {
-          Navigator.of(context).pop('back');
-        }
-      }
     } finally {
       _isErrorDialogShowing = false;
+    }
+    if (!mounted) return;
+
+    switch (action) {
+      case 'retake':
+        if (widget.isInline) {
+          await _openCameraCapture();
+        } else {
+          Navigator.of(context).pop('retake');
+        }
+      case 'choose_another':
+        await _pickImage();
+      case 'back':
+        if (widget.isInline) {
+          _chooseAnother(next: _readyForNextSheet);
+        } else if (Navigator.of(context).canPop()) {
+          Navigator.of(context).pop('back');
+        }
     }
   }
   // ------------------------------------------------------------
@@ -386,7 +495,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
     if (_imageBytes == null) return;
 
     setState(() {
-      _isProcessing = true;
+      _phase = _ScanPhase.preparing;
+      _scanError = null;
+      _verificationDraft = null;
       _processedImageBytes = null;
       _omrDebugImageBytes = null;
       _detectedMarkers = null;
@@ -394,11 +505,19 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       _identificationOcrNotice = null;
       _scoringResult = null;
       _answersVerified = false;
-      _processingStage =
-          'Aligning answer sheet and detecting corner markers...';
+      _detectedQrSheetNumber = null;
     });
+    _showInlineCard();
 
     try {
+      await _ensureExamAndStudentsLoaded();
+      if (!mounted) return;
+
+      setState(() => _phase = _ScanPhase.aligning);
+      if (widget.isInline) {
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted) return;
+      }
       final alignmentTimer = Stopwatch()..start();
 
       final result = await AnswerSheetProcessor.processAnswerSheet(
@@ -412,9 +531,6 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
 
       if (!mounted) return;
 
-      await _ensureExamAndStudentsLoaded();
-      if (!mounted) return;
-
       // Enforce strict 1-to-1 Answer Sheet <-> Assessment verification right
       // after perspective alignment so answer sheets from any other exam/quiz
       // are immediately rejected.
@@ -423,7 +539,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       setState(() {
         _processedImageBytes = result.correctedImageBytes;
         _detectedMarkers = result.markers;
-        _isProcessing = false;
+        _phase = _ScanPhase.ready;
       });
       if (widget.autoProcessOnStart && mounted) {
         await _runOMR();
@@ -434,9 +550,8 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       final errorMessage = e.toString().replaceFirst('Exception: ', '');
 
       setState(() {
-        _isProcessing = false;
-        _processingError = errorMessage;
-        _processingStage = 'Answer sheet processing failed.';
+        _phase = _ScanPhase.processingFailed;
+        _scanError = errorMessage;
       });
 
       await _showProcessingErrorDialog(
@@ -473,10 +588,8 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
     }
 
     setState(() {
-      _isProcessing = true;
-      _processingError = null;
-      _processingStage =
-          'Detecting marked answers and reading identification responses...';
+      _phase = _ScanPhase.detecting;
+      _scanError = null;
     });
 
     try {
@@ -518,15 +631,10 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         _scoringResult = null;
         _answersVerified = false;
         _omrDebugImageBytes = result.debugImageBytes;
-        _isProcessing = false;
+        _phase = _ScanPhase.verifying;
       });
 
       if (!mounted) return;
-
-      setState(() {
-        _processingStage =
-            'Detection complete. Preparing answer verification...';
-      });
 
       await _verifyDetectedAnswers(result);
     } catch (e) {
@@ -535,9 +643,8 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       final errorMessage = e.toString().replaceFirst('Exception: ', '');
 
       setState(() {
-        _isProcessing = false;
-        _processingError = errorMessage;
-        _processingStage = 'Answer detection failed.';
+        _phase = _ScanPhase.processingFailed;
+        _scanError = errorMessage;
       });
 
       await _showProcessingErrorDialog(
@@ -1458,11 +1565,13 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
     OMRProcessingResult rawResult, {
     String? ocrText,
   }) async {
+    setState(() => _phase = _ScanPhase.verifying);
     await _ensureExamAndStudentsLoaded();
     if (!mounted) return;
 
-    final edits = <String, String>{};
-    final overriddenKeys = <String>{};
+    final draft = _verificationDraft;
+    final edits = draft?.edits ?? <String, String>{};
+    final overriddenKeys = draft?.overriddenKeys ?? <String>{};
 
     for (
       var sectionIndex = 0;
@@ -1472,6 +1581,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       final section = rawResult.sections[sectionIndex];
       for (final answer in section.answers) {
         final key = '$sectionIndex:${answer.questionNumber}';
+        if (edits.containsKey(key)) continue;
         if (section.sectionType == 'identification') {
           edits[key] =
               (answer.answer == 'OCR Pending' || answer.answer == 'Unanswered')
@@ -1484,30 +1594,37 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
     }
 
     final availableSections = _availableSections();
-    final autoMatched =
-        _autoDetectStudent(ocrText: ocrText) ??
-        (_lastRecordedStudent == null && _students.length == 1
-            ? _students.first
-            : null);
+    final autoMatched = draft != null
+        ? null
+        : _autoDetectStudent(ocrText: ocrText) ??
+              (_lastRecordedStudent == null && _students.length == 1
+                  ? _students.first
+                  : null);
 
-    int? selectedStudentId = autoMatched != null
-        ? int.tryParse('${autoMatched['id']}')
-        : null;
-    final bool autoDetectedHighConfidence = autoMatched != null;
+    int? selectedStudentId =
+        draft?.selectedStudentId ??
+        (autoMatched != null ? int.tryParse('${autoMatched['id']}') : null);
+    final bool autoDetectedHighConfidence =
+        draft?.autoDetectedHighConfidence ?? (autoMatched != null);
 
-    String selectedSection = autoMatched != null
-        ? _studentSectionName(autoMatched)
-        : (availableSections.isNotEmpty
-              ? availableSections.first
-              : _defaultExamSection());
+    String selectedSection =
+        draft?.section ??
+        (autoMatched != null
+            ? _studentSectionName(autoMatched)
+            : (availableSections.isNotEmpty
+                  ? availableSections.first
+                  : _defaultExamSection()));
 
     final nameController = TextEditingController(
-      text: autoMatched != null ? _formatStudentFullName(autoMatched) : '',
+      text:
+          draft?.studentName ??
+          (autoMatched != null ? _formatStudentFullName(autoMatched) : ''),
     );
     final numberController = TextEditingController(
-      text: autoMatched != null
-          ? (autoMatched['student_number']?.toString() ?? '')
-          : '',
+      text:
+          draft?.studentNumber ??
+          autoMatched?['student_number']?.toString() ??
+          '',
     );
     final sectionController = TextEditingController(text: selectedSection);
 
@@ -1655,140 +1772,146 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         }
       }
 
+      final scrollHeader =
+          isMobileSheet ||
+          MediaQuery.sizeOf(modalContext).height < 720 ||
+          MediaQuery.viewInsetsOf(modalContext).bottom > 0;
+      final header = Container(
+        padding: scrollHeader
+            ? const EdgeInsets.fromLTRB(12, 12, 8, 12)
+            : const EdgeInsets.fromLTRB(24, 20, 20, 16),
+        decoration: const BoxDecoration(
+          color: CmTheme.surfaceWhite,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          border: Border(bottom: BorderSide(color: CmTheme.lineBorder)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: CmTheme.navy.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.fact_check_outlined,
+                    color: CmTheme.navy,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Verify Student Answers & Scanning Details',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: CmTheme.navy,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _examTitle(),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: CmTheme.slateText,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => _closeDialog(modalContext, false),
+                  icon: const Icon(Icons.close, color: CmTheme.slateText),
+                  tooltip: 'Close',
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (_examSubjectDisplay().isNotEmpty)
+                  _buildHeaderChip(
+                    Icons.menu_book_outlined,
+                    _examSubjectDisplay(),
+                  ),
+                _buildHeaderChip(
+                  Icons.quiz_outlined,
+                  '$totalItems Items • ${_formatNum(liveScore.totalPoints)} pts',
+                ),
+                for (final sec in rawResult.sections)
+                  _buildHeaderChip(
+                    _sectionIcon(sec.sectionType),
+                    '${sec.sectionName} (${sec.questionCount})',
+                  ),
+              ],
+            ),
+            if (ocrNotice != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                ocrNotice,
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: CmTheme.navy,
+                ),
+              ),
+            ],
+            if (unresolvedCount > 0) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: CmTheme.amberWarning.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: CmTheme.amberWarning.withValues(alpha: 0.5),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.warning_amber_rounded,
+                      size: 18,
+                      color: CmTheme.amberWarning,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '$unresolvedCount bubble detection(s) need manual review before recording.',
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: CmTheme.navy,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Modal Top Header
-          Container(
-            padding: const EdgeInsets.fromLTRB(24, 20, 20, 16),
-            decoration: const BoxDecoration(
-              color: CmTheme.surfaceWhite,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-              border: Border(bottom: BorderSide(color: CmTheme.lineBorder)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: CmTheme.navy.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(
-                        Icons.fact_check_outlined,
-                        color: CmTheme.navy,
-                        size: 22,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Verify Student Answers & Scanning Details',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700,
-                              color: CmTheme.navy,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            _examTitle(),
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: CmTheme.slateText,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: () => Navigator.of(modalContext).pop(false),
-                      icon: const Icon(Icons.close, color: CmTheme.slateText),
-                      tooltip: 'Close',
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    if (_examSubjectDisplay().isNotEmpty)
-                      _buildHeaderChip(
-                        Icons.menu_book_outlined,
-                        _examSubjectDisplay(),
-                      ),
-                    _buildHeaderChip(
-                      Icons.quiz_outlined,
-                      '$totalItems Items • ${_formatNum(liveScore.totalPoints)} pts',
-                    ),
-                    for (final sec in rawResult.sections)
-                      _buildHeaderChip(
-                        _sectionIcon(sec.sectionType),
-                        '${sec.sectionName} (${sec.questionCount})',
-                      ),
-                  ],
-                ),
-                if (ocrNotice != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    ocrNotice,
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                      color: CmTheme.navy,
-                    ),
-                  ),
-                ],
-                if (unresolvedCount > 0) ...[
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: CmTheme.amberWarning.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: CmTheme.amberWarning.withValues(alpha: 0.5),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.warning_amber_rounded,
-                          size: 18,
-                          color: CmTheme.amberWarning,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '$unresolvedCount bubble detection(s) need manual review before recording.',
-                            style: const TextStyle(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w600,
-                              color: CmTheme.navy,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-
+          if (!scrollHeader) header,
           // Scrollable Body: Student Details + Bubble Answer Verification
           Expanded(
             child: ColoredBox(
@@ -1796,6 +1919,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(20),
                 children: [
+                  if (scrollHeader) ...[header, const SizedBox(height: 12)],
                   // 1. STUDENT DETAILS SECTION
                   Container(
                     padding: const EdgeInsets.all(18),
@@ -1807,36 +1931,48 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.badge_outlined,
-                              size: 20,
-                              color: CmTheme.navy,
-                            ),
-                            const SizedBox(width: 8),
-                            const Expanded(
-                              child: Text(
-                                'Student Details',
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                  color: CmTheme.navy,
-                                ),
+                        SizedBox(
+                          width: double.infinity,
+                          child: Wrap(
+                            alignment: WrapAlignment.spaceBetween,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: [
+                              const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.badge_outlined,
+                                    size: 20,
+                                    color: CmTheme.navy,
+                                  ),
+                                  SizedBox(width: 8),
+                                  Flexible(
+                                    child: Text(
+                                      'Student Details',
+                                      style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w700,
+                                        color: CmTheme.navy,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
-                            _buildConfidencePill(
-                              isConfident: matchedStudent != null,
-                              confidentText:
-                                  autoDetectedHighConfidence &&
-                                      matchedStudent != null
-                                  ? '96% Confident • Matched'
-                                  : 'Matched in Section',
-                              warningText: _students.isEmpty
-                                  ? 'No Roster Loaded'
-                                  : 'Select / Verify Student',
-                            ),
-                          ],
+                              _buildConfidencePill(
+                                isConfident: matchedStudent != null,
+                                confidentText:
+                                    autoDetectedHighConfidence &&
+                                        matchedStudent != null
+                                    ? '96% Confident • Matched'
+                                    : 'Matched in Section',
+                                warningText: _students.isEmpty
+                                    ? 'No Roster Loaded'
+                                    : 'Select / Verify Student',
+                              ),
+                            ],
+                          ),
                         ),
                         const SizedBox(height: 14),
 
@@ -2119,9 +2255,10 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
             ),
           ),
 
-          // Sticky Modal Footer with Live Score & "Confirm & Record Score"
           Container(
-            padding: const EdgeInsets.fromLTRB(24, 14, 24, 18),
+            padding: isMobileSheet
+                ? const EdgeInsets.fromLTRB(12, 8, 12, 10)
+                : const EdgeInsets.fromLTRB(24, 14, 24, 18),
             decoration: const BoxDecoration(
               color: CmTheme.surfaceWhite,
               border: Border(top: BorderSide(color: CmTheme.lineBorder)),
@@ -2129,107 +2266,136 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
             ),
             child: SafeArea(
               top: false,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text(
-                          'Live Verified Score',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: CmTheme.slateText,
-                          ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final compact = constraints.maxWidth < 530;
+                  final scoreSummary = Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Live Verified Score',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: CmTheme.slateText,
                         ),
-                        const SizedBox(height: 2),
-                        Row(
-                          children: [
-                            Text(
-                              '${_formatNum(liveScore.earnedPoints)} / ${_formatNum(liveScore.totalPoints)}',
+                      ),
+                      const SizedBox(height: 2),
+                      Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 8,
+                        children: [
+                          Text(
+                            '${_formatNum(liveScore.earnedPoints)} / ${_formatNum(liveScore.totalPoints)}',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: CmTheme.navy,
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: CmTheme.emeraldSuccess.withValues(
+                                alpha: 0.15,
+                              ),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              '${liveScore.percentage.round()}%',
                               style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
                                 color: CmTheme.navy,
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: CmTheme.emeraldSuccess.withValues(
-                                  alpha: 0.15,
-                                ),
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: Text(
-                                '${liveScore.percentage.round()}%',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: CmTheme.navy,
-                                ),
-                              ),
-                            ),
-                          ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  );
+                  final actions = OverflowBar(
+                    spacing: 8,
+                    overflowSpacing: 4,
+                    alignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => _closeDialog(modalContext, false),
+                        style: TextButton.styleFrom(
+                          foregroundColor: CmTheme.slateText,
+                          padding: EdgeInsets.symmetric(
+                            horizontal: compact ? 10 : 16,
+                            vertical: 14,
+                          ),
                         ),
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      FilledButton.icon(
+                        onPressed:
+                            unresolvedCount > 0 ||
+                                (_students.isNotEmpty && matchedStudent == null)
+                            ? null
+                            : () => _closeDialog(modalContext, true),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: CmTheme.navy,
+                          foregroundColor: CmTheme.surfaceWhite,
+                          disabledBackgroundColor: CmTheme.lineBorder,
+                          disabledForegroundColor: CmTheme.slateText,
+                          padding: EdgeInsets.symmetric(
+                            horizontal: compact ? 12 : 20,
+                            vertical: 15,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        icon: const Icon(Icons.check_circle_outline, size: 18),
+                        label: const Text(
+                          'Confirm & Record Score',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                  if (compact) {
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        scoreSummary,
+                        const SizedBox(height: 4),
+                        actions,
                       ],
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.of(modalContext).pop(false),
-                    style: TextButton.styleFrom(
-                      foregroundColor: CmTheme.slateText,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 14,
-                      ),
-                    ),
-                    child: const Text(
-                      'Cancel',
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton.icon(
-                    onPressed:
-                        unresolvedCount > 0 ||
-                            (_students.isNotEmpty && matchedStudent == null)
-                        ? null
-                        : () => Navigator.of(modalContext).pop(true),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: CmTheme.navy,
-                      foregroundColor: CmTheme.surfaceWhite,
-                      disabledBackgroundColor: CmTheme.lineBorder,
-                      disabledForegroundColor: CmTheme.slateText,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 15,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    icon: const Icon(Icons.check_circle_outline, size: 18),
-                    label: const Text(
-                      'Confirm & Record Score',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-                ],
+                    );
+                  }
+                  return Row(
+                    children: [
+                      Expanded(child: scoreSummary),
+                      Flexible(flex: 2, child: actions),
+                    ],
+                  );
+                },
               ),
             ),
           ),
         ],
       );
+    }
+
+    Future<bool?>? reviewDismissed;
+    Widget reviewContents(BuildContext dialogContext) {
+      reviewDismissed = ModalRoute.of<bool>(dialogContext)?.completed;
+      return StatefulBuilder(builder: buildModalBody);
     }
 
     final bool? confirmed = isMobileSheet
@@ -2239,14 +2405,22 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
             isDismissible: false,
             enableDrag: false,
             backgroundColor: CmTheme.transparent,
-            builder: (sheetContext) => FractionallySizedBox(
-              heightFactor: 0.94,
-              child: Container(
-                decoration: const BoxDecoration(
-                  color: CmTheme.surfaceWhite,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            useSafeArea: true,
+            builder: (sheetContext) => Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
+              ),
+              child: FractionallySizedBox(
+                heightFactor: 0.94,
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: CmTheme.surfaceWhite,
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(24),
+                    ),
+                  ),
+                  child: reviewContents(sheetContext),
                 ),
-                child: StatefulBuilder(builder: buildModalBody),
               ),
             ),
           )
@@ -2268,10 +2442,13 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
                   maxWidth: 860,
                   maxHeight: MediaQuery.sizeOf(dialogContext).height * 0.88,
                 ),
-                child: StatefulBuilder(builder: buildModalBody),
+                child: reviewContents(dialogContext),
               ),
             ),
           );
+
+    // The route still paints during its exit animation.
+    await reviewDismissed;
 
     final finalName = nameController.text.trim().toUpperCase();
     final finalNumber = numberController.text.trim();
@@ -2290,7 +2467,23 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       c.dispose();
     }
 
-    if (confirmed != true || !mounted) return;
+    if (!mounted) return;
+    if (widget.isInline) {
+      _verificationDraft = _VerificationDraft(
+        edits: edits,
+        overriddenKeys: overriddenKeys,
+        selectedStudentId: selectedStudentId,
+        studentName: finalName,
+        studentNumber: finalNumber,
+        section: finalSection,
+        autoDetectedHighConfidence: autoDetectedHighConfidence,
+      );
+    }
+    if (confirmed != true) {
+      setState(() => _phase = _ScanPhase.verificationCancelled);
+      _showInlineCard();
+      return;
+    }
 
     final verified = buildCurrentOmr();
     final score = ScoringService.score(
@@ -2299,7 +2492,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
     );
 
     setState(() {
-      _omrResult = verified;
+      if (!widget.isInline) _omrResult = verified;
       _scoringResult = score;
       _answersVerified = true;
     });
@@ -2335,7 +2528,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
     final int? examId = int.tryParse('${widget.examId ?? _exam?['id'] ?? ''}');
     if (examId == null) return;
 
-    setState(() => _isSavingScore = true);
+    setState(() => _phase = _ScanPhase.saving);
 
     bool updatedExisting = false;
     int? recordedAttemptId;
@@ -2399,10 +2592,14 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() => _isSavingScore = false);
+      final message = e.toString().replaceFirst('Exception: ', '');
+      setState(() {
+        _phase = _ScanPhase.recordingFailed;
+        _scanError = message;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         CmTheme.feedbackSnackBar(
-          'Failed to save score to scorebook: ${e.toString().replaceFirst('Exception: ', '')}',
+          'Failed to save score to scorebook: $message',
           color: CmTheme.redDanger,
           duration: const Duration(seconds: 6),
         ),
@@ -2412,7 +2609,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
 
     if (!mounted) return;
     setState(() {
-      _isSavingScore = false;
+      _phase = _ScanPhase.recorded;
       _lastUpdatedExisting = updatedExisting;
       _lastRecordedStudent = {
         'id': resolvedStudentId,
@@ -2431,7 +2628,10 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       sectionName: sectionName.isEmpty ? _defaultExamSection() : sectionName,
     );
 
-    if (!mounted || nextAction == null) return;
+    if (!mounted) return;
+    if (widget.isInline) {
+      _chooseAnother(next: _readyForNextSheet);
+    }
 
     if (nextAction == 'view_subjects') {
       if (resolvedClassId != null && resolvedStudentId != null) {
@@ -2445,7 +2645,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
           attemptId: recordedAttemptId,
         );
       }
-      if (widget.onViewInMySubjects != null) {
+      if (widget.isInline) {
+        widget.onViewInMySubjects?.call();
+      } else if (widget.onViewInMySubjects != null) {
         Navigator.of(context).pop('view_subjects');
         widget.onViewInMySubjects!.call();
       } else {
@@ -2456,7 +2658,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
           Navigator.of(context).pop('view_subjects');
         }
       }
-    } else if (nextAction == 'scan_next') {
+    } else if (!widget.isInline && nextAction == 'scan_next') {
       if (widget.initialImageBytes != null) {
         // Came from AnswerSheetCameraScreen -> return 'scan_next' so camera relaunches.
         Navigator.of(context).pop('scan_next');
@@ -2516,14 +2718,16 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
                           color: CmTheme.navy,
                         ),
                         const SizedBox(width: 6),
-                        Text(
-                          updatedExisting
-                              ? 'Score updated in Scorebook'
-                              : 'Saved to Scorebook',
-                          style: const TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
-                            color: CmTheme.navy,
+                        Flexible(
+                          child: Text(
+                            updatedExisting
+                                ? 'Score updated in Scorebook'
+                                : 'Saved to Scorebook',
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                              color: CmTheme.navy,
+                            ),
                           ),
                         ),
                       ],
@@ -2738,7 +2942,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
                     width: double.infinity,
                     child: FilledButton.icon(
                       onPressed: () =>
-                          Navigator.of(dialogContext).pop('view_subjects'),
+                          _closeDialog(dialogContext, 'view_subjects'),
                       style: FilledButton.styleFrom(
                         backgroundColor: CmTheme.navy,
                         foregroundColor: CmTheme.surfaceWhite,
@@ -2761,8 +2965,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
-                      onPressed: () =>
-                          Navigator.of(dialogContext).pop('scan_next'),
+                      onPressed: () => _closeDialog(dialogContext, 'scan_next'),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: CmTheme.navy,
                         side: const BorderSide(color: CmTheme.navy, width: 1.3),
@@ -3338,12 +3541,14 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
             color: CmTheme.navy,
           ),
           const SizedBox(width: 4),
-          Text(
-            isConfident ? confidentText : warningText,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: CmTheme.navy,
+          Flexible(
+            child: Text(
+              isConfident ? confidentText : warningText,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: CmTheme.navy,
+              ),
             ),
           ),
         ],
@@ -3364,12 +3569,14 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         children: [
           Icon(icon, size: 14, color: CmTheme.slateText),
           const SizedBox(width: 5),
-          Text(
-            text,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: CmTheme.slateText,
+          Flexible(
+            child: Text(
+              text,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: CmTheme.slateText,
+              ),
             ),
           ),
         ],
@@ -3441,8 +3648,12 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   // CHOOSE ANOTHER IMAGE
   // ------------------------------------------------------------
 
-  void _chooseAnother() {
+  _ScanPhase get _readyForNextSheet =>
+      widget.cameraAvailable ? _ScanPhase.ready : _ScanPhase.uploadReady;
+
+  void _chooseAnother({_ScanPhase next = _ScanPhase.ready}) {
     setState(() {
+      _phase = next;
       _imageBytes = null;
       _processedImageBytes = null;
       _omrDebugImageBytes = null;
@@ -3452,9 +3663,47 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       _scoringResult = null;
       _answersVerified = false;
       _fileName = null;
-      _isProcessing = false;
-      _processingError = null;
+      _cameFromCamera = false;
+      _scanError = null;
+      _detectedQrSheetNumber = null;
+      _verificationDraft = null;
     });
+  }
+
+  void _startScan() {
+    if (!_canStartAction) return;
+    if (widget.cameraAvailable) {
+      _runScannerAction(_openCameraCapture);
+    } else {
+      setState(() => _phase = _ScanPhase.uploadReady);
+      _showInlineCard();
+    }
+  }
+
+  Widget _buildInlineContent() {
+    final scannerCard = widget.scannerCardBuilder!;
+    final Widget content;
+    if (_imageBytes != null) {
+      if (widget.useWideStatusLayout &&
+          (_isProcessing || _phase == _ScanPhase.verificationCancelled)) {
+        return scannerCard(
+          _buildAutomaticProcessingState(insideScannerCard: true),
+        );
+      }
+      content = _buildAutomaticProcessingState();
+    } else if (_phase == _ScanPhase.uploadReady) {
+      content = _buildEmptyUploadState();
+    } else {
+      content = widget.entryBuilder!(
+        _canStartAction ? _startScan : null,
+        _canStartAction ? () => _runScannerAction(_pickImage) : null,
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [scannerCard(null), const SizedBox(height: 6), content],
+    );
   }
 
   // ------------------------------------------------------------
@@ -3463,6 +3712,16 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.isInline) {
+      return PopScope(
+        canPop: !_isRunningAction && _phase == _ScanPhase.ready,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop && !_isRunningAction) _chooseAnother();
+        },
+        child: _buildInlineContent(),
+      );
+    }
+
     return Scaffold(
       backgroundColor: CmTheme.background,
       appBar: AppBar(
@@ -3645,11 +3904,16 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
   // ------------------------------------------------------------
 
   Widget _buildEmptyUploadState() {
-    final bool isMobileViewport = MediaQuery.sizeOf(context).width < 1024;
+    final canUseCamera = widget.isInline
+        ? widget.cameraAvailable
+        : !kIsWeb && MediaQuery.sizeOf(context).width < 1024;
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 48),
+      padding: EdgeInsets.symmetric(
+        horizontal: widget.isInline ? 20 : 28,
+        vertical: widget.isInline ? 14 : 48,
+      ),
       decoration: BoxDecoration(
         color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(20),
@@ -3666,19 +3930,19 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 76,
-            height: 76,
+            width: widget.isInline ? 44 : 76,
+            height: widget.isInline ? 44 : 76,
             decoration: BoxDecoration(
               color: CmTheme.navy.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(20),
             ),
-            child: const Icon(
+            child: Icon(
               Icons.upload_file_outlined,
-              size: 38,
+              size: widget.isInline ? 26 : 38,
               color: CmTheme.navy,
             ),
           ),
-          const SizedBox(height: 20),
+          SizedBox(height: widget.isInline ? 6 : 20),
           const Text(
             'Upload an Answer Sheet Image',
             textAlign: TextAlign.center,
@@ -3698,20 +3962,22 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
               height: 1.45,
             ),
           ),
-          const SizedBox(height: 28),
+          SizedBox(height: widget.isInline ? 10 : 28),
           Wrap(
             spacing: 12,
             runSpacing: 12,
             alignment: WrapAlignment.center,
             children: [
               FilledButton.icon(
-                onPressed: _pickImage,
+                onPressed: _canStartAction
+                    ? () => _runScannerAction(_pickImage)
+                    : null,
                 style: FilledButton.styleFrom(
                   backgroundColor: CmTheme.navy,
                   foregroundColor: CmTheme.surfaceWhite,
-                  padding: const EdgeInsets.symmetric(
+                  padding: EdgeInsets.symmetric(
                     horizontal: 24,
-                    vertical: 16,
+                    vertical: widget.isInline ? 10 : 16,
                   ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
@@ -3723,9 +3989,11 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
                 ),
               ),
-              if (isMobileViewport && !kIsWeb)
+              if (canUseCamera)
                 OutlinedButton.icon(
-                  onPressed: _openCameraCapture,
+                  onPressed: _canStartAction
+                      ? () => _runScannerAction(_openCameraCapture)
+                      : null,
                   style: OutlinedButton.styleFrom(
                     foregroundColor: CmTheme.navy,
                     side: const BorderSide(color: CmTheme.navy, width: 1.2),
@@ -3832,161 +4100,259 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
     );
   }
 
-  Widget _buildAutomaticProcessingState() {
-    final bool showFailure = !_isProcessing && _processingError != null;
+  Widget _buildAutomaticProcessingState({bool insideScannerCard = false}) {
+    final progress = _isProcessing || _isSavingScore;
+    final (title, message, icon, iconColor) = switch (_phase) {
+      _ScanPhase.processingFailed => (
+        'Processing Failed',
+        'Check the answer sheet image and try again.',
+        Icons.error_outline,
+        CmTheme.redDanger,
+      ),
+      _ScanPhase.recordingFailed => (
+        'Unable to Record Score',
+        _scanError ?? 'Retry verification to submit the score again.',
+        Icons.error_outline,
+        CmTheme.redDanger,
+      ),
+      _ScanPhase.verificationCancelled => (
+        'Answer Verification Cancelled',
+        'Your detected answers are still available. '
+            'You can retry verification or select another answer sheet.',
+        Icons.edit_note,
+        CmTheme.navy,
+      ),
+      _ScanPhase.verifying => (
+        'Verify Detected Answers',
+        'Review the answers and student details before recording the score.',
+        Icons.edit_note,
+        CmTheme.navy,
+      ),
+      _ScanPhase.saving => (
+        'Saving verified student score...',
+        'Please wait while CheckMate saves the score to My Subjects.',
+        Icons.check_circle_outline,
+        CmTheme.navy,
+      ),
+      _ScanPhase.recorded => (
+        'Sheet Scored',
+        'Saved to My Subjects.',
+        Icons.check_circle_outline,
+        CmTheme.emeraldSuccess,
+      ),
+      _ => (
+        switch (_phase) {
+          _ScanPhase.aligning =>
+            'Aligning answer sheet and detecting corner markers...',
+          _ScanPhase.detecting =>
+            'Detecting marked answers and reading identification responses...',
+          _ => 'Preparing answer sheet...',
+        },
+        'Please wait while CheckMate processes your answer sheet.',
+        Icons.document_scanner_outlined,
+        CmTheme.navy,
+      ),
+    };
+    final canRecoverVerification =
+        _phase == _ScanPhase.verificationCancelled ||
+        _phase == _ScanPhase.recordingFailed;
 
-    final bool showRecovery =
-        !_isProcessing &&
-        _processingError == null &&
-        _processedImageBytes != null &&
-        _omrResult != null &&
-        !_answersVerified;
-
-    final bool cameFromCamera =
-        widget.autoProcessOnStart && widget.initialImageBytes != null;
+    final fileName = _fileName?.trim();
+    final content = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (progress)
+          SizedBox.square(
+            dimension: insideScannerCard ? 30 : 48,
+            child: CircularProgressIndicator(
+              strokeWidth: insideScannerCard ? 3 : 4,
+              color: CmTheme.navy,
+              backgroundColor: insideScannerCard ? CmTheme.lineBorder : null,
+            ),
+          )
+        else if (!insideScannerCard)
+          Icon(icon, size: 48, color: iconColor),
+        if (progress || !insideScannerCard)
+          SizedBox(height: insideScannerCard ? 8 : (widget.isInline ? 10 : 20)),
+        Text(
+          title,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: insideScannerCard ? 16 : 20,
+            fontWeight: FontWeight.w700,
+            color: CmTheme.navy,
+          ),
+        ),
+        SizedBox(height: insideScannerCard ? 4 : 8),
+        Text(
+          message,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: insideScannerCard ? 12 : 14,
+            color: CmTheme.slateText,
+            height: insideScannerCard ? 1.35 : 1.5,
+          ),
+        ),
+        if (progress) ...[
+          SizedBox(height: insideScannerCard ? 8 : 16),
+          if (insideScannerCard)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 330),
+              child: const LinearProgressIndicator(
+                minHeight: 4,
+                borderRadius: BorderRadius.all(Radius.circular(4)),
+                color: CmTheme.navy,
+                backgroundColor: CmTheme.lineBorder,
+              ),
+            )
+          else
+            const LinearProgressIndicator(
+              color: CmTheme.navy,
+              backgroundColor: CmTheme.lineBorder,
+            ),
+          if (insideScannerCard && fileName != null && fileName.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              fileName,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, color: CmTheme.slateText),
+            ),
+          ],
+        ],
+        if (_phase == _ScanPhase.processingFailed ||
+            canRecoverVerification) ...[
+          SizedBox(height: insideScannerCard ? 6 : 12),
+          _buildProcessingActions(
+            canRecoverVerification: canRecoverVerification,
+            insideScannerCard: insideScannerCard,
+          ),
+        ],
+      ],
+    );
+    if (insideScannerCard) return content;
 
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 480),
         child: Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(32),
+          padding: EdgeInsets.all(widget.isInline ? 16 : 32),
           decoration: BoxDecoration(
             color: CmTheme.surfaceWhite,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: CmTheme.lineBorder),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (showFailure) ...[
-                const Icon(
-                  Icons.error_outline,
-                  size: 52,
-                  color: CmTheme.redDanger,
-                ),
-                const SizedBox(height: 20),
-              ] else if (showRecovery) ...[
-                const Icon(Icons.edit_note, size: 48, color: CmTheme.navy),
-                const SizedBox(height: 24),
-              ] else ...[
-                const SizedBox(
-                  width: 48,
-                  height: 48,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 4,
-                    color: CmTheme.navy,
-                  ),
-                ),
-                const SizedBox(height: 24),
-              ],
-
-              Text(
-                showFailure
-                    ? 'Processing Failed'
-                    : showRecovery
-                    ? 'Answer Verification Cancelled'
-                    : _processingStage,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  color: CmTheme.navy,
-                ),
-              ),
-
-              const SizedBox(height: 10),
-
-              Text(
-                showFailure
-                    ? 'Check the answer sheet image and try again.'
-                    : showRecovery
-                    ? 'Your detected answers are still available. '
-                          'You can retry verification or select another answer sheet.'
-                    : 'Please wait while CheckMate processes your answer sheet.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: CmTheme.slateText,
-                  height: 1.5,
-                ),
-              ),
-
-              if (showFailure) ...[
-                const SizedBox(height: 24),
-
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: () {
-                      if (cameFromCamera) {
-                        Navigator.of(context).pop('retake');
-                      } else {
-                        _processImage();
-                      }
-                    },
-                    icon: Icon(
-                      cameFromCamera ? Icons.camera_alt : Icons.refresh,
-                    ),
-                    label: Text(
-                      cameFromCamera
-                          ? 'Retake Answer Sheet'
-                          : 'Retry Processing',
-                    ),
-                  ),
-                ),
-
-                if (!cameFromCamera) ...[
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _pickImage,
-                      icon: const Icon(Icons.upload_file),
-                      label: const Text('Choose Another Image'),
-                    ),
-                  ),
-                ],
-              ] else if (showRecovery) ...[
-                const SizedBox(height: 24),
-
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: () {
-                      if (_omrResult != null) {
-                        _verifyDetectedAnswers(_omrResult!);
-                      }
-                    },
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Retry Verification'),
-                  ),
-                ),
-
-                const SizedBox(height: 10),
-
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () async {
-                      await _pickImage();
-                    },
-                    icon: const Icon(Icons.upload_file),
-                    label: const Text('Choose Another Image'),
-                  ),
-                ),
-              ] else ...[
-                const SizedBox(height: 24),
-                const LinearProgressIndicator(
-                  color: CmTheme.navy,
-                  backgroundColor: CmTheme.lineBorder,
-                ),
-              ],
-            ],
-          ),
+          child: content,
         ),
       ),
     );
+  }
+
+  Widget _buildProcessingActions({
+    required bool canRecoverVerification,
+    required bool insideScannerCard,
+  }) {
+    final buttonShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(10),
+    );
+    const buttonPadding = EdgeInsets.symmetric(horizontal: 10, vertical: 6);
+    const buttonText = TextStyle(fontSize: 13, fontWeight: FontWeight.w700);
+
+    final retry = FilledButton.icon(
+      style: insideScannerCard
+          ? FilledButton.styleFrom(
+              backgroundColor: CmTheme.navy,
+              foregroundColor: CmTheme.surfaceWhite,
+              minimumSize: const Size(0, 36),
+              padding: buttonPadding,
+              shape: buttonShape,
+            )
+          : null,
+      onPressed: !_canStartAction
+          ? null
+          : canRecoverVerification
+          ? () => _runScannerAction(() => _verifyDetectedAnswers(_omrResult!))
+          : () => _runScannerAction(_retryProcessing),
+      icon: Icon(
+        !canRecoverVerification && _cameFromCamera
+            ? Icons.camera_alt
+            : Icons.refresh,
+        size: insideScannerCard ? 16 : null,
+      ),
+      label: Text(
+        canRecoverVerification
+            ? 'Retry Verification'
+            : _cameFromCamera
+            ? 'Retake Answer Sheet'
+            : 'Retry Processing',
+        textAlign: insideScannerCard ? TextAlign.center : null,
+        style: insideScannerCard ? buttonText : null,
+      ),
+    );
+    final chooseImage = OutlinedButton.icon(
+      style: insideScannerCard
+          ? OutlinedButton.styleFrom(
+              backgroundColor: CmTheme.surfaceWhite,
+              foregroundColor: CmTheme.navy,
+              side: const BorderSide(color: CmTheme.lineBorder),
+              minimumSize: const Size(0, 36),
+              padding: buttonPadding,
+              shape: buttonShape,
+            )
+          : null,
+      onPressed: _canStartAction ? () => _runScannerAction(_pickImage) : null,
+      icon: Icon(Icons.upload_file, size: insideScannerCard ? 16 : null),
+      label: Text(
+        'Choose Another Image',
+        textAlign: insideScannerCard ? TextAlign.center : null,
+        style: insideScannerCard ? buttonText : null,
+      ),
+    );
+
+    if (insideScannerCard) {
+      return Row(
+        children: [
+          Expanded(child: retry),
+          const SizedBox(width: 8),
+          Expanded(child: chooseImage),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        retry,
+        if (widget.isInline || !_cameFromCamera || canRecoverVerification) ...[
+          const SizedBox(height: 6),
+          chooseImage,
+        ],
+        if (widget.isInline &&
+            widget.cameraAvailable &&
+            (canRecoverVerification || !_cameFromCamera)) ...[
+          const SizedBox(height: 6),
+          OutlinedButton.icon(
+            onPressed: _canStartAction
+                ? () => _runScannerAction(_openCameraCapture)
+                : null,
+            icon: const Icon(Icons.photo_camera_outlined),
+            label: const Text('Open Camera Scanner'),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _retryProcessing() async {
+    if (!_cameFromCamera) {
+      await _processImage();
+    } else if (widget.isInline) {
+      await _openCameraCapture();
+    } else {
+      Navigator.of(context).pop('retake');
+    }
   }
 
   Widget _buildProcessedResult() {
@@ -4269,7 +4635,7 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
       runSpacing: 12,
       children: [
         OutlinedButton.icon(
-          onPressed: (_isProcessing || _isSavingScore) ? null : _chooseAnother,
+          onPressed: _canStartAction ? _chooseAnother : null,
           style: OutlinedButton.styleFrom(
             foregroundColor: CmTheme.navy,
             side: const BorderSide(color: CmTheme.slateText),
@@ -4287,7 +4653,9 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
         ),
         if (_processedImageBytes == null)
           FilledButton.icon(
-            onPressed: (_isProcessing || _isSavingScore) ? null : _processImage,
+            onPressed: _canStartAction
+                ? () => _runScannerAction(_processImage)
+                : null,
             style: FilledButton.styleFrom(
               backgroundColor: CmTheme.navy,
               foregroundColor: CmTheme.surfaceWhite,
@@ -4304,11 +4672,13 @@ class _AnswerSheetUploadScreenState extends State<AnswerSheetUploadScreen> {
           ),
         if (_processedImageBytes != null)
           FilledButton.icon(
-            onPressed: (_isProcessing || _isSavingScore)
+            onPressed: !_canStartAction
                 ? null
-                : (_omrResult == null
-                      ? _runOMR
-                      : () => _verifyDetectedAnswers(_omrResult!)),
+                : () => _runScannerAction(
+                    _omrResult == null
+                        ? _runOMR
+                        : () => _verifyDetectedAnswers(_omrResult!),
+                  ),
             style: FilledButton.styleFrom(
               backgroundColor: CmTheme.navy,
               foregroundColor: CmTheme.surfaceWhite,

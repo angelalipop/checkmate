@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:checkmate/theme/cm_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
@@ -7,7 +7,6 @@ import '../services/answer_sheet_pdf_service.dart';
 import '../services/api_service.dart';
 import '../services/auth_storage.dart';
 import '../services/my_subjects_api_service.dart';
-import 'answer_sheet_camera_screen.dart';
 import 'answer_sheet_upload_screen.dart';
 import 'teacher_dashboard.dart' show TeacherPage, TeacherShell;
 
@@ -29,6 +28,14 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
   bool _isLoadingAssessments = false;
   bool _isLoadingSections = false;
   bool _isDownloadingSheet = false;
+  bool _scannerBusy = false;
+
+  bool get _selectionLocked =>
+      _isLoading ||
+      _isLoadingAssessments ||
+      _isLoadingSections ||
+      _isDownloadingSheet ||
+      _scannerBusy;
 
   // Cascading filter state: Subject -> Section -> Active/Published Assessment
   List<Map<String, dynamic>> _subjects = [];
@@ -146,12 +153,13 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
         _selectedExam = null;
         _selectedExamSections = [];
         _selectedExamStudents = [];
-        _isLoading = false;
+        _isLoading = widget.initialExamId != null;
       });
 
       // If an initialExamId was supplied, pre-select its Subject, Section, and Assessment.
       if (widget.initialExamId != null) {
         await _preselectInitialExam(widget.initialExamId!);
+        if (mounted) setState(() => _isLoading = false);
       }
     } catch (e) {
       if (!mounted) return;
@@ -193,7 +201,11 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
         }
       }
     } catch (_) {}
-    if (targetExam == null || targetExam['creation_mode'] == 'manual') return;
+    if (!mounted ||
+        targetExam == null ||
+        targetExam['creation_mode'] == 'manual') {
+      return;
+    }
 
     for (final subj in _subjects) {
       final sections = _subjectSections(subj);
@@ -719,55 +731,19 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
   }
 
   // =========================
-  // CONTINUE TO SCANNER (CAMERA OR FILE UPLOAD)
+  // INLINE SCANNER
   // =========================
 
-  Future<void> _continueToScanner({bool? forceUpload}) async {
-    if (_selectedSubject == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        CmTheme.feedbackSnackBar(
-          'Please select a subject first.',
-          color: CmTheme.amberWarning,
-        ),
-      );
-      return;
-    }
-
-    if (_selectedSection == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        CmTheme.feedbackSnackBar(
-          'Please select a section first.',
-          color: CmTheme.amberWarning,
-        ),
-      );
-      return;
-    }
-
-    if (_selectedExam == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        CmTheme.feedbackSnackBar(
-          'Please select an assessment first.',
-          color: CmTheme.amberWarning,
-        ),
-      );
-      return;
-    }
-
-    if (_isLoadingSections) return;
-
-    if (_selectedExamSections.isEmpty) {
-      await _loadExamSections();
-      if (!mounted || _selectedExamSections.isEmpty) return;
-    }
-
-    final int? examId = int.tryParse('${_selectedExam!['id']}');
-    if (examId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        CmTheme.feedbackSnackBar('Invalid exam ID.', color: CmTheme.redDanger),
-      );
-      return;
-    }
-
+  Widget _buildScannerWorkflow({
+    required bool canUseCamera,
+    required bool useWideStatusLayout,
+  }) {
+    final exam = _selectedExam!;
+    final examId = int.tryParse('${exam['id']}');
+    final canScan =
+        examId != null &&
+        !_isLoadingSections &&
+        _selectedExamSections.isNotEmpty;
     final List<Map<String, dynamic>> scannerSections = _selectedExamSections
         .map((section) {
           return {
@@ -783,39 +759,38 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
         })
         .toList();
 
-    final examMap = Map<String, dynamic>.from(_selectedExam!);
-    final studentsList = List<Map<String, dynamic>>.from(_selectedExamStudents);
-
-    final screenWidth = MediaQuery.sizeOf(context).width;
-    final bool isMobileOrTablet = screenWidth < 1024;
-    final bool useUploadScreen = forceUpload ?? (!isMobileOrTablet || kIsWeb);
-
-    if (!mounted) return;
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (routeContext) {
-          if (useUploadScreen) {
-            return AnswerSheetUploadScreen(
-              examId: examId,
-              exam: examMap,
-              sections: scannerSections,
-              students: studentsList,
-              autoProcessOnStart: true,
-              onViewInMySubjects: _routeToMySubjects,
-            );
-          }
-
-          return AnswerSheetCameraScreen(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (canScan)
+          AnswerSheetUploadScreen.inline(
+            key: ValueKey((_selectedSection?['class_id'], examId)),
             examId: examId,
-            exam: examMap,
+            exam: exam,
             sections: scannerSections,
-            students: studentsList,
+            students: _selectedExamStudents,
+            cameraAvailable: canUseCamera,
+            useWideStatusLayout: useWideStatusLayout,
+            enabled: !_isDownloadingSheet,
+            entryBuilder: (start, upload) =>
+                _buildScannerButtons(canUseCamera, start, upload),
+            scannerCardBuilder: (status) =>
+                _buildCaptureMethodCard(canUseCamera, status: status),
+            onBusyChanged: (busy) => setState(() => _scannerBusy = busy),
             onViewInMySubjects: _routeToMySubjects,
-          );
-        },
-      ),
+          )
+        else ...[
+          _buildCaptureMethodCard(canUseCamera),
+          const SizedBox(height: 6),
+          _buildScannerButtons(
+            canUseCamera,
+            _selectionLocked ? null : _loadExamSections,
+            _selectionLocked ? null : _loadExamSections,
+          ),
+        ],
+        const SizedBox(height: 4),
+        _buildDownloadButton(),
+      ],
     );
   }
 
@@ -825,12 +800,21 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final double screenWidth = MediaQuery.sizeOf(context).width;
-    final bool isMobileOrTablet = screenWidth < 1024;
+    final screenSize = MediaQuery.sizeOf(context);
+    final bool isMobileOrTablet = screenSize.width < 1024;
+    final platform = defaultTargetPlatform;
+    final bool canUseCamera =
+        isMobileOrTablet &&
+        (platform == TargetPlatform.android || platform == TargetPlatform.iOS);
+    // Give long labels more room to fit on one line in short desktop windows.
+    final double cardMaxWidth = !isMobileOrTablet && screenSize.height < 640
+        ? 960
+        : 780;
 
     return Scaffold(
       backgroundColor: CmTheme.background,
       appBar: AppBar(
+        toolbarHeight: 48,
         backgroundColor: CmTheme.surfaceWhite,
         foregroundColor: CmTheme.navy,
         elevation: 0,
@@ -852,22 +836,29 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
           ? const Center(child: CircularProgressIndicator(color: CmTheme.navy))
           : RefreshIndicator(
               color: CmTheme.navy,
-              onRefresh: _loadExams,
+              onRefresh: () async {
+                if (!_selectionLocked && _selectedExam == null) {
+                  await _loadExams();
+                }
+              },
               child: ListView(
                 padding: EdgeInsets.symmetric(
-                  horizontal: screenWidth >= 900 ? 32 : 20,
-                  vertical: 24,
+                  horizontal: screenSize.width >= 900 ? 32 : 20,
+                  vertical: 6,
                 ),
                 children: [
                   Center(
                     child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 780),
+                      constraints: BoxConstraints(maxWidth: cardMaxWidth),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           // Hero Header Card
                           Container(
-                            padding: const EdgeInsets.all(24),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 8,
+                            ),
                             decoration: BoxDecoration(
                               color: CmTheme.surfaceWhite,
                               borderRadius: BorderRadius.circular(16),
@@ -883,19 +874,19 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                             child: Column(
                               children: [
                                 Container(
-                                  width: 64,
-                                  height: 64,
+                                  width: 36,
+                                  height: 36,
                                   decoration: BoxDecoration(
                                     color: CmTheme.navy.withValues(alpha: 0.08),
                                     borderRadius: BorderRadius.circular(16),
                                   ),
                                   child: const Icon(
                                     Icons.document_scanner_outlined,
-                                    size: 32,
+                                    size: 24,
                                     color: CmTheme.navy,
                                   ),
                                 ),
-                                const SizedBox(height: 16),
+                                const SizedBox(height: 4),
                                 const Text(
                                   'Scan & Score Answer Sheets',
                                   textAlign: TextAlign.center,
@@ -905,9 +896,9 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                                     color: CmTheme.navy,
                                   ),
                                 ),
-                                const SizedBox(height: 6),
+                                const SizedBox(height: 2),
                                 Text(
-                                  isMobileOrTablet
+                                  canUseCamera
                                       ? 'Select a subject, section, and active assessment, align the answer sheet corners in your camera frame, verify answers, and record scores directly to My Subjects.'
                                       : 'Select a subject, section, and active assessment, upload a JPG or PNG answer sheet scan, verify detected answers, and record scores directly to My Subjects.',
                                   textAlign: TextAlign.center,
@@ -917,7 +908,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                                     height: 1.4,
                                   ),
                                 ),
-                                const SizedBox(height: 24),
+                                const SizedBox(height: 8),
                                 if (_subjects.isEmpty)
                                   _buildNoExamsState()
                                 else
@@ -926,11 +917,14 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                             ),
                           ),
 
-                          const SizedBox(height: 20),
+                          const SizedBox(height: 6),
 
                           if (_isLoadingSections)
                             Container(
-                              padding: const EdgeInsets.all(20),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                                vertical: 10,
+                              ),
                               decoration: BoxDecoration(
                                 color: CmTheme.surfaceWhite,
                                 borderRadius: BorderRadius.circular(16),
@@ -964,14 +958,14 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                               _selectedExam != null &&
                               _selectedExamSections.isNotEmpty) ...[
                             _buildExamStructureCard(),
-                            const SizedBox(height: 20),
+                            const SizedBox(height: 6),
                           ],
 
-                          if (_selectedExam != null) ...[
-                            _buildCaptureMethodCard(isMobileOrTablet),
-                            const SizedBox(height: 20),
-                            _buildActionButtons(isMobileOrTablet),
-                          ],
+                          if (_selectedExam != null)
+                            _buildScannerWorkflow(
+                              canUseCamera: canUseCamera,
+                              useWideStatusLayout: !isMobileOrTablet,
+                            ),
                         ],
                       ),
                     ),
@@ -984,7 +978,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
 
   Widget _buildNoExamsState() {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: BoxDecoration(
         color: CmTheme.background,
         borderRadius: BorderRadius.circular(14),
@@ -994,10 +988,10 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
         children: [
           const Icon(
             Icons.assignment_late_outlined,
-            size: 44,
+            size: 36,
             color: CmTheme.slateText,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           const Text(
             'No subjects or assessments available yet.',
             style: TextStyle(
@@ -1012,7 +1006,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 13, color: CmTheme.slateText),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
           OutlinedButton.icon(
             onPressed: _loadExams,
             style: OutlinedButton.styleFrom(
@@ -1038,6 +1032,8 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
     return InputDecoration(
       labelText: label,
       hintText: hint,
+      isDense: true,
+      contentPadding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
       labelStyle: const TextStyle(
         color: CmTheme.slateText,
         fontWeight: FontWeight.w600,
@@ -1045,6 +1041,12 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
       filled: true,
       fillColor: CmTheme.background,
       prefixIcon: Icon(icon, color: CmTheme.navy),
+      prefixIconConstraints: BoxConstraints(
+        minWidth: kMinInteractiveDimension,
+        minHeight: MediaQuery.sizeOf(context).width < 1024
+            ? kMinInteractiveDimension
+            : 40,
+      ),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
         borderSide: const BorderSide(color: CmTheme.lineBorder),
@@ -1147,35 +1149,37 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
               ),
             );
           }).toList(),
-          onChanged: (String? subjKey) {
-            if (subjKey == null) return;
-            Map<String, dynamic>? chosenSubj;
-            for (final s in uniqueSubjects) {
-              final k = (s['key'] ?? '${s['subject_id'] ?? s['code']}')
-                  .toString();
-              if (k == subjKey) {
-                chosenSubj = s;
-                break;
-              }
-            }
-            if (chosenSubj == null) return;
-            setState(() {
-              _selectedSubject = chosenSubj;
-              _selectedSection = null;
-              _exams = [];
-              _selectedExam = null;
-              _selectedExamSections = [];
-              _selectedExamStudents = [];
-            });
-          },
+          onChanged: _selectionLocked
+              ? null
+              : (String? subjKey) {
+                  if (subjKey == null) return;
+                  Map<String, dynamic>? chosenSubj;
+                  for (final s in uniqueSubjects) {
+                    final k = (s['key'] ?? '${s['subject_id'] ?? s['code']}')
+                        .toString();
+                    if (k == subjKey) {
+                      chosenSubj = s;
+                      break;
+                    }
+                  }
+                  if (chosenSubj == null) return;
+                  setState(() {
+                    _selectedSubject = chosenSubj;
+                    _selectedSection = null;
+                    _exams = [];
+                    _selectedExam = null;
+                    _selectedExamSections = [];
+                    _selectedExamStudents = [];
+                  });
+                },
         ),
 
         // Step 2: Section Filter (shown once a Subject is selected)
         if (_selectedSubject != null) ...[
-          const SizedBox(height: 14),
+          const SizedBox(height: 6),
           if (uniqueSections.isEmpty)
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
                 color: CmTheme.background,
                 borderRadius: BorderRadius.circular(12),
@@ -1218,34 +1222,36 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                   ),
                 );
               }).toList(),
-              onChanged: (int? classId) async {
-                if (classId == null) return;
-                Map<String, dynamic>? chosenSec;
-                for (final sec in uniqueSections) {
-                  if (int.tryParse('${sec['class_id']}') == classId) {
-                    chosenSec = sec;
-                    break;
-                  }
-                }
-                if (chosenSec == null) return;
-                setState(() {
-                  _selectedSection = chosenSec;
-                  _exams = [];
-                  _selectedExam = null;
-                  _selectedExamSections = [];
-                  _selectedExamStudents = [];
-                });
-                await _loadAssessmentsForSection(chosenSec);
-              },
+              onChanged: _selectionLocked
+                  ? null
+                  : (int? classId) async {
+                      if (classId == null) return;
+                      Map<String, dynamic>? chosenSec;
+                      for (final sec in uniqueSections) {
+                        if (int.tryParse('${sec['class_id']}') == classId) {
+                          chosenSec = sec;
+                          break;
+                        }
+                      }
+                      if (chosenSec == null) return;
+                      setState(() {
+                        _selectedSection = chosenSec;
+                        _exams = [];
+                        _selectedExam = null;
+                        _selectedExamSections = [];
+                        _selectedExamStudents = [];
+                      });
+                      await _loadAssessmentsForSection(chosenSec);
+                    },
             ),
         ],
 
         // Step 3: Active & Published Assessment Selector (shown once a Section is selected)
         if (_selectedSection != null) ...[
-          const SizedBox(height: 14),
+          const SizedBox(height: 6),
           if (_isLoadingAssessments)
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
                 color: CmTheme.background,
                 borderRadius: BorderRadius.circular(12),
@@ -1277,7 +1283,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
             )
           else if (uniqueExams.isEmpty)
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
                 color: CmTheme.background,
                 borderRadius: BorderRadius.circular(12),
@@ -1328,22 +1334,24 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                   ),
                 );
               }).toList(),
-              onChanged: (int? examId) async {
-                if (examId == null) return;
-                Map<String, dynamic>? chosen;
-                for (final e in uniqueExams) {
-                  if (int.tryParse('${e['id']}') == examId) {
-                    chosen = e;
-                    break;
-                  }
-                }
-                if (chosen == null) return;
-                setState(() {
-                  _selectedExam = chosen;
-                  _selectedExamSections = [];
-                });
-                await _loadExamSections();
-              },
+              onChanged: _selectionLocked
+                  ? null
+                  : (int? examId) async {
+                      if (examId == null) return;
+                      Map<String, dynamic>? chosen;
+                      for (final e in uniqueExams) {
+                        if (int.tryParse('${e['id']}') == examId) {
+                          chosen = e;
+                          break;
+                        }
+                      }
+                      if (chosen == null) return;
+                      setState(() {
+                        _selectedExam = chosen;
+                        _selectedExamSections = [];
+                      });
+                      await _loadExamSections();
+                    },
             ),
         ],
       ],
@@ -1361,7 +1369,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
     );
 
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       decoration: BoxDecoration(
         color: CmTheme.surfaceWhite,
         borderRadius: BorderRadius.circular(16),
@@ -1392,7 +1400,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
-                  vertical: 4,
+                  vertical: 3,
                 ),
                 decoration: BoxDecoration(
                   color: CmTheme.emeraldSuccess.withValues(alpha: 0.14),
@@ -1409,10 +1417,10 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           Wrap(
             spacing: 8,
-            runSpacing: 8,
+            runSpacing: 4,
             children: [
               if (subjectLabel.isNotEmpty)
                 _metaChip(Icons.menu_book_outlined, 'Subject: $subjectLabel'),
@@ -1425,19 +1433,19 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
             ],
           ),
           const Padding(
-            padding: EdgeInsets.symmetric(vertical: 14),
+            padding: EdgeInsets.symmetric(vertical: 3),
             child: Divider(height: 1, color: CmTheme.lineBorder),
           ),
           ..._selectedExamSections.map((section) {
             final type = _normalizeQuestionType(section['question_type']);
             final count = section['question_count']?.toString() ?? '0';
             return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
+              padding: const EdgeInsets.symmetric(vertical: 2),
               child: Row(
                 children: [
                   Container(
-                    width: 34,
-                    height: 34,
+                    width: 28,
+                    height: 28,
                     decoration: BoxDecoration(
                       color: CmTheme.background,
                       borderRadius: BorderRadius.circular(10),
@@ -1475,7 +1483,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
-                      vertical: 4,
+                      vertical: 3,
                     ),
                     decoration: BoxDecoration(
                       color: CmTheme.background,
@@ -1502,7 +1510,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
 
   Widget _metaChip(IconData icon, String text) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
         color: CmTheme.background,
         borderRadius: BorderRadius.circular(999),
@@ -1529,49 +1537,44 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
     );
   }
 
-  Widget _buildCaptureMethodCard(bool isMobileOrTablet) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: CmTheme.surfaceWhite,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: CmTheme.lineBorder),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: CmTheme.navy.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(
-              isMobileOrTablet && !kIsWeb
-                  ? Icons.photo_camera_outlined
-                  : Icons.upload_file_outlined,
-              size: 26,
-              color: CmTheme.navy,
-            ),
+  Widget _buildCaptureMethodCard(bool canUseCamera, {Widget? status}) {
+    final hasStatus = status != null;
+    final heading = Row(
+      children: [
+        Container(
+          width: hasStatus ? 30 : 38,
+          height: hasStatus ? 30 : 38,
+          decoration: BoxDecoration(
+            color: CmTheme.navy.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(hasStatus ? 10 : 14),
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  isMobileOrTablet && !kIsWeb
-                      ? 'Mobile & Tablet Camera Capture (< 1024px)'
-                      : 'Answer Sheet Image Upload & OMR Scanner',
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: CmTheme.navy,
-                  ),
+          child: Icon(
+            canUseCamera
+                ? Icons.photo_camera_outlined
+                : Icons.upload_file_outlined,
+            size: hasStatus ? 18 : 22,
+            color: CmTheme.navy,
+          ),
+        ),
+        SizedBox(width: hasStatus ? 10 : 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                canUseCamera
+                    ? 'Mobile & Tablet Camera Capture (< 1024px)'
+                    : 'Answer Sheet Image Upload & OMR Scanner',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: CmTheme.navy,
                 ),
-                const SizedBox(height: 4),
+              ),
+              if (!hasStatus) ...[
+                const SizedBox(height: 2),
                 Text(
-                  isMobileOrTablet && !kIsWeb
+                  canUseCamera
                       ? 'Opens the full-screen viewfinder with corner alignment guides, 1x/2x zoom review, and gallery picker fallback.'
                       : 'Supports JPG and PNG answer sheet scans with automatic 4-corner marker registration and bubble detection.',
                   style: const TextStyle(
@@ -1580,23 +1583,51 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                   ),
                 ),
               ],
-            ),
+            ],
           ),
-        ],
+        ),
+      ],
+    );
+
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: 20,
+        vertical: hasStatus ? 10 : 6,
       ),
+      decoration: BoxDecoration(
+        color: CmTheme.surfaceWhite,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: CmTheme.lineBorder),
+      ),
+      child: status == null
+          ? heading
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                heading,
+                const SizedBox(height: 8),
+                const Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: CmTheme.lineBorder,
+                ),
+                const SizedBox(height: 8),
+                status,
+              ],
+            ),
     );
   }
 
-  Widget _buildActionButtons(bool isMobileOrTablet) {
+  Widget _buildScannerButtons(
+    bool canUseCamera,
+    VoidCallback? onStart,
+    VoidCallback? onUpload,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         FilledButton.icon(
-          onPressed: _isLoadingSections
-              ? null
-              : () => _continueToScanner(
-                  forceUpload: kIsWeb ? !isMobileOrTablet : null,
-                ),
+          onPressed: onStart,
           icon: _isLoadingSections
               ? const SizedBox(
                   width: 20,
@@ -1607,14 +1638,14 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
                   ),
                 )
               : Icon(
-                  (isMobileOrTablet && !kIsWeb)
+                  (canUseCamera)
                       ? Icons.camera_alt_outlined
                       : Icons.document_scanner_outlined,
                 ),
           label: Text(
             _isLoadingSections
                 ? 'Loading Assessment...'
-                : (isMobileOrTablet && !kIsWeb)
+                : (canUseCamera)
                 ? 'Open Camera Scanner'
                 : 'Continue to Answer Sheet Scanner',
             style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
@@ -1622,18 +1653,16 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
           style: FilledButton.styleFrom(
             backgroundColor: CmTheme.navy,
             foregroundColor: CmTheme.surfaceWhite,
-            padding: const EdgeInsets.symmetric(vertical: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14),
             ),
           ),
         ),
-        if (!kIsWeb && isMobileOrTablet) ...[
-          const SizedBox(height: 10),
+        if (canUseCamera) ...[
+          const SizedBox(height: 4),
           OutlinedButton.icon(
-            onPressed: _isLoadingSections
-                ? null
-                : () => _continueToScanner(forceUpload: true),
+            onPressed: onUpload,
             icon: const Icon(Icons.upload_file_outlined),
             label: const Text(
               'Upload Answer Sheet Image Instead',
@@ -1643,40 +1672,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
               foregroundColor: CmTheme.navy,
               side: const BorderSide(color: CmTheme.lineBorder),
               backgroundColor: CmTheme.surfaceWhite,
-              padding: const EdgeInsets.symmetric(vertical: 15),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
-          ),
-        ],
-        if (_selectedExam != null) ...[
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: (_isDownloadingSheet || _isLoadingSections)
-                ? null
-                : _downloadAnswerSheet,
-            icon: _isDownloadingSheet
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: CmTheme.navy,
-                    ),
-                  )
-                : const Icon(Icons.download_outlined),
-            label: Text(
-              _isDownloadingSheet
-                  ? 'Preparing 2xA5 Answer Sheets PDF...'
-                  : 'Download Answer Sheet PDF',
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: CmTheme.navy,
-              side: const BorderSide(color: CmTheme.lineBorder),
-              backgroundColor: CmTheme.surfaceWhite,
-              padding: const EdgeInsets.symmetric(vertical: 15),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
@@ -1684,6 +1680,35 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
           ),
         ],
       ],
+    );
+  }
+
+  Widget _buildDownloadButton() {
+    return OutlinedButton.icon(
+      onPressed: _selectionLocked ? null : _downloadAnswerSheet,
+      icon: _isDownloadingSheet
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: CmTheme.navy,
+              ),
+            )
+          : const Icon(Icons.download_outlined),
+      label: Text(
+        _isDownloadingSheet
+            ? 'Preparing 2xA5 Answer Sheets PDF...'
+            : 'Download Answer Sheet PDF',
+        style: const TextStyle(fontWeight: FontWeight.w600),
+      ),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: CmTheme.navy,
+        side: const BorderSide(color: CmTheme.lineBorder),
+        backgroundColor: CmTheme.surfaceWhite,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
     );
   }
 
@@ -1705,7 +1730,7 @@ class _AnswerSheetInputScreenState extends State<AnswerSheetInputScreen> {
   // =========================
 
   Future<void> _downloadAnswerSheet() async {
-    if (_selectedExam == null) return;
+    if (_selectionLocked || _selectedExam == null) return;
 
     final examId = int.tryParse(_selectedExam!['id'].toString());
     if (examId == null) return;
